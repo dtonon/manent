@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.scrawl" "\0"
-            VALUE "FileDescription", "scrawl" "\0"
+            VALUE "CompanyName", "com.manent" "\0"
+            VALUE "FileDescription", "manent" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "scrawl" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.scrawl. All rights reserved." "\0"
-            VALUE "OriginalFilename", "scrawl.exe" "\0"
-            VALUE "ProductName", "scrawl" "\0"
+            VALUE "InternalName", "manent" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.manent. All rights reserved." "\0"
+            VALUE "OriginalFilename", "manent.exe" "\0"
+            VALUE "ProductName", "manent" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

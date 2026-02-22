@@ -1,4 +1,4 @@
-package com.scrawl.scrawl
+package com.manent.manent
 
 import io.flutter.embedding.android.FlutterActivity
 
