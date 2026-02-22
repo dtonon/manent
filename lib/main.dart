@@ -86,7 +86,7 @@ class _NotesScreenState extends State<NotesScreen> {
               ],
             ),
           ),
-          _buildInputBar(),
+          _buildInputBar(context),
         ],
       ),
     );
@@ -240,40 +240,47 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
-  Widget _buildInputBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            offset: const Offset(0, -1),
-            blurRadius: 4,
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _textController,
-              decoration: const InputDecoration(
-                hintText: 'Memo...',
-                border: InputBorder.none,
-                hintStyle: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 14,
-                ),
-              ),
-              style: const TextStyle(fontSize: 14),
+  Widget _buildInputBar(BuildContext context) {
+    final maxHeight = MediaQuery.of(context).size.height * 0.5;
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              offset: const Offset(0, -1),
+              blurRadius: 4,
             ),
-          ),
-          const SizedBox(width: 12),
-          Icon(Icons.attach_file, color: Colors.grey[700]),
-          const SizedBox(width: 16),
-          Icon(Icons.mic, color: Colors.grey[700]),
-        ],
+          ],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _textController,
+                maxLines: null,
+                keyboardType: TextInputType.multiline,
+                decoration: const InputDecoration(
+                  hintText: 'Memo...',
+                  border: InputBorder.none,
+                  hintStyle: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 14,
+                  ),
+                ),
+                style: const TextStyle(fontSize: 14),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Icon(Icons.attach_file, color: Colors.grey[700]),
+            const SizedBox(width: 16),
+            Icon(Icons.mic, color: Colors.grey[700]),
+          ],
+        ),
       ),
     );
   }
