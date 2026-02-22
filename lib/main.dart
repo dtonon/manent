@@ -1,4 +1,6 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   runApp(const ManentApp());
@@ -100,12 +102,16 @@ class _NotesScreenState extends State<NotesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            text,
-            style: const TextStyle(
-              fontSize: 14,
-              height: 1.3,
-              color: Colors.black87,
+          RichText(
+            text: TextSpan(
+              children: _buildTextSpans(
+                text,
+                const TextStyle(
+                  fontSize: 14,
+                  height: 1.3,
+                  color: Colors.black87,
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 0),
@@ -122,6 +128,45 @@ class _NotesScreenState extends State<NotesScreen> {
         ],
       ),
     );
+  }
+
+  static final _urlRegex = RegExp(
+    r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9\-]*\.[a-zA-Z]{2,}(?:/[^\s]*)?',
+    caseSensitive: false,
+  );
+
+  List<InlineSpan> _buildTextSpans(String text, TextStyle baseStyle) {
+    final spans = <InlineSpan>[];
+    int lastEnd = 0;
+
+    for (final match in _urlRegex.allMatches(text)) {
+      if (match.start > lastEnd) {
+        spans.add(TextSpan(text: text.substring(lastEnd, match.start), style: baseStyle));
+      }
+
+      // Strip trailing sentence punctuation
+      String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
+      final fullUrl = url.startsWith('http') ? url : 'https://$url';
+
+      spans.add(TextSpan(
+        text: url,
+        style: baseStyle.copyWith(
+          color: const Color(0xFFe32a6d),
+          decoration: TextDecoration.underline,
+          decorationColor: const Color(0xFFe32a6d),
+        ),
+        recognizer: TapGestureRecognizer()
+          ..onTap = () => launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault),
+      ));
+      // Advance past stripped url only; trailing punctuation becomes plain text
+      lastEnd = match.start + url.length;
+    }
+
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(text: text.substring(lastEnd), style: baseStyle));
+    }
+
+    return spans;
   }
 
   Widget _buildImageMessage(String imageUrl, String time) {
