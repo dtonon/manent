@@ -60,7 +60,7 @@ class _BunkerScreenState extends State<BunkerScreen> {
       await _onConnected(connection);
     } catch (e) {
       if (mounted) {
-        setState(() { _error = e.toString(); _connectingWithUrl = false; });
+        setState(() { _error = _friendlyError(e); _connectingWithUrl = false; });
       }
     }
   }
@@ -86,14 +86,23 @@ class _BunkerScreenState extends State<BunkerScreen> {
     } catch (e) {
       _done = false;
       if (mounted) {
-        setState(() { _error = e.toString(); _connectingWithUrl = false; });
+        setState(() { _error = _friendlyError(e); _connectingWithUrl = false; });
       }
     }
   }
 
   void _onError(Object e, StackTrace _) {
     if (!mounted || _done) return;
-    setState(() { _error = e.toString(); });
+    setState(() { _error = _friendlyError(e); });
+  }
+
+  String _friendlyError(Object e) {
+    final msg = e.toString();
+    if (msg.contains('Invalid payload size') ||
+        msg.contains('invalid padding')) {
+      return 'This signer uses NIP-04 encryption, which is not supported. Use a NIP-44 compatible signer.';
+    }
+    return msg;
   }
 
   @override
