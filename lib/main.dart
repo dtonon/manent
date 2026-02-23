@@ -48,6 +48,10 @@ class _ManentAppState extends State<ManentApp> {
           seedColor: accent,
         ),
         useMaterial3: true,
+        bottomSheetTheme: const BottomSheetThemeData(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+        ),
       ),
       home: _user == null
           ? LoginScreen(onLogin: _onLogin)
