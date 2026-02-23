@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:ndk/ndk.dart';
 import 'package:ndk/data_layer/repositories/signers/nip46_event_signer.dart';
@@ -56,7 +58,8 @@ class _BunkerScreenState extends State<BunkerScreen> {
     setState(() { _connectingWithUrl = true; _error = null; });
     try {
       final connection = await NostrClient().ndk.bunkers
-          .connectWithBunkerUrl(_bunkerController.text.trim());
+          .connectWithBunkerUrl(_bunkerController.text.trim())
+          .timeout(const Duration(seconds: 10));
       await _onConnected(connection);
     } catch (e) {
       if (mounted) {
@@ -97,6 +100,9 @@ class _BunkerScreenState extends State<BunkerScreen> {
   }
 
   String _friendlyError(Object e) {
+    if (e is TimeoutException) {
+      return 'Connection timed out. Your signer may have rejected the request or is unreachable.';
+    }
     final msg = e.toString();
     if (msg.contains('Invalid payload size') ||
         msg.contains('invalid padding')) {
