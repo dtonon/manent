@@ -2,6 +2,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:ndk/ndk.dart';
+
 import '../auth/auth_state.dart';
 import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
@@ -61,9 +63,9 @@ class _NotesScreenState extends State<NotesScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              widget.user.pubkey,
-              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-              overflow: TextOverflow.ellipsis,
+              Nip19.encodePubKey(widget.user.pubkey),
+              style: TextStyle(fontSize: 12, color: Colors.grey[500], fontFamily: 'monospace'),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             SizedBox(

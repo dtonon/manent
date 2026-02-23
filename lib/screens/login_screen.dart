@@ -1,9 +1,14 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:amberflutter/amberflutter.dart';
+import 'package:ndk/shared/nips/nip19/nip19.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../auth/amber_event_signer.dart';
 import '../auth/auth_state.dart';
+import '../auth/profile_fetcher.dart';
+import '../auth/signer_session.dart';
 import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
 import 'bunker_screen.dart';
@@ -15,6 +20,34 @@ class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key, required this.onLogin});
 
   bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;
+
+  Future<void> _loginWithAndroidSigner(BuildContext context) async {
+    final amber = Amberflutter();
+    final installed = await amber.isAppInstalled();
+    if (!installed) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Amber signer app is not installed')),
+      );
+      return;
+    }
+    final result = await amber.getPublicKey(permissions: [
+      const Permission(type: 'sign_event'),
+      const Permission(type: 'nip44_encrypt'),
+      const Permission(type: 'nip44_decrypt'),
+    ]);
+    final npub = result['signature'] as String? ?? '';
+    if (npub.isEmpty || !context.mounted) return;
+    final pubkey = Nip19.decode(npub);
+    SignerSession.set(AmberEventSigner(pubkey: pubkey));
+    final profile = await ProfileFetcher.fetch(pubkey);
+    await onLogin(AuthUser(
+      pubkey: pubkey,
+      name: profile.name,
+      avatarUrl: profile.avatarUrl,
+      signingMethod: SigningMethod.androidSigner,
+    ));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +82,7 @@ class LoginScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 _Button(
                   label: 'Android Signer',
-                  onPressed: () async => onLogin(AuthUser.fake()),
+                  onPressed: () => _loginWithAndroidSigner(context),
                 ),
               ],
               const SizedBox(height: 24),
