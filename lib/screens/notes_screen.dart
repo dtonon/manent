@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth/auth_state.dart';
+import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
 
 class NotesScreen extends StatefulWidget {
@@ -43,7 +44,7 @@ class _NotesScreenState extends State<NotesScreen> {
               backgroundImage: widget.user.avatarUrl != null
                   ? NetworkImage(widget.user.avatarUrl!)
                   : null,
-              backgroundColor: const Color(0xFFe32a6d),
+              backgroundColor: accent,
               child: widget.user.avatarUrl == null
                   ? Text(
                       widget.user.name.isNotEmpty
@@ -73,7 +74,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   await widget.onLogout();
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFe32a6d),
+                  backgroundColor: accent,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
@@ -92,7 +93,7 @@ class _NotesScreenState extends State<NotesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: background,
       appBar: manentAppBar(
         actions: [
           Padding(
@@ -107,7 +108,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   backgroundImage: widget.user.avatarUrl != null
                       ? NetworkImage(widget.user.avatarUrl!)
                       : null,
-                  backgroundColor: const Color(0xFFe32a6d),
+                  backgroundColor: accent,
                   child: widget.user.avatarUrl == null
                       ? Text(
                           widget.user.name.isNotEmpty
@@ -224,9 +225,9 @@ class _NotesScreenState extends State<NotesScreen> {
       spans.add(TextSpan(
         text: url,
         style: baseStyle.copyWith(
-          color: const Color(0xFFe32a6d),
+          color: accent,
           decoration: TextDecoration.underline,
-          decorationColor: const Color(0xFFe32a6d),
+          decorationColor: accent,
         ),
         recognizer: TapGestureRecognizer()
           ..onTap = () =>
@@ -300,7 +301,7 @@ class _NotesScreenState extends State<NotesScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFFe32a6d),
+        color: accent,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(

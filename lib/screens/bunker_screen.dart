@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../auth/auth_state.dart';
+import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
 
 // Fake nostrconnect:// URI shown while real NIP-46 logic is not yet implemented
@@ -36,9 +37,8 @@ class _BunkerScreenState extends State<BunkerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const pink = Color(0xFFe32a6d);
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: background,
       appBar: manentAppBar(),
       body: SafeArea(
         child: Padding(
@@ -88,9 +88,9 @@ class _BunkerScreenState extends State<BunkerScreen> {
                 child: ElevatedButton(
                   onPressed: _canLogin ? _login : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: pink,
+                    backgroundColor: accent,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: pink.withOpacity(0.4),
+                    disabledBackgroundColor: accent.withOpacity(0.4),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),

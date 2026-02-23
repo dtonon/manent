@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth/auth_state.dart';
+import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
 
 class NsecScreen extends StatefulWidget {
@@ -30,9 +31,8 @@ class _NsecScreenState extends State<NsecScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const pink = Color(0xFFe32a6d);
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: background,
       appBar: manentAppBar(),
       body: SafeArea(
         child: Padding(
@@ -74,9 +74,9 @@ class _NsecScreenState extends State<NsecScreen> {
                 child: ElevatedButton(
                   onPressed: _canLogin ? _login : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: pink,
+                    backgroundColor: accent,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: pink.withOpacity(0.4),
+                    disabledBackgroundColor: accent.withOpacity(0.4),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),

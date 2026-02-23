@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatf
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth/auth_state.dart';
+import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
 import 'bunker_screen.dart';
 import 'nsec_screen.dart';
@@ -17,9 +18,8 @@ class LoginScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const pink = Color(0xFFe32a6d);
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: background,
       appBar: manentAppBar(),
       body: SafeArea(
         child: Padding(
@@ -38,7 +38,7 @@ class LoginScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 16, color: Colors.black87),
               ),
               const SizedBox(height: 24),
-              _PinkButton(
+              _Button(
                 label: 'Nostr Connect / Bunker',
                 onPressed: () => Navigator.push(
                   context,
@@ -47,7 +47,7 @@ class LoginScreen extends StatelessWidget {
               ),
               if (_isAndroid) ...[
                 const SizedBox(height: 16),
-                _PinkButton(
+                _Button(
                   label: 'Android Signer',
                   onPressed: () async => onLogin(AuthUser.fake()),
                 ),
@@ -80,9 +80,9 @@ class LoginScreen extends StatelessWidget {
                     TextSpan(
                       text: 'Read more',
                       style: const TextStyle(
-                        color: pink,
+                        color: accent,
                         decoration: TextDecoration.underline,
-                        decorationColor: pink,
+                        decorationColor: accent,
                       ),
                       recognizer: TapGestureRecognizer()
                         ..onTap = () => launchUrl(
@@ -94,9 +94,9 @@ class LoginScreen extends StatelessWidget {
                     TextSpan(
                       text: 'create a free account',
                       style: const TextStyle(
-                        color: pink,
+                        color: accent,
                         decoration: TextDecoration.underline,
-                        decorationColor: pink,
+                        decorationColor: accent,
                       ),
                       recognizer: TapGestureRecognizer()
                         ..onTap = () => launchUrl(
@@ -116,11 +116,11 @@ class LoginScreen extends StatelessWidget {
   }
 }
 
-class _PinkButton extends StatelessWidget {
+class _Button extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
 
-  const _PinkButton({required this.label, required this.onPressed});
+  const _Button({required this.label, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -129,7 +129,7 @@ class _PinkButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFe32a6d),
+          backgroundColor: accent,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

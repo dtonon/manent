@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'auth/auth_state.dart';
 import 'screens/login_screen.dart';
 import 'screens/notes_screen.dart';
+import 'theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,7 +45,7 @@ class _ManentAppState extends State<ManentApp> {
       title: 'Manent',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFe32a6d),
+          seedColor: accent,
         ),
         useMaterial3: true,
       ),

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+
 AppBar manentAppBar({List<Widget>? actions}) {
   return AppBar(
-    backgroundColor: const Color(0xFFe32a6d),
+    backgroundColor: accent,
     elevation: 0,
     automaticallyImplyLeading: false,
     centerTitle: true,
