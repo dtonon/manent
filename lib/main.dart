@@ -7,6 +7,7 @@ import 'auth/amber_event_signer.dart';
 import 'auth/auth_state.dart';
 import 'auth/nostr_client.dart';
 import 'auth/profile_fetcher.dart';
+import 'auth/relay_fetcher.dart';
 import 'auth/signer_session.dart';
 import 'auth/signer_store.dart';
 import 'screens/login_screen.dart';
@@ -64,7 +65,10 @@ class _ManentAppState extends State<ManentApp> {
   void initState() {
     super.initState();
     _user = widget.initialUser;
-    if (_user != null) _refreshProfile();
+    if (_user != null) {
+      _refreshProfile();
+      _refreshRelays();
+    }
   }
 
   Future<void> _refreshProfile() async {
@@ -78,6 +82,7 @@ class _ManentAppState extends State<ManentApp> {
       name: profile.name,
       avatarUrl: profile.avatarUrl,
       signingMethod: _user!.signingMethod,
+      writeRelays: _user!.writeRelays,
     );
     await AuthService.save(updated);
     if (mounted) setState(() => _user = updated);
@@ -86,6 +91,25 @@ class _ManentAppState extends State<ManentApp> {
   Future<void> _onLogin(AuthUser user) async {
     await AuthService.save(user);
     setState(() => _user = user);
+    _refreshRelays();
+  }
+
+  Future<void> _refreshRelays() async {
+    final relays = await RelayFetcher.fetchWriteRelays(_user!.pubkey);
+    if (!mounted || relays.isEmpty) return;
+    final current = _user!.writeRelays;
+    if (relays.length == current.length && relays.every(current.contains)) {
+      return;
+    }
+    final updated = AuthUser(
+      pubkey: _user!.pubkey,
+      name: _user!.name,
+      avatarUrl: _user!.avatarUrl,
+      signingMethod: _user!.signingMethod,
+      writeRelays: relays,
+    );
+    await AuthService.save(updated);
+    if (mounted) setState(() => _user = updated);
   }
 
   Future<void> _onLogout() async {

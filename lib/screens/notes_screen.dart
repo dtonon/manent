@@ -22,13 +22,21 @@ class _NotesScreenState extends State<NotesScreen> {
   final TextEditingController _textController = TextEditingController();
 
   void _showProfileSheet() {
+    final npub = Nip19.encodePubKey(widget.user.pubkey);
+
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+      builder: (ctx) => SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          24,
+          16,
+          24,
+          MediaQuery.of(ctx).viewInsets.bottom + 32,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -63,10 +71,40 @@ class _NotesScreenState extends State<NotesScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              Nip19.encodePubKey(widget.user.pubkey),
-              style: TextStyle(fontSize: 12, color: Colors.grey[500], fontFamily: 'monospace'),
+              '${npub.substring(0, 8)}...${npub.substring(npub.length - 8)}',
+              style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[500],
+                  fontFamily: 'monospace'),
               textAlign: TextAlign.center,
             ),
+            if (widget.user.writeRelays.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              Text(
+                'Write relays',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 8),
+              ...widget.user.writeRelays.map(
+                (url) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    url,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[700],
+                      fontFamily: 'monospace',
+                    ),
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,

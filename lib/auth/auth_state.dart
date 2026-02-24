@@ -8,12 +8,14 @@ class AuthUser {
   final String name;
   final String? avatarUrl;
   final SigningMethod signingMethod;
+  final List<String> writeRelays;
 
   const AuthUser({
     required this.pubkey,
     required this.name,
     this.avatarUrl,
     required this.signingMethod,
+    this.writeRelays = const [],
   });
 }
 
@@ -23,6 +25,7 @@ class AuthService {
   static const _kName = 'name';
   static const _kAvatarUrl = 'avatar_url';
   static const _kSigningMethod = 'signing_method';
+  static const _kWriteRelays = 'write_relays';
 
   static Future<AuthUser?> loadUser() async {
     final prefs = await SharedPreferences.getInstance();
@@ -36,6 +39,7 @@ class AuthService {
         (m) => m.name == methodStr,
         orElse: () => SigningMethod.nsec,
       ),
+      writeRelays: prefs.getStringList(_kWriteRelays) ?? [],
     );
   }
 
@@ -48,6 +52,7 @@ class AuthService {
     if (user.avatarUrl != null) {
       await prefs.setString(_kAvatarUrl, user.avatarUrl!);
     }
+    await prefs.setStringList(_kWriteRelays, user.writeRelays);
   }
 
   static Future<void> clear() async {
