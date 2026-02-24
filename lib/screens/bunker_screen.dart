@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:ndk/ndk.dart';
@@ -24,9 +26,26 @@ class BunkerScreen extends StatefulWidget {
 
 class _BunkerScreenState extends State<BunkerScreen> {
   final _bunkerController = TextEditingController();
-  // Client-initiated connection — used for the QR code
+  // relay.nsec.app is the dedicated NIP-46 relay — accepts kind 24133 subscriptions
+  // without restrictive filter policies. relay.damus.io may send CLOSED for
+  // broad kind 24133 subscriptions without an authors filter.
+  static const _nostrConnectRelays = [
+    'wss://relay.nsec.app',
+    'wss://relay.damus.io',
+  ];
+
+  // NDK's secret is base64 with '==' padding — signer URL parsers split on '=' producing garbage.
+  // Generate a hex secret (no special chars) and use it in the URL and handshake.
+  static String _makeSecret() {
+    const hex = '0123456789abcdef';
+    final r = Random.secure();
+    return List.generate(32, (_) => hex[r.nextInt(16)]).join();
+  }
+
+  final _secret = _makeSecret();
+
   final _nostrConnect = NostrConnect(
-    relays: ['wss://relay.damus.io'],
+    relays: _nostrConnectRelays,
     appName: 'Manent',
     perms: ['nip44_encrypt', 'nip44_decrypt'],
   );
@@ -43,27 +62,169 @@ class _BunkerScreenState extends State<BunkerScreen> {
     _waitForNostrConnect();
   }
 
-  // Start listening for a signer scanning the QR code
-  void _waitForNostrConnect() {
-    NostrClient().ndk.bunkers
-        .connectWithNostrConnect(_nostrConnect)
-        .then(_onConnected)
-        .catchError(_onError);
+  void _waitForNostrConnect() async {
+    try {
+      final connection = await _nostrConnectHandshake();
+      if (connection == null && mounted && !_done) {
+        setState(() => _error =
+            'Relay closed the subscription. Try entering a bunker:// URL instead.');
+        return;
+      }
+      await _onConnected(connection);
+    } catch (e, s) {
+      _onError(e, s);
+    }
+  }
+
+  Future<BunkerConnection?> _nostrConnectHandshake() async {
+    final keypair = _nostrConnect.keyPair;
+    final secret = _secret;
+    final relays = _nostrConnect.relays;
+    final localSigner = Bip340EventSigner(
+        privateKey: keypair.privateKey, publicKey: keypair.publicKey);
+    final sub = NostrClient().ndk.requests.subscription(
+          explicitRelays: relays,
+          filter: Filter(
+              kinds: [24133],
+              pTags: [keypair.publicKey],
+              since: DateTime.now().millisecondsSinceEpoch ~/ 1000 - 300),
+        );
+
+    // Tracks state for legacy flow: after signer sends result==secret,
+    // we send a connect RPC and wait for the signer's ack on the same stream.
+    String? pendingConnectId;
+    String? pendingSignerPubkey;
+
+    try {
+      await for (final event
+          in sub.stream.timeout(const Duration(seconds: 600))) {
+        try {
+          final plain = await localSigner.decryptNip44(
+              ciphertext: event.content, senderPubKey: event.pubKey);
+          if (plain == null) continue;
+          final data = jsonDecode(plain) as Map<String, dynamic>;
+
+          // Legacy phase 2: waiting for signer's ack to our connect RPC
+          if (pendingConnectId != null) {
+            if (data['id'] == pendingConnectId && data['result'] == 'ack') {
+              return BunkerConnection(
+                  privateKey: keypair.privateKey!,
+                  remotePubkey: pendingSignerPubkey!,
+                  relays: relays);
+            }
+            continue;
+          }
+
+          // Modern NIP-46: signer sends connect request, we ack
+          if (data['method'] == 'connect') {
+            final params = data['params'] as List?;
+            if (params != null &&
+                params.length >= 2 &&
+                params[1].toString() == secret) {
+              final signerPubkey = params[0].toString();
+              await _sendAck(localSigner, data['id']?.toString() ?? '',
+                  signerPubkey, relays);
+              return BunkerConnection(
+                  privateKey: keypair.privateKey!,
+                  remotePubkey: signerPubkey,
+                  relays: relays);
+            }
+            continue;
+          }
+
+          // Legacy phase 1: signer sends result==secret, we follow up with a connect RPC
+          if (data['result']?.toString() == secret) {
+            pendingSignerPubkey = event.pubKey;
+            pendingConnectId = await _sendConnectRpc(
+                localSigner, event.pubKey, secret, relays);
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+    } finally {
+      NostrClient().ndk.requests.closeSubscription(sub.requestId);
+    }
+    return null;
+  }
+
+  Future<void> _sendAck(Bip340EventSigner signer, String requestId,
+      String signerPubkey, List<String> relays) async {
+    await _broadcastEncrypted(
+        signer,
+        jsonEncode({'id': requestId, 'result': 'ack', 'error': ''}),
+        signerPubkey,
+        relays);
+  }
+
+  Future<String> _sendConnectRpc(Bip340EventSigner signer, String signerPubkey,
+      String secret, List<String> relays) async {
+    final id = _secret.substring(0, 16);
+    await _broadcastEncrypted(
+        signer,
+        jsonEncode({
+          'id': id,
+          'method': 'connect',
+          'params': [signerPubkey, secret]
+        }),
+        signerPubkey,
+        relays);
+    return id;
+  }
+
+  Future<void> _broadcastEncrypted(Bip340EventSigner signer, String payload,
+      String recipientPubkey, List<String> relays) async {
+    final encrypted = await signer.encryptNip44(
+        plaintext: payload, recipientPubKey: recipientPubkey);
+    if (encrypted == null) return;
+    final event = Nip01Event(
+        pubKey: signer.publicKey,
+        kind: 24133,
+        tags: [
+          ['p', recipientPubkey]
+        ],
+        content: encrypted);
+    NostrClient().ndk.broadcast.broadcast(
+        nostrEvent: await signer.sign(event), specificRelays: relays);
+  }
+
+  // Build URL with our hex secret — NDK's secret is base64 with '==' which signer parsers mangle.
+  String get _nostrConnectURL {
+    final pubkey = _nostrConnect.keyPair.publicKey;
+    final params = <String>[];
+    for (final relay in _nostrConnect.relays) {
+      params.add('relay=${Uri.encodeComponent(relay)}');
+    }
+    params.add('secret=$_secret');
+    if (_nostrConnect.perms != null && _nostrConnect.perms!.isNotEmpty) {
+      params.add('perms=${_nostrConnect.perms!.join(',')}');
+    }
+    params.add('name=Manent');
+    return 'nostrconnect://$pubkey?${params.join('&')}';
   }
 
   bool get _canLogin =>
-      !_connectingWithUrl && _bunkerController.text.trim().startsWith('bunker://');
+      !_connectingWithUrl &&
+      _bunkerController.text.trim().startsWith('bunker://');
 
   Future<void> _loginWithBunkerUrl() async {
-    setState(() { _connectingWithUrl = true; _error = null; });
+    setState(() {
+      _connectingWithUrl = true;
+      _error = null;
+    });
     try {
-      final connection = await NostrClient().ndk.bunkers
+      final connection = await NostrClient()
+          .ndk
+          .bunkers
           .connectWithBunkerUrl(_bunkerController.text.trim())
           .timeout(const Duration(seconds: 10));
       await _onConnected(connection);
     } catch (e) {
       if (mounted) {
-        setState(() { _error = _friendlyError(e); _connectingWithUrl = false; });
+        setState(() {
+          _error = _friendlyError(e);
+          _connectingWithUrl = false;
+        });
       }
     }
   }
@@ -89,14 +250,19 @@ class _BunkerScreenState extends State<BunkerScreen> {
     } catch (e) {
       _done = false;
       if (mounted) {
-        setState(() { _error = _friendlyError(e); _connectingWithUrl = false; });
+        setState(() {
+          _error = _friendlyError(e);
+          _connectingWithUrl = false;
+        });
       }
     }
   }
 
   void _onError(Object e, StackTrace _) {
     if (!mounted || _done) return;
-    setState(() { _error = _friendlyError(e); });
+    setState(() {
+      _error = _friendlyError(e);
+    });
   }
 
   String _friendlyError(Object e) {
@@ -125,7 +291,8 @@ class _BunkerScreenState extends State<BunkerScreen> {
               const Text(
                 'Scan the QR Code with your signer app or enter a bunker URL',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, height: 1.3, color: Colors.black87),
+                style:
+                    TextStyle(fontSize: 16, height: 1.3, color: Colors.black87),
               ),
               const SizedBox(height: 32),
               Container(
@@ -135,7 +302,7 @@ class _BunkerScreenState extends State<BunkerScreen> {
                   label: 'Nostr Connect QR code — scan with your signer app',
                   image: true,
                   child: QrImageView(
-                    data: _nostrConnect.nostrConnectURL,
+                    data: _nostrConnectURL,
                     size: 260,
                     backgroundColor: Colors.white,
                   ),
