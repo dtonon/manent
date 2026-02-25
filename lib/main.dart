@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/nips/nip01/bip340.dart';
@@ -10,6 +11,8 @@ import 'auth/profile_fetcher.dart';
 import 'auth/relay_fetcher.dart';
 import 'auth/signer_session.dart';
 import 'auth/signer_store.dart';
+import 'notes/note_cache.dart';
+import 'notes/notes_database.dart';
 import 'screens/login_screen.dart';
 import 'screens/notes_screen.dart';
 import 'theme.dart';
@@ -68,7 +71,16 @@ class _ManentAppState extends State<ManentApp> {
     if (_user != null) {
       _refreshProfile();
       _refreshRelays();
+      _loadNotes();
     }
+  }
+
+  Future<void> _loadNotes() async {
+    final signer = SignerSession.signer;
+    if (signer == null) return;
+    final db = kIsWeb ? null : AppDatabase.instance;
+    await NoteCache.instance.loadAll(db, signer, _user!.writeRelays);
+    NoteCache.instance.sync();
   }
 
   Future<void> _refreshProfile() async {
@@ -92,6 +104,7 @@ class _ManentAppState extends State<ManentApp> {
     await AuthService.save(user);
     setState(() => _user = user);
     _refreshRelays();
+    _loadNotes();
   }
 
   Future<void> _refreshRelays() async {
@@ -109,10 +122,13 @@ class _ManentAppState extends State<ManentApp> {
       writeRelays: relays,
     );
     await AuthService.save(updated);
+    NoteCache.instance.updateWriteRelays(relays);
+    NoteCache.instance.sync();
     if (mounted) setState(() => _user = updated);
   }
 
   Future<void> _onLogout() async {
+    await NoteCache.instance.clear();
     SignerSession.clear();
     setState(() => _user = null);
     await AuthService.clear();

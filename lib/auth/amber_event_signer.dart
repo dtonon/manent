@@ -29,10 +29,23 @@ class AmberEventSigner implements EventSigner {
       currentUser: _pubkey,
       eventJson: jsonEncode(eventMap),
     );
-    return event.copyWith(
-      id: result['id'] as String,
-      sig: result['signature'] as String,
-    );
+    // Prefer the full event JSON Amber returns — has the canonical id and sig
+    final rawEvent = result['event'] as String?;
+    if (rawEvent != null && rawEvent.isNotEmpty) {
+      final map = jsonDecode(rawEvent) as Map<String, dynamic>;
+      final id = map['id'] as String?;
+      final sig = map['sig'] as String?;
+      if (id != null && id.isNotEmpty && sig != null && sig.isNotEmpty) {
+        return event.copyWith(id: id, sig: sig);
+      }
+    }
+    // Fallback: separate id / signature fields
+    final id = result['id'] as String?;
+    final sig = result['signature'] as String?;
+    if (id != null && id.isNotEmpty && sig != null && sig.isNotEmpty) {
+      return event.copyWith(id: id, sig: sig);
+    }
+    throw Exception('Amber returned invalid sign response');
   }
 
   @override
@@ -67,7 +80,8 @@ class AmberEventSigner implements EventSigner {
       currentUser: _pubkey,
       pubKey: recipientPubKey,
     );
-    return result['result'] as String?;
+    // amberflutter returns the encrypted payload in 'signature'
+    return result['signature'] as String?;
   }
 
   @override
@@ -80,6 +94,7 @@ class AmberEventSigner implements EventSigner {
       currentUser: _pubkey,
       pubKey: senderPubKey,
     );
-    return result['result'] as String?;
+    // amberflutter returns the decrypted payload in 'signature'
+    return result['signature'] as String?;
   }
 }

@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:ndk/ndk.dart';
 
 import '../auth/auth_state.dart';
+import '../notes/note.dart';
+import '../notes/note_cache.dart';
 import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
 
@@ -20,6 +22,41 @@ class NotesScreen extends StatefulWidget {
 
 class _NotesScreenState extends State<NotesScreen> {
   final TextEditingController _textController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    NoteCache.instance.notifier.addListener(_onNotesChanged);
+    // Scroll to bottom on first load if notes are already available
+    if (NoteCache.instance.notifier.value.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    }
+  }
+
+  void _onNotesChanged() => _scrollToBottom();
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Future<void> _sendNote() async {
+    final text = _textController.text.trim();
+    if (text.isEmpty || _sending) return;
+    setState(() => _sending = true);
+    _textController.clear();
+    await NoteCache.instance.add(text);
+    if (mounted) setState(() => _sending = false);
+  }
 
   void _showProfileSheet() {
     final npub = Nip19.encodePubKey(widget.user.pubkey);
@@ -167,36 +204,23 @@ class _NotesScreenState extends State<NotesScreen> {
       body: Column(
         children: [
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _buildTextMessage(
-                  'Proin luctus, libero eget volutpat sodales, magna orci sodales augue, quis volutpat tortor risus at https://njump.me.',
-                  '19:02',
-                ),
-                const SizedBox(height: 12),
-                _buildTextMessage(
-                  'Proin luctus, libero eget volutpat sodales, magna nstart.me orci sodales augue, quis volutpat tortor risus dignissim tortor.',
-                  '20:10',
-                ),
-                const SizedBox(height: 24),
-                _buildDateSeparator('17 February'),
-                const SizedBox(height: 12),
-                _buildImageMessage(
-                  'https://images.unsplash.com/photo-1574158622682-e40e69881006?w=800',
-                  '12:31',
-                ),
-                const SizedBox(height: 12),
-                _buildTextMessage(
-                  'Proin luctus, libero eget volutpat sodales, magna orci sodales augue, quis volutpat tortor risus dignissim tortor. Etiam dapibus ultrices massa, euismod accumsan eros commodo vel. Integer faucibus auctor viverra. Ut et nisl a massa facilisis fringilla a a sem.',
-                  '15:31',
-                ),
-                const SizedBox(height: 12),
-                _buildTextMessage(
-                  'Curabitur tristique, est in congue mattis, justo leo dapibus nisl, in lobortis lacus tellus vitae sem. Fusce ultrices iaculis vestibulum.\n\nAenean nec felis nec ex molestie efficitur et vitae ante.',
-                  '15:34',
-                ),
-              ],
+            child: ValueListenableBuilder<List<DecryptedNote>>(
+              valueListenable: NoteCache.instance.notifier,
+              builder: (context, notes, _) {
+                if (notes.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      'No notes yet',
+                      style: TextStyle(color: Colors.grey, fontSize: 14),
+                    ),
+                  );
+                }
+                return ListView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(16),
+                  children: _buildNoteItems(notes),
+                );
+              },
             ),
           ),
           _buildInputBar(context),
@@ -204,6 +228,35 @@ class _NotesScreenState extends State<NotesScreen> {
       ),
     );
   }
+
+  List<Widget> _buildNoteItems(List<DecryptedNote> notes) {
+    final items = <Widget>[];
+    DateTime? lastDate;
+
+    for (final note in notes) {
+      final noteDate = DateUtils.dateOnly(note.createdAt);
+      if (lastDate == null || noteDate != lastDate) {
+        if (items.isNotEmpty) items.add(const SizedBox(height: 12));
+        items.add(_buildDateSeparator(_formatDate(note.createdAt)));
+        lastDate = noteDate;
+      }
+      items.add(const SizedBox(height: 12));
+      items.add(_buildTextMessage(note.text, _formatTime(note.createdAt)));
+    }
+
+    return items;
+  }
+
+  String _formatDate(DateTime dt) {
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    return '${dt.day} ${months[dt.month - 1]}';
+  }
+
+  String _formatTime(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
   Widget _buildTextMessage(String text, String time) {
     return Container(
@@ -258,7 +311,6 @@ class _NotesScreenState extends State<NotesScreen> {
             text: text.substring(lastEnd, match.start), style: baseStyle));
       }
 
-      // Strip trailing sentence punctuation
       String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
       final fullUrl = url.startsWith('http') ? url : 'https://$url';
 
@@ -273,7 +325,6 @@ class _NotesScreenState extends State<NotesScreen> {
           ..onTap = () =>
               launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault),
       ));
-      // Advance past stripped url only; trailing punctuation becomes plain text
       lastEnd = match.start + url.length;
     }
 
@@ -282,59 +333,6 @@ class _NotesScreenState extends State<NotesScreen> {
     }
 
     return spans;
-  }
-
-  Widget _buildImageMessage(String imageUrl, String time) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Stack(
-            children: [
-              Image.network(
-                imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    height: 300,
-                    color: Colors.grey[300],
-                    child: const Center(
-                      child: Icon(Icons.image, size: 64, color: Colors.grey),
-                    ),
-                  );
-                },
-              ),
-              Positioned(
-                bottom: 8,
-                right: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.8),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    time,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.black87,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildDateSeparator(String date) {
@@ -364,7 +362,7 @@ class _NotesScreenState extends State<NotesScreen> {
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               offset: const Offset(0, -1),
               blurRadius: 4,
             ),
@@ -379,6 +377,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 controller: _textController,
                 maxLines: null,
                 keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.newline,
                 decoration: const InputDecoration(
                   hintText: 'Memo...',
                   border: InputBorder.none,
@@ -391,9 +390,39 @@ class _NotesScreenState extends State<NotesScreen> {
               ),
             ),
             const SizedBox(width: 12),
-            Icon(Icons.attach_file, color: Colors.grey[700]),
-            const SizedBox(width: 16),
-            Icon(Icons.mic, color: Colors.grey[700]),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _textController,
+              builder: (context, value, _) {
+                final hasText = value.text.trim().isNotEmpty;
+                if (hasText) {
+                  return Semantics(
+                    label: 'Send note',
+                    button: true,
+                    child: GestureDetector(
+                      onTap: _sending ? null : _sendNote,
+                      child: _sending
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(accent),
+                              ),
+                            )
+                          : const Icon(Icons.send, color: accent),
+                    ),
+                  );
+                }
+                return Row(
+                  children: [
+                    Icon(Icons.attach_file, color: Colors.grey[700]),
+                    const SizedBox(width: 16),
+                    Icon(Icons.mic, color: Colors.grey[700]),
+                  ],
+                );
+              },
+            ),
           ],
         ),
       ),
@@ -402,7 +431,9 @@ class _NotesScreenState extends State<NotesScreen> {
 
   @override
   void dispose() {
+    NoteCache.instance.notifier.removeListener(_onNotesChanged);
     _textController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 }

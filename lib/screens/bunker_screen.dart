@@ -165,7 +165,8 @@ class _BunkerScreenState extends State<BunkerScreen> {
         jsonEncode({
           'id': id,
           'method': 'connect',
-          'params': [signerPubkey, secret]
+          // Third param requests specific permissions from the bunker
+          'params': [signerPubkey, secret, 'sign_event,nip44_encrypt,nip44_decrypt']
         }),
         signerPubkey,
         relays);

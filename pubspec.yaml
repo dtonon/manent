@@ -40,6 +40,11 @@ dependencies:
   ndk: ^0.7.0
   flutter_secure_storage: ^10.0.0
   amberflutter: ^0.0.9
+  sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.0
+  path_provider: ^2.1.0
+  path: ^1.9.0
+  cryptography: ^2.7.0
 
 dev_dependencies:
   flutter_test:
