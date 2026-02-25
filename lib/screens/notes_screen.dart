@@ -387,8 +387,9 @@ class _NoteCard extends StatefulWidget {
 }
 
 class _NoteCardState extends State<_NoteCard> {
+  static final _activeMenuId = ValueNotifier<String?>(null);
+
   bool _retrying = false;
-  bool _menuOpen = false;
   Offset _tapPosition = Offset.zero;
 
   static final _urlRegex = RegExp(
@@ -412,7 +413,7 @@ class _NoteCardState extends State<_NoteCard> {
   }
 
   Future<void> _showContextMenu() async {
-    setState(() => _menuOpen = true);
+    _activeMenuId.value = widget.note.id;
 
     final completer = Completer<String?>();
     OverlayEntry? entry;
@@ -434,7 +435,7 @@ class _NoteCardState extends State<_NoteCard> {
     Overlay.of(context).insert(entry!);
     final result = await completer.future;
 
-    if (mounted) setState(() => _menuOpen = false);
+    _activeMenuId.value = null;
 
     if (result == 'copy') {
       await Clipboard.setData(ClipboardData(text: widget.note.text));
@@ -490,12 +491,22 @@ class _NoteCardState extends State<_NoteCard> {
               _showContextMenu();
             }
           : null,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: _menuOpen ? const Color(0xFFFAFAFA) : Colors.white,
-          borderRadius: BorderRadius.circular(8),
-        ),
+      child: ValueListenableBuilder<String?>(
+        valueListenable: _activeMenuId,
+        builder: (context, activeId, child) {
+          final isActive = activeId == widget.note.id;
+          final color = activeId == null || isActive
+              ? Colors.white
+              : const Color(0xFFEEEEEE);
+          return Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: child,
+          );
+        },
         child: _retrying ? _buildSpinner() : _buildContent(),
       ),
     );
