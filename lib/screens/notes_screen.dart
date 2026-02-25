@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:ndk/ndk.dart';
@@ -249,9 +250,7 @@ class _NotesScreenState extends State<NotesScreen> {
         lastDate = noteDate;
       }
       items.add(const SizedBox(height: 12));
-      items.add(note.error != null
-          ? _NoteErrorCard(note: note)
-          : _buildTextMessage(note.text, _formatTime(note.createdAt)));
+      items.add(_NoteCard(note: note));
     }
 
     return items;
@@ -273,86 +272,6 @@ class _NotesScreenState extends State<NotesScreen> {
       'December',
     ];
     return '${dt.day} ${months[dt.month - 1]}';
-  }
-
-  String _formatTime(DateTime dt) =>
-      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-
-  Widget _buildTextMessage(String text, String time) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          RichText(
-            text: TextSpan(
-              children: _buildTextSpans(
-                text,
-                const TextStyle(
-                  fontSize: 14,
-                  height: 1.3,
-                  color: Colors.black87,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 0),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              time,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[400],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static final _urlRegex = RegExp(
-    r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9\-]*\.[a-zA-Z]{2,}(?:/[^\s]*)?',
-    caseSensitive: false,
-  );
-
-  List<InlineSpan> _buildTextSpans(String text, TextStyle baseStyle) {
-    final spans = <InlineSpan>[];
-    int lastEnd = 0;
-
-    for (final match in _urlRegex.allMatches(text)) {
-      if (match.start > lastEnd) {
-        spans.add(TextSpan(
-            text: text.substring(lastEnd, match.start), style: baseStyle));
-      }
-
-      String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
-      final fullUrl = url.startsWith('http') ? url : 'https://$url';
-
-      spans.add(TextSpan(
-        text: url,
-        style: baseStyle.copyWith(
-          color: accent,
-          decoration: TextDecoration.underline,
-          decorationColor: accent,
-        ),
-        recognizer: TapGestureRecognizer()
-          ..onTap = () =>
-              launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault),
-      ));
-      lastEnd = match.start + url.length;
-    }
-
-    if (lastEnd < text.length) {
-      spans.add(TextSpan(text: text.substring(lastEnd), style: baseStyle));
-    }
-
-    return spans;
   }
 
   Widget _buildDateSeparator(String date) {
@@ -458,19 +377,33 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 }
 
-class _NoteErrorCard extends StatefulWidget {
+class _NoteCard extends StatefulWidget {
   final DecryptedNote note;
 
-  const _NoteErrorCard({required this.note});
+  const _NoteCard({required this.note});
 
   @override
-  State<_NoteErrorCard> createState() => _NoteErrorCardState();
+  State<_NoteCard> createState() => _NoteCardState();
 }
 
-class _NoteErrorCardState extends State<_NoteErrorCard> {
+class _NoteCardState extends State<_NoteCard> {
   bool _retrying = false;
   bool _menuOpen = false;
   Offset _tapPosition = Offset.zero;
+
+  static final _urlRegex = RegExp(
+    r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9\-]*\.[a-zA-Z]{2,}(?:/[^\s]*)?',
+    caseSensitive: false,
+  );
+
+  static bool get _isDesktopOrWeb =>
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux;
+
+  String _formatTime(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
   Future<void> _retry() async {
     setState(() => _retrying = true);
@@ -491,9 +424,10 @@ class _NoteErrorCardState extends State<_NoteErrorCard> {
     }
 
     entry = OverlayEntry(
-      builder: (_) => _ErrorMenuOverlay(
+      builder: (_) => _NoteMenuOverlay(
         tapPosition: _tapPosition,
         onSelect: dismiss,
+        showRetry: widget.note.error != null,
       ),
     );
 
@@ -501,21 +435,68 @@ class _NoteErrorCardState extends State<_NoteErrorCard> {
     final result = await completer.future;
 
     if (mounted) setState(() => _menuOpen = false);
-    if (result == 'retry') _retry();
+
+    if (result == 'copy') {
+      await Clipboard.setData(ClipboardData(text: widget.note.text));
+    } else if (result == 'retry') {
+      _retry();
+    }
   }
 
-  String _formatTime(DateTime dt) =>
-      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  List<InlineSpan> _buildTextSpans(String text, TextStyle baseStyle) {
+    final spans = <InlineSpan>[];
+    int lastEnd = 0;
+
+    for (final match in _urlRegex.allMatches(text)) {
+      if (match.start > lastEnd) {
+        spans.add(TextSpan(
+            text: text.substring(lastEnd, match.start), style: baseStyle));
+      }
+
+      String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
+      final fullUrl = url.startsWith('http') ? url : 'https://$url';
+
+      spans.add(TextSpan(
+        text: url,
+        style: baseStyle.copyWith(
+          color: accent,
+          decoration: TextDecoration.underline,
+          decorationColor: accent,
+        ),
+        recognizer: TapGestureRecognizer()
+          ..onTap = () =>
+              launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault),
+      ));
+      lastEnd = match.start + url.length;
+    }
+
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(text: text.substring(lastEnd), style: baseStyle));
+    }
+
+    return spans;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: _menuOpen ? const Color(0xFFFAFAFA) : Colors.white,
-        borderRadius: BorderRadius.circular(8),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: _isDesktopOrWeb ? null : (d) => _tapPosition = d.globalPosition,
+      onTap: _isDesktopOrWeb ? null : _showContextMenu,
+      onSecondaryTapDown: _isDesktopOrWeb
+          ? (d) {
+              _tapPosition = d.globalPosition;
+              _showContextMenu();
+            }
+          : null,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _menuOpen ? const Color(0xFFFAFAFA) : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: _retrying ? _buildSpinner() : _buildContent(),
       ),
-      child: _retrying ? _buildSpinner() : _buildContent(),
     );
   }
 
@@ -535,25 +516,9 @@ class _NoteErrorCardState extends State<_NoteErrorCard> {
     );
   }
 
-  static bool get _isDesktopOrWeb =>
-      kIsWeb ||
-      defaultTargetPlatform == TargetPlatform.macOS ||
-      defaultTargetPlatform == TargetPlatform.windows ||
-      defaultTargetPlatform == TargetPlatform.linux;
-
   Widget _buildContent() {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown:
-          _isDesktopOrWeb ? null : (d) => _tapPosition = d.globalPosition,
-      onTap: _isDesktopOrWeb ? null : _showContextMenu,
-      onSecondaryTapDown: _isDesktopOrWeb
-          ? (d) {
-              _tapPosition = d.globalPosition;
-              _showContextMenu();
-            }
-          : null,
-      child: Column(
+    if (widget.note.error != null) {
+      return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
@@ -566,14 +531,12 @@ class _NoteErrorCardState extends State<_NoteErrorCard> {
           ),
           Text(
             widget.note.error!,
-            style: const TextStyle(
-                fontSize: 14, height: 1.3, color: Colors.black87),
+            style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
           ),
           if (widget.note.nostrId != null)
             Text(
               'Event ID: ${widget.note.nostrId}',
-              style: const TextStyle(
-                  fontSize: 14, height: 1.3, color: Colors.black87),
+              style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
             ),
           Align(
             alignment: Alignment.centerRight,
@@ -583,16 +546,42 @@ class _NoteErrorCardState extends State<_NoteErrorCard> {
             ),
           ),
         ],
-      ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RichText(
+          text: TextSpan(
+            children: _buildTextSpans(
+              widget.note.text,
+              const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Text(
+            _formatTime(widget.note.createdAt),
+            style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _ErrorMenuOverlay extends StatelessWidget {
+class _NoteMenuOverlay extends StatelessWidget {
   final Offset tapPosition;
   final void Function([String?]) onSelect;
+  final bool showRetry;
 
-  const _ErrorMenuOverlay({required this.tapPosition, required this.onSelect});
+  const _NoteMenuOverlay({
+    required this.tapPosition,
+    required this.onSelect,
+    required this.showRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -626,16 +615,38 @@ class _ErrorMenuOverlay extends StatelessWidget {
               child: Material(
                 color: Colors.transparent,
                 child: IntrinsicWidth(
-                  child: InkWell(
-                    onTap: () => onSelect('retry'),
-                    child: const Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      child: Text(
-                        'Try to decrypt again',
-                        style: TextStyle(fontSize: 14, color: Colors.black87),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      InkWell(
+                        onTap: () => onSelect('copy'),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                          child: Text(
+                            'Copy',
+                            style:
+                                TextStyle(fontSize: 14, color: Colors.black87),
+                          ),
+                        ),
                       ),
-                    ),
+                      if (showRetry) ...[
+                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                        InkWell(
+                          onTap: () => onSelect('retry'),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Text(
+                              'Try to decrypt again',
+                              style: TextStyle(
+                                  fontSize: 14, color: Colors.black87),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),
