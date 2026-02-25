@@ -144,4 +144,9 @@ class AppDatabase {
     final db = await _getDb();
     await db.delete('notes', where: 'id = ?', whereArgs: [id]);
   }
+
+  Future<void> deleteAll() async {
+    final db = await _getDb();
+    await db.delete('notes');
+  }
 }

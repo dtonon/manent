@@ -283,6 +283,7 @@ class NoteCache {
 
   Future<void> clear() async {
     await _cancelRelaySubscription();
+    await _db?.deleteAll();
     _db = null;
     _signer = null;
     _writeRelays = [];
