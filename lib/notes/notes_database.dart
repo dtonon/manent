@@ -140,6 +140,13 @@ class AppDatabase {
     );
   }
 
+  Future<Map<String, Object?>?> getById(String id) async {
+    final db = await _getDb();
+    final rows =
+        await db.query('notes', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
   Future<void> delete(String id) async {
     final db = await _getDb();
     await db.delete('notes', where: 'id = ?', whereArgs: [id]);

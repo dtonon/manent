@@ -275,6 +275,53 @@ class NoteCache {
     }
   }
 
+  Future<bool> retryDecrypt(String id) async {
+    if (_localKey == null || _db == null) return false;
+
+    final row = await _db!.getById(id);
+    if (row == null) return false;
+
+    // Try local key first (handles transient errors)
+    final localEncoded = row['local_content'] as String?;
+    if (localEncoded != null) {
+      final text = await LocalCrypto.decrypt(_localKey!, localEncoded);
+      if (text != null) {
+        _map[id] = DecryptedNote(
+          id: id,
+          nostrId: row['nostr_id'] as String?,
+          text: text,
+          createdAt: DateTime.fromMillisecondsSinceEpoch(
+              (row['created_at'] as int) * 1000),
+          syncedToRelay: (row['synced_to_relay'] as int) == 1,
+        );
+        _emit();
+        return true;
+      }
+    }
+
+    // Try signer on encrypted_content
+    if (_signer == null) return false;
+    final ciphertext = (row['encrypted_content'] as String?) ?? '';
+    if (ciphertext.isEmpty) return false;
+
+    final result = await _decryptViaSigner(_signer!, ciphertext);
+    if (result.text == null) return false;
+
+    final text = result.text!;
+    final localContent = await LocalCrypto.encrypt(_localKey!, text);
+    await _db!.updateLocalContent(id, localContent);
+    _map[id] = DecryptedNote(
+      id: id,
+      nostrId: row['nostr_id'] as String?,
+      text: text,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(
+          (row['created_at'] as int) * 1000),
+      syncedToRelay: (row['synced_to_relay'] as int) == 1,
+    );
+    _emit();
+    return true;
+  }
+
   Future<void> delete(String id) async {
     if (_db != null) await _db!.delete(id);
     _map.remove(id);

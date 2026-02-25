@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -24,18 +27,23 @@ class _NotesScreenState extends State<NotesScreen> {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _sending = false;
+  int _noteCount = 0;
 
   @override
   void initState() {
     super.initState();
     NoteCache.instance.notifier.addListener(_onNotesChanged);
-    // Scroll to bottom on first load if notes are already available
-    if (NoteCache.instance.notifier.value.isNotEmpty) {
+    _noteCount = NoteCache.instance.notifier.value.length;
+    if (_noteCount > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
   }
 
-  void _onNotesChanged() => _scrollToBottom();
+  void _onNotesChanged() {
+    final notes = NoteCache.instance.notifier.value;
+    if (notes.length > _noteCount) _scrollToBottom();
+    _noteCount = notes.length;
+  }
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -242,7 +250,7 @@ class _NotesScreenState extends State<NotesScreen> {
       }
       items.add(const SizedBox(height: 12));
       items.add(note.error != null
-          ? _buildErrorMessage(note)
+          ? _NoteErrorCard(note: note)
           : _buildTextMessage(note.text, _formatTime(note.createdAt)));
     }
 
@@ -251,53 +259,24 @@ class _NotesScreenState extends State<NotesScreen> {
 
   String _formatDate(DateTime dt) {
     const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December',
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
     return '${dt.day} ${months[dt.month - 1]}';
   }
 
   String _formatTime(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-
-  Widget _buildErrorMessage(DecryptedNote note) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Error:',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: accent,
-            ),
-          ),
-          Text(
-            note.error!,
-            style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
-          ),
-          if (note.nostrId != null)
-            Text(
-              'Event ID: ${note.nostrId}',
-              style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
-            ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              _formatTime(note.createdAt),
-              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildTextMessage(String text, String time) {
     return Container(
@@ -477,4 +456,213 @@ class _NotesScreenState extends State<NotesScreen> {
     _scrollController.dispose();
     super.dispose();
   }
+}
+
+class _NoteErrorCard extends StatefulWidget {
+  final DecryptedNote note;
+
+  const _NoteErrorCard({required this.note});
+
+  @override
+  State<_NoteErrorCard> createState() => _NoteErrorCardState();
+}
+
+class _NoteErrorCardState extends State<_NoteErrorCard> {
+  bool _retrying = false;
+  bool _menuOpen = false;
+  Offset _tapPosition = Offset.zero;
+
+  Future<void> _retry() async {
+    setState(() => _retrying = true);
+    final success = await NoteCache.instance.retryDecrypt(widget.note.id);
+    if (mounted && !success) setState(() => _retrying = false);
+  }
+
+  Future<void> _showContextMenu() async {
+    setState(() => _menuOpen = true);
+
+    final completer = Completer<String?>();
+    OverlayEntry? entry;
+
+    void dismiss([String? value]) {
+      entry?.remove();
+      entry = null;
+      completer.complete(value);
+    }
+
+    entry = OverlayEntry(
+      builder: (_) => _ErrorMenuOverlay(
+        tapPosition: _tapPosition,
+        onSelect: dismiss,
+      ),
+    );
+
+    Overlay.of(context).insert(entry!);
+    final result = await completer.future;
+
+    if (mounted) setState(() => _menuOpen = false);
+    if (result == 'retry') _retry();
+  }
+
+  String _formatTime(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _menuOpen ? const Color(0xFFFAFAFA) : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: _retrying ? _buildSpinner() : _buildContent(),
+    );
+  }
+
+  Widget _buildSpinner() {
+    return const SizedBox(
+      height: 40,
+      child: Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(accent),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static bool get _isDesktopOrWeb =>
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux;
+
+  Widget _buildContent() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown:
+          _isDesktopOrWeb ? null : (d) => _tapPosition = d.globalPosition,
+      onTap: _isDesktopOrWeb ? null : _showContextMenu,
+      onSecondaryTapDown: _isDesktopOrWeb
+          ? (d) {
+              _tapPosition = d.globalPosition;
+              _showContextMenu();
+            }
+          : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Error:',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: accent,
+            ),
+          ),
+          Text(
+            widget.note.error!,
+            style: const TextStyle(
+                fontSize: 14, height: 1.3, color: Colors.black87),
+          ),
+          if (widget.note.nostrId != null)
+            Text(
+              'Event ID: ${widget.note.nostrId}',
+              style: const TextStyle(
+                  fontSize: 14, height: 1.3, color: Colors.black87),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              _formatTime(widget.note.createdAt),
+              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorMenuOverlay extends StatelessWidget {
+  final Offset tapPosition;
+  final void Function([String?]) onSelect;
+
+  const _ErrorMenuOverlay({required this.tapPosition, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => onSelect(null),
+            onSecondaryTap: () => onSelect(null),
+          ),
+        ),
+        CustomSingleChildLayout(
+          delegate: _MenuPositionDelegate(tapPosition),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE0E0E0)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 24,
+                  spreadRadius: 0,
+                  offset: Offset(0, 6),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Material(
+                color: Colors.transparent,
+                child: IntrinsicWidth(
+                  child: InkWell(
+                    onTap: () => onSelect('retry'),
+                    child: const Padding(
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Text(
+                        'Try to decrypt again',
+                        style: TextStyle(fontSize: 14, color: Colors.black87),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MenuPositionDelegate extends SingleChildLayoutDelegate {
+  final Offset tapPosition;
+
+  const _MenuPositionDelegate(this.tapPosition);
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints(maxWidth: constraints.maxWidth - 16);
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    final x = tapPosition.dx.clamp(8.0, size.width - childSize.width - 8.0);
+    return Offset(x, tapPosition.dy + 4);
+  }
+
+  @override
+  bool shouldRelayout(_MenuPositionDelegate old) =>
+      old.tapPosition != tapPosition;
 }
