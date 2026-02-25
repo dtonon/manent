@@ -481,7 +481,8 @@ class _NoteCardState extends State<_NoteCard> {
   Widget build(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTapDown: _isDesktopOrWeb ? null : (d) => _tapPosition = d.globalPosition,
+      onTapDown:
+          _isDesktopOrWeb ? null : (d) => _tapPosition = d.globalPosition,
       onTap: _isDesktopOrWeb ? null : _showContextMenu,
       onSecondaryTapDown: _isDesktopOrWeb
           ? (d) {
@@ -531,12 +532,14 @@ class _NoteCardState extends State<_NoteCard> {
           ),
           Text(
             widget.note.error!,
-            style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
+            style: const TextStyle(
+                fontSize: 14, height: 1.3, color: Colors.black87),
           ),
           if (widget.note.nostrId != null)
             Text(
               'Event ID: ${widget.note.nostrId}',
-              style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
+              style: const TextStyle(
+                  fontSize: 14, height: 1.3, color: Colors.black87),
             ),
           Align(
             alignment: Alignment.centerRight,
@@ -595,7 +598,7 @@ class _NoteMenuOverlay extends StatelessWidget {
           ),
         ),
         CustomSingleChildLayout(
-          delegate: _MenuPositionDelegate(tapPosition),
+          delegate: _MenuPositionDelegate(tapPosition, isDesktopOrWeb: _NoteCardState._isDesktopOrWeb),
           child: Container(
             decoration: BoxDecoration(
               color: Colors.white,
@@ -660,20 +663,32 @@ class _NoteMenuOverlay extends StatelessWidget {
 
 class _MenuPositionDelegate extends SingleChildLayoutDelegate {
   final Offset tapPosition;
+  final bool isDesktopOrWeb;
 
-  const _MenuPositionDelegate(this.tapPosition);
+  const _MenuPositionDelegate(this.tapPosition, {required this.isDesktopOrWeb});
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
-      BoxConstraints(maxWidth: constraints.maxWidth - 16);
+      BoxConstraints(minWidth: 200, maxWidth: constraints.maxWidth - 32);
 
   @override
   Offset getPositionForChild(Size size, Size childSize) {
-    final x = tapPosition.dx.clamp(8.0, size.width - childSize.width - 8.0);
+    final double x;
+    if (isDesktopOrWeb) {
+      // Follow the cursor, clamped to screen edges
+      x = tapPosition.dx.clamp(8.0, size.width - childSize.width - 8.0);
+    } else {
+      // Pin to the opposite edge so the finger never covers the menu
+      if (tapPosition.dx > size.width / 2) {
+        x = 26.0;
+      } else {
+        x = size.width - childSize.width - 26.0;
+      }
+    }
     return Offset(x, tapPosition.dy + 4);
   }
 
   @override
   bool shouldRelayout(_MenuPositionDelegate old) =>
-      old.tapPosition != tapPosition;
+      old.tapPosition != tapPosition || old.isDesktopOrWeb != isDesktopOrWeb;
 }
