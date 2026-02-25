@@ -241,7 +241,9 @@ class _NotesScreenState extends State<NotesScreen> {
         lastDate = noteDate;
       }
       items.add(const SizedBox(height: 12));
-      items.add(_buildTextMessage(note.text, _formatTime(note.createdAt)));
+      items.add(note.error != null
+          ? _buildErrorMessage(note)
+          : _buildTextMessage(note.text, _formatTime(note.createdAt)));
     }
 
     return items;
@@ -257,6 +259,45 @@ class _NotesScreenState extends State<NotesScreen> {
 
   String _formatTime(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+
+  Widget _buildErrorMessage(DecryptedNote note) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Error:',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: accent,
+            ),
+          ),
+          Text(
+            note.error!,
+            style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
+          ),
+          if (note.nostrId != null)
+            Text(
+              'Event ID: ${note.nostrId}',
+              style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              _formatTime(note.createdAt),
+              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildTextMessage(String text, String time) {
     return Container(
