@@ -138,6 +138,17 @@ class _ManentAppState extends State<ManentApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Manent',
+      builder: (context, child) {
+        final isMobile = defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.android;
+        if (!isMobile) return child!;
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(1.2),
+          ),
+          child: child!,
+        );
+      },
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: accent,

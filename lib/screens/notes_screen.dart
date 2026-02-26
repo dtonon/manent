@@ -723,7 +723,7 @@ class _NoteCardState extends State<_NoteCard> {
             child: SelectableText.rich(textSpan),
           )
         else
-          RichText(text: textSpan),
+          Text.rich(textSpan),
         Align(
           alignment: Alignment.centerRight,
           child: Text(
