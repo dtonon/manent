@@ -39,61 +39,66 @@ class NoteCache {
 
   Future<void> loadAll(
       AppDatabase? db, EventSigner signer, List<String> writeRelays) async {
-    _db = db;
-    _signer = signer;
-    _writeRelays = writeRelays;
-    _localKey = await LocalKeyStore.loadOrCreate();
-    _map.clear();
+    try {
+      _db = db;
+      _signer = signer;
+      _writeRelays = writeRelays;
+      _localKey = await LocalKeyStore.loadOrCreate();
+      _map.clear();
 
-    if (_db == null) {
-      _emit();
-      return;
-    }
-
-    final rows = await _db!.getAll();
-    for (final row in rows) {
-      final id = row['id'] as String;
-      final localEncoded = row['local_content'] as String?;
-      String? text;
-      String? errorMsg;
-
-      if (localEncoded != null) {
-        // Fast path — local AES key, no signer needed
-        text = await LocalCrypto.decrypt(_localKey!, localEncoded);
-        if (text == null) {
-          errorMsg = 'The local decryption failed.';
-        }
-      } else {
-        // Migration path — event stored before local-key support, or pending retry
-        final ciphertext = row['encrypted_content'] as String;
-        if (ciphertext.isNotEmpty) {
-          final result = await _decryptViaSigner(signer, ciphertext);
-          text = result.text;
-          if (text != null) {
-            final cached = await LocalCrypto.encrypt(_localKey!, text);
-            await _db!.updateLocalContent(id, cached);
-          } else {
-            errorMsg = 'The remote decryption failed with the error "${result.error}".';
-          }
-        }
+      if (_db == null) {
+        _emit();
+        return;
       }
 
-      if (text == null && errorMsg == null) continue;
-      final editedAtRaw = row['edited_at'] as int?;
-      _map[id] = DecryptedNote(
-        id: id,
-        nostrId: row['nostr_id'] as String?,
-        text: text ?? '',
-        error: errorMsg,
-        createdAt: DateTime.fromMillisecondsSinceEpoch(
-            (row['created_at'] as int) * 1000),
-        editedAt: editedAtRaw != null
-            ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
-            : null,
-        syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
-      );
+      final rows = await _db!.getAll();
+      for (final row in rows) {
+        final id = row['id'] as String;
+        final localEncoded = row['local_content'] as String?;
+        String? text;
+        String? errorMsg;
+
+        if (localEncoded != null) {
+          // Fast path — local AES key, no signer needed
+          text = await LocalCrypto.decrypt(_localKey!, localEncoded);
+          if (text == null) {
+            errorMsg = 'The local decryption failed.';
+          }
+        } else {
+          // Migration path — event stored before local-key support, or pending retry
+          final ciphertext = row['encrypted_content'] as String;
+          if (ciphertext.isNotEmpty) {
+            final result = await _decryptViaSigner(signer, ciphertext);
+            text = result.text;
+            if (text != null) {
+              final cached = await LocalCrypto.encrypt(_localKey!, text);
+              await _db!.updateLocalContent(id, cached);
+            } else {
+              errorMsg =
+                  'The remote decryption failed with the error "${result.error}".';
+            }
+          }
+        }
+
+        if (text == null && errorMsg == null) continue;
+        final editedAtRaw = row['edited_at'] as int?;
+        _map[id] = DecryptedNote(
+          id: id,
+          nostrId: row['nostr_id'] as String?,
+          text: text ?? '',
+          error: errorMsg,
+          createdAt: DateTime.fromMillisecondsSinceEpoch(
+              (row['created_at'] as int) * 1000),
+          editedAt: editedAtRaw != null
+              ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
+              : null,
+          syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
+        );
+      }
+      _emit();
+    } catch (_) {
+      _emit();
     }
-    _emit();
   }
 
   Future<void> add(String text) async {
@@ -396,42 +401,44 @@ class NoteCache {
       return;
     }
 
-    final result = await _decryptViaSigner(_signer!, event.content);
-    final text = result.text;
-    final localContent =
-        text != null ? await LocalCrypto.encrypt(_localKey!, text) : null;
+    try {
+      final result = await _decryptViaSigner(_signer!, event.content);
+      final text = result.text;
+      final localContent =
+          text != null ? await LocalCrypto.encrypt(_localKey!, text) : null;
 
-    // Decode original creation time from the d tag; compare to detect edits
-    final originalCreatedAt = _createdAtFromId(localId);
-    final originalCreatedAtSeconds =
-        originalCreatedAt.millisecondsSinceEpoch ~/ 1000;
-    final editedAt = event.createdAt > originalCreatedAtSeconds
-        ? DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000)
-        : null;
+      // Decode original creation time from the d tag; compare to detect edits
+      final originalCreatedAt = _createdAtFromId(localId);
+      final originalCreatedAtSeconds =
+          originalCreatedAt.millisecondsSinceEpoch ~/ 1000;
+      final editedAt = event.createdAt > originalCreatedAtSeconds
+          ? DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000)
+          : null;
 
-    if (_db != null) {
-      await _db!.insertSynced(
+      if (_db != null) {
+        await _db!.insertSynced(
+          id: localId,
+          nostrId: event.id,
+          createdAt: originalCreatedAtSeconds,
+          encryptedContent: event.content,
+          localContent: localContent,
+          editedAt: editedAt != null ? event.createdAt : null,
+        );
+      }
+
+      _map[localId] = DecryptedNote(
         id: localId,
         nostrId: event.id,
-        createdAt: originalCreatedAtSeconds,
-        encryptedContent: event.content,
-        localContent: localContent,
-        editedAt: editedAt != null ? event.createdAt : null,
+        text: text ?? '',
+        error: text == null
+            ? 'The remote decryption failed with the error "${result.error}".'
+            : null,
+        createdAt: originalCreatedAt,
+        editedAt: editedAt,
+        syncStatus: SyncStatus.synced,
       );
-    }
-
-    _map[localId] = DecryptedNote(
-      id: localId,
-      nostrId: event.id,
-      text: text ?? '',
-      error: text == null
-          ? 'The remote decryption failed with the error "${result.error}".'
-          : null,
-      createdAt: originalCreatedAt,
-      editedAt: editedAt,
-      syncStatus: SyncStatus.synced,
-    );
-    _emit();
+      _emit();
+    } catch (_) {}
   }
 
   // Retries decryption for events stored encrypted-only (local_content is null).
@@ -590,13 +597,15 @@ class NoteCache {
   Future<({String? text, String? error})> _decryptViaSigner(
       EventSigner signer, String ciphertext) async {
     try {
-      return (
-        text: await signer.decryptNip44(
-          ciphertext: ciphertext,
-          senderPubKey: signer.getPublicKey(),
-        ),
-        error: null,
-      );
+      final text = await signer
+          .decryptNip44(
+            ciphertext: ciphertext,
+            senderPubKey: signer.getPublicKey(),
+          )
+          .timeout(const Duration(seconds: 30));
+      return (text: text, error: null);
+    } on TimeoutException {
+      return (text: null, error: 'signer connection timed out');
     } catch (e) {
       return (text: null, error: e.toString());
     }
