@@ -121,7 +121,7 @@ class _NotesScreenState extends State<NotesScreen> {
               style: TextStyle(
                   fontSize: 14,
                   color: Colors.grey[500],
-                  fontFamily: 'monospace'),
+              ),
               textAlign: TextAlign.center,
             ),
             if (widget.user.writeRelays.isNotEmpty) ...[
@@ -143,7 +143,6 @@ class _NotesScreenState extends State<NotesScreen> {
                     style: TextStyle(
                       fontSize: 14,
                       color: Colors.grey[700],
-                      fontFamily: 'monospace',
                     ),
                     textAlign: TextAlign.center,
                     overflow: TextOverflow.ellipsis,
@@ -293,8 +292,15 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   Widget _buildInputBar(BuildContext context) {
+    final isMobile = defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
+    final bottomInset =
+        isMobile ? MediaQuery.of(context).padding.bottom : 0.0;
     final maxHeight = MediaQuery.of(context).size.height * 0.5;
-    return ConstrainedBox(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+      ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight),
       child: Container(
         decoration: BoxDecoration(
@@ -307,9 +313,9 @@ class _NotesScreenState extends State<NotesScreen> {
             ),
           ],
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
               child: TextField(
@@ -320,12 +326,14 @@ class _NotesScreenState extends State<NotesScreen> {
                 decoration: const InputDecoration(
                   hintText: 'Memo...',
                   border: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
                   hintStyle: TextStyle(
                     color: Colors.grey,
                     fontSize: 14,
                   ),
                 ),
-                style: const TextStyle(fontSize: 14),
+                style: const TextStyle(fontSize: 14, height: 1.3),
               ),
             ),
             const SizedBox(width: 12),
@@ -333,25 +341,27 @@ class _NotesScreenState extends State<NotesScreen> {
               valueListenable: _textController,
               builder: (context, value, _) {
                 final hasText = value.text.trim().isNotEmpty;
-                if (!hasText) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Semantics(
-                    label: 'Send note',
-                    button: true,
-                    child: GestureDetector(
-                      onTap: _sending ? null : _sendNote,
-                      child: _sending
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(accent),
-                              ),
-                            )
-                          : const Icon(Icons.send, color: accent),
+                return Opacity(
+                  opacity: hasText ? 1.0 : 0.0,
+                  child: IgnorePointer(
+                    ignoring: !hasText || _sending,
+                    child: Semantics(
+                      label: 'Send note',
+                      button: true,
+                      child: GestureDetector(
+                        onTap: _sendNote,
+                        child: _sending
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(accent),
+                                ),
+                              )
+                            : const Icon(Icons.send, color: accent),
+                      ),
                     ),
                   ),
                 );
@@ -360,7 +370,13 @@ class _NotesScreenState extends State<NotesScreen> {
           ],
         ),
       ),
-    );
+      ),
+      if (bottomInset > 0)
+        Container(
+          height: bottomInset,
+          color: const Color(0xFFEEEEEE),
+        ),
+    ]);
   }
 
   @override
