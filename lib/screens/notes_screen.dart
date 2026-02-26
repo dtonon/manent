@@ -333,8 +333,10 @@ class _NotesScreenState extends State<NotesScreen> {
               valueListenable: _textController,
               builder: (context, value, _) {
                 final hasText = value.text.trim().isNotEmpty;
-                if (hasText) {
-                  return Semantics(
+                if (!hasText) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Semantics(
                     label: 'Send note',
                     button: true,
                     child: GestureDetector(
@@ -351,14 +353,7 @@ class _NotesScreenState extends State<NotesScreen> {
                             )
                           : const Icon(Icons.send, color: accent),
                     ),
-                  );
-                }
-                return Row(
-                  children: [
-                    Icon(Icons.attach_file, color: Colors.grey[700]),
-                    const SizedBox(width: 16),
-                    Icon(Icons.mic, color: Colors.grey[700]),
-                  ],
+                  ),
                 );
               },
             ),
@@ -441,6 +436,30 @@ class _NoteCardState extends State<_NoteCard> {
       await Clipboard.setData(ClipboardData(text: widget.note.text));
     } else if (result == 'retry') {
       _retry();
+    } else if (result == 'delete') {
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Delete note'),
+          content: const Text('Are you sure you want to delete this message?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) {
+        await NoteCache.instance
+            .delete(widget.note.id, nostrId: widget.note.nostrId);
+      }
     }
   }
 
@@ -609,7 +628,8 @@ class _NoteMenuOverlay extends StatelessWidget {
           ),
         ),
         CustomSingleChildLayout(
-          delegate: _MenuPositionDelegate(tapPosition, isDesktopOrWeb: _NoteCardState._isDesktopOrWeb),
+          delegate: _MenuPositionDelegate(tapPosition,
+              isDesktopOrWeb: _NoteCardState._isDesktopOrWeb),
           child: Container(
             decoration: BoxDecoration(
               color: Colors.white,
@@ -660,6 +680,18 @@ class _NoteMenuOverlay extends StatelessWidget {
                           ),
                         ),
                       ],
+                      const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                      InkWell(
+                        onTap: () => onSelect('delete'),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                          child: Text(
+                            'Delete',
+                            style: TextStyle(fontSize: 14, color: Colors.red),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),

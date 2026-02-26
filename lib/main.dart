@@ -147,6 +147,10 @@ class _ManentAppState extends State<ManentApp> {
           backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
         ),
+        dialogTheme: const DialogThemeData(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+        ),
       ),
       home: _user == null
           ? LoginScreen(onLogin: _onLogin)

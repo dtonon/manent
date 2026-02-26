@@ -26,6 +26,9 @@ class NoteCache {
 
   StreamSubscription<Nip01Event>? _relaySubscription;
   String? _relaySubId;
+  StreamSubscription<Nip01Event>? _deletionSubscription;
+  String? _deletionSubId;
+  final _pendingDeletions = <String>{};
 
   List<DecryptedNote> get _sorted =>
       _map.values.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
@@ -186,12 +189,47 @@ class NoteCache {
     _relaySubId = response.requestId;
     _relaySubscription = response.stream.listen(_onRelayEvent);
 
+    final deletionResponse = NostrClient().ndk.requests.subscription(
+      filter: Filter(
+        kinds: [5],
+        authors: [_signer!.getPublicKey()],
+      ),
+      explicitRelays: _writeRelays,
+    );
+    _deletionSubId = deletionResponse.requestId;
+    _deletionSubscription =
+        deletionResponse.stream.listen(_onDeletionEvent);
+
     // After relays have sent historical events, retry any that failed to decrypt
     Future.delayed(const Duration(seconds: 5), _retryPendingDecryptions);
   }
 
+  Future<void> _onDeletionEvent(Nip01Event event) async {
+    final referencedIds = event.tags
+        .where((t) => t.length >= 2 && t[0] == 'e')
+        .map((t) => t[1])
+        .toSet();
+    if (referencedIds.isEmpty) return;
+
+    // Remember so kind:40001 echoes arriving later in the same session are ignored
+    _pendingDeletions.addAll(referencedIds);
+
+    final toDelete = _map.values
+        .where((n) => n.nostrId != null && referencedIds.contains(n.nostrId))
+        .map((n) => n.id)
+        .toList();
+
+    for (final localId in toDelete) {
+      if (_db != null) await _db!.delete(localId);
+      _map.remove(localId);
+    }
+
+    if (toDelete.isNotEmpty) _emit();
+  }
+
   Future<void> _onRelayEvent(Nip01Event event) async {
     if (_signer == null || _localKey == null) return;
+    if (_pendingDeletions.contains(event.id)) return;
 
     // Dedup: prefer DB check; fall back to in-memory map on web
     if (_db != null) {
@@ -273,6 +311,12 @@ class NoteCache {
       await NostrClient().ndk.requests.closeSubscription(_relaySubId!);
       _relaySubId = null;
     }
+    await _deletionSubscription?.cancel();
+    _deletionSubscription = null;
+    if (_deletionSubId != null) {
+      await NostrClient().ndk.requests.closeSubscription(_deletionSubId!);
+      _deletionSubId = null;
+    }
   }
 
   Future<bool> retryDecrypt(String id) async {
@@ -322,10 +366,32 @@ class NoteCache {
     return true;
   }
 
-  Future<void> delete(String id) async {
+  Future<void> delete(String id, {String? nostrId}) async {
     if (_db != null) await _db!.delete(id);
     _map.remove(id);
     _emit();
+    if (nostrId != null) _broadcastDeletion(nostrId);
+  }
+
+  Future<void> _broadcastDeletion(String nostrId) async {
+    if (_writeRelays.isEmpty || _signer == null) return;
+    try {
+      final event = Nip01Event(
+        pubKey: _signer!.getPublicKey(),
+        kind: 5,
+        tags: [
+          ['e', nostrId]
+        ],
+        content: '',
+        createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      );
+      final signed = await _signer!.sign(event);
+      await NostrClient()
+          .ndk
+          .broadcast
+          .broadcast(nostrEvent: signed, specificRelays: _writeRelays)
+          .broadcastDoneFuture;
+    } catch (_) {}
   }
 
   Future<void> clear() async {
@@ -336,6 +402,7 @@ class NoteCache {
     _writeRelays = [];
     _localKey = null;
     _map.clear();
+    _pendingDeletions.clear();
     notifier.value = [];
   }
 
