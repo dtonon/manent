@@ -598,17 +598,24 @@ class _NoteCardState extends State<_NoteCard> {
       );
     }
 
+    final textSpan = TextSpan(
+      children: _buildTextSpans(
+        widget.note.text,
+        const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
+      ),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        RichText(
-          text: TextSpan(
-            children: _buildTextSpans(
-              widget.note.text,
-              const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
-            ),
-          ),
-        ),
+        if (_isDesktopOrWeb)
+          SelectableText.rich(
+            textSpan,
+            // Suppress built-in menu so the right-click overlay still works
+            contextMenuBuilder: (_, __) => const SizedBox.shrink(),
+          )
+        else
+          RichText(text: textSpan),
         Align(
           alignment: Alignment.centerRight,
           child: Text(
