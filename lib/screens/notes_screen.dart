@@ -175,65 +175,113 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
+  AppBar _buildSelectionAppBar() {
+    return AppBar(
+      backgroundColor: accent,
+      elevation: 0,
+      automaticallyImplyLeading: false,
+      centerTitle: true,
+      title: const Text(
+        'Selection mode',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      actions: [
+        Semantics(
+          label: 'Exit selection mode',
+          button: true,
+          child: IconButton(
+            icon: const Icon(Icons.close, color: Colors.white),
+            onPressed: () => _NoteCardState._selectionModeId.value = null,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: background,
-      appBar: manentAppBar(
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Semantics(
-              label: 'Profile: ${widget.user.name}',
-              button: true,
-              child: GestureDetector(
-                onTap: _showProfileSheet,
-                child: CircleAvatar(
-                  radius: 18,
-                  backgroundImage: widget.user.avatarUrl != null
-                      ? NetworkImage(widget.user.avatarUrl!)
-                      : null,
-                  backgroundColor: accent,
-                  child: widget.user.avatarUrl == null
-                      ? Text(
-                          widget.user.name.isNotEmpty
-                              ? widget.user.name[0].toUpperCase()
-                              : '?',
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 14),
-                        )
-                      : null,
-                ),
+    return ValueListenableBuilder<String?>(
+      valueListenable: _NoteCardState._selectionModeId,
+      builder: (context, selectionId, _) {
+        final inSelection = selectionId != null;
+        return PopScope(
+          canPop: !inSelection,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _NoteCardState._selectionModeId.value = null;
+          },
+          child: Scaffold(
+            backgroundColor: background,
+            appBar: inSelection
+                ? _buildSelectionAppBar()
+                : manentAppBar(
+                    actions: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 20),
+                        child: Semantics(
+                          label: 'Profile: ${widget.user.name}',
+                          button: true,
+                          child: GestureDetector(
+                            onTap: _showProfileSheet,
+                            child: CircleAvatar(
+                              radius: 18,
+                              backgroundImage: widget.user.avatarUrl != null
+                                  ? NetworkImage(widget.user.avatarUrl!)
+                                  : null,
+                              backgroundColor: accent,
+                              child: widget.user.avatarUrl == null
+                                  ? Text(
+                                      widget.user.name.isNotEmpty
+                                          ? widget.user.name[0].toUpperCase()
+                                          : '?',
+                                      style: const TextStyle(
+                                          color: Colors.white, fontSize: 14),
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+            body: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: inSelection
+                  ? () => _NoteCardState._selectionModeId.value = null
+                  : null,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: ValueListenableBuilder<List<DecryptedNote>>(
+                      valueListenable: NoteCache.instance.notifier,
+                      builder: (context, notes, _) {
+                        if (notes.isEmpty) {
+                          return const Center(
+                            child: Text(
+                              'No notes yet',
+                              style:
+                                  TextStyle(color: Colors.grey, fontSize: 14),
+                            ),
+                          );
+                        }
+                        return ListView(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.all(16),
+                          children: _buildNoteItems(notes),
+                        );
+                      },
+                    ),
+                  ),
+                  _buildInputBar(context),
+                ],
               ),
             ),
           ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ValueListenableBuilder<List<DecryptedNote>>(
-              valueListenable: NoteCache.instance.notifier,
-              builder: (context, notes, _) {
-                if (notes.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      'No notes yet',
-                      style: TextStyle(color: Colors.grey, fontSize: 14),
-                    ),
-                  );
-                }
-                return ListView(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
-                  children: _buildNoteItems(notes),
-                );
-              },
-            ),
-          ),
-          _buildInputBar(context),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -381,6 +429,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
   @override
   void dispose() {
+    _NoteCardState._selectionModeId.value = null;
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
     _textController.dispose();
     _scrollController.dispose();
@@ -399,6 +448,7 @@ class _NoteCard extends StatefulWidget {
 
 class _NoteCardState extends State<_NoteCard> {
   static final _activeMenuId = ValueNotifier<String?>(null);
+  static final _selectionModeId = ValueNotifier<String?>(null);
 
   bool _retrying = false;
   Offset _tapPosition = Offset.zero;
@@ -440,6 +490,7 @@ class _NoteCardState extends State<_NoteCard> {
         tapPosition: _tapPosition,
         onSelect: dismiss,
         showRetry: widget.note.error != null,
+        showSelectText: !_isDesktopOrWeb,
       ),
     );
 
@@ -450,6 +501,8 @@ class _NoteCardState extends State<_NoteCard> {
 
     if (result == 'copy') {
       await Clipboard.setData(ClipboardData(text: widget.note.text));
+    } else if (result == 'select_text') {
+      _selectionModeId.value = widget.note.id;
     } else if (result == 'retry') {
       _retry();
     } else if (result == 'delete') {
@@ -515,35 +568,58 @@ class _NoteCardState extends State<_NoteCard> {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown:
-          _isDesktopOrWeb ? null : (d) => _tapPosition = d.globalPosition,
-      onTap: _isDesktopOrWeb ? null : _showContextMenu,
-      onSecondaryTapDown: _isDesktopOrWeb
-          ? (d) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([_activeMenuId, _selectionModeId]),
+      builder: (context, _) {
+        final menuId = _activeMenuId.value;
+        final selectionId = _selectionModeId.value;
+        final isActiveSelection = selectionId == widget.note.id;
+        final inAnyMode = menuId != null || selectionId != null;
+
+        final color = (!inAnyMode || menuId == widget.note.id || isActiveSelection)
+            ? Colors.white
+            : const Color(0xFFEEEEEE);
+
+        void Function(TapDownDetails)? onTapDown;
+        void Function()? onTap;
+        void Function(TapDownDetails)? onSecondaryTapDown;
+
+        if (isActiveSelection) {
+          // All null — SelectableText handles everything
+        } else if (selectionId != null) {
+          // Non-active card: tap exits selection mode
+          if (!_isDesktopOrWeb) onTap = () => _selectionModeId.value = null;
+        } else {
+          // Normal mode
+          if (!_isDesktopOrWeb) {
+            onTapDown = (d) => _tapPosition = d.globalPosition;
+            onTap = _showContextMenu;
+          }
+          if (_isDesktopOrWeb) {
+            onSecondaryTapDown = (d) {
               _tapPosition = d.globalPosition;
               _showContextMenu();
-            }
-          : null,
-      child: ValueListenableBuilder<String?>(
-        valueListenable: _activeMenuId,
-        builder: (context, activeId, child) {
-          final isActive = activeId == widget.note.id;
-          final color = activeId == null || isActive
-              ? Colors.white
-              : const Color(0xFFEEEEEE);
-          return Container(
+            };
+          }
+        }
+
+        return GestureDetector(
+          behavior: isActiveSelection
+              ? HitTestBehavior.translucent
+              : HitTestBehavior.opaque,
+          onTapDown: onTapDown,
+          onTap: onTap,
+          onSecondaryTapDown: onSecondaryTapDown,
+          child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: child,
-          );
-        },
-        child: _retrying ? _buildSpinner() : _buildContent(),
-      ),
+            child: _retrying ? _buildSpinner() : _buildContent(isActiveSelection),
+          ),
+        );
+      },
     );
   }
 
@@ -563,7 +639,7 @@ class _NoteCardState extends State<_NoteCard> {
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent([bool inSelectionMode = false]) {
     if (widget.note.error != null) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -605,15 +681,20 @@ class _NoteCardState extends State<_NoteCard> {
       ),
     );
 
-    return Column(
+    return DefaultSelectionStyle(
+      selectionColor: textSelectionColor,
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (_isDesktopOrWeb)
+          // Suppress built-in menu so the right-click overlay still works
           SelectableText.rich(
             textSpan,
-            // Suppress built-in menu so the right-click overlay still works
             contextMenuBuilder: (_, __) => const SizedBox.shrink(),
           )
+        else if (inSelectionMode)
+          // Default context menu — shows the native OS toolbar (copy, select all…)
+          SelectableText.rich(textSpan)
         else
           RichText(text: textSpan),
         Align(
@@ -624,7 +705,7 @@ class _NoteCardState extends State<_NoteCard> {
           ),
         ),
       ],
-    );
+    ));
   }
 }
 
@@ -632,11 +713,13 @@ class _NoteMenuOverlay extends StatelessWidget {
   final Offset tapPosition;
   final void Function([String?]) onSelect;
   final bool showRetry;
+  final bool showSelectText;
 
   const _NoteMenuOverlay({
     required this.tapPosition,
     required this.onSelect,
     required this.showRetry,
+    this.showSelectText = false,
   });
 
   @override
@@ -688,6 +771,21 @@ class _NoteMenuOverlay extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (showSelectText) ...[
+                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                        InkWell(
+                          onTap: () => onSelect('select_text'),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Text(
+                              'Select text',
+                              style: TextStyle(
+                                  fontSize: 14, color: Colors.black87),
+                            ),
+                          ),
+                        ),
+                      ],
                       if (showRetry) ...[
                         const Divider(height: 1, color: Color(0xFFE0E0E0)),
                         InkWell(
