@@ -223,7 +223,18 @@ class NoteCache {
 
     await _cancelRelaySubscription();
 
-    final since = _db != null ? await _db!.getLatestCreatedAt() : null;
+    final thirtyDaysAgo = DateTime.now()
+            .subtract(const Duration(days: 30))
+            .millisecondsSinceEpoch ~/
+        1000;
+    final int? since;
+    if (_db != null) {
+      final latest = await _db!.getLatestCreatedAt();
+      // Always go back at least 30 days to catch notes from other devices
+      since = latest != null ? min(latest, thirtyDaysAgo) : thirtyDaysAgo;
+    } else {
+      since = null;
+    }
 
     final response = NostrClient().ndk.requests.subscription(
       filter: Filter(
