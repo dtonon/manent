@@ -27,8 +27,10 @@ class NotesScreen extends StatefulWidget {
 class _NotesScreenState extends State<NotesScreen> {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _inputFocusNode = FocusNode();
   bool _sending = false;
   int _noteCount = 0;
+  String? _editingNoteId;
 
   @override
   void initState() {
@@ -64,6 +66,34 @@ class _NotesScreenState extends State<NotesScreen> {
     setState(() => _sending = true);
     _textController.clear();
     await NoteCache.instance.add(text);
+    if (mounted) setState(() => _sending = false);
+  }
+
+  void _startEdit(DecryptedNote note) {
+    setState(() => _editingNoteId = note.id);
+    _textController.text = note.text;
+    _textController.selection =
+        TextSelection.collapsed(offset: note.text.length);
+    _inputFocusNode.requestFocus();
+  }
+
+  void _cancelEdit() {
+    setState(() => _editingNoteId = null);
+    _textController.clear();
+    _inputFocusNode.unfocus();
+  }
+
+  Future<void> _confirmEdit() async {
+    final text = _textController.text.trim();
+    final id = _editingNoteId;
+    if (text.isEmpty || id == null || _sending) return;
+    setState(() {
+      _editingNoteId = null;
+      _sending = true;
+    });
+    _textController.clear();
+    _inputFocusNode.unfocus();
+    await NoteCache.instance.update(id, text);
     if (mounted) setState(() => _sending = false);
   }
 
@@ -119,8 +149,8 @@ class _NotesScreenState extends State<NotesScreen> {
             Text(
               '${npub.substring(0, 8)}...${npub.substring(npub.length - 8)}',
               style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[500],
+                fontSize: 14,
+                color: Colors.grey[500],
               ),
               textAlign: TextAlign.center,
             ),
@@ -209,9 +239,15 @@ class _NotesScreenState extends State<NotesScreen> {
       builder: (context, selectionId, _) {
         final inSelection = selectionId != null;
         return PopScope(
-          canPop: !inSelection,
+          canPop: !inSelection && _editingNoteId == null,
           onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) _NoteCardState._selectionModeId.value = null;
+            if (!didPop) {
+              if (_editingNoteId != null) {
+                _cancelEdit();
+              } else {
+                _NoteCardState._selectionModeId.value = null;
+              }
+            }
           },
           child: Scaffold(
             backgroundColor: background,
@@ -297,7 +333,7 @@ class _NotesScreenState extends State<NotesScreen> {
         lastDate = noteDate;
       }
       items.add(const SizedBox(height: 12));
-      items.add(_NoteCard(note: note));
+      items.add(_NoteCard(note: note, onEdit: () => _startEdit(note)));
     }
 
     return items;
@@ -342,89 +378,131 @@ class _NotesScreenState extends State<NotesScreen> {
   Widget _buildInputBar(BuildContext context) {
     final isMobile = defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.android;
-    final bottomInset =
-        isMobile ? MediaQuery.of(context).padding.bottom : 0.0;
+    final bottomInset = isMobile ? MediaQuery.of(context).padding.bottom : 0.0;
     final maxHeight = MediaQuery.of(context).size.height * 0.5;
+    final isEditing = _editingNoteId != null;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-      ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              offset: const Offset(0, -1),
-              blurRadius: 4,
-            ),
-          ],
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _textController,
-                maxLines: null,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  hintText: 'Memo...',
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.zero,
-                  hintStyle: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 14,
-                  ),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  offset: const Offset(0, -1),
+                  blurRadius: 4,
                 ),
-                style: const TextStyle(fontSize: 14, height: 1.3),
-              ),
+              ],
             ),
-            const SizedBox(width: 12),
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: _textController,
-              builder: (context, value, _) {
-                final hasText = value.text.trim().isNotEmpty;
-                return Opacity(
-                  opacity: hasText ? 1.0 : 0.0,
-                  child: IgnorePointer(
-                    ignoring: !hasText || _sending,
-                    child: Semantics(
-                      label: 'Send note',
-                      button: true,
-                      child: GestureDetector(
-                        onTap: _sendNote,
-                        child: _sending
-                            ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor:
-                                      AlwaysStoppedAnimation<Color>(accent),
-                                ),
-                              )
-                            : const Icon(Icons.send, color: accent),
-                      ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isEditing)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(32, 12, 35, 0),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.edit, size: 14, color: Colors.grey),
+                        const SizedBox(width: 6),
+                        const Expanded(
+                          child: Text(
+                            'Editing',
+                            style: TextStyle(fontSize: 13, color: Colors.grey),
+                          ),
+                        ),
+                        Semantics(
+                          label: 'Cancel editing',
+                          button: true,
+                          child: GestureDetector(
+                            onTap: _cancelEdit,
+                            child: const Icon(Icons.close,
+                                size: 18, color: Colors.grey),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                );
-              },
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _textController,
+                          focusNode: _inputFocusNode,
+                          maxLines: null,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          decoration: const InputDecoration(
+                            hintText: 'Memo...',
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.zero,
+                            hintStyle: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 14,
+                            ),
+                          ),
+                          style: const TextStyle(fontSize: 14, height: 1.3),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: _textController,
+                        builder: (context, value, _) {
+                          final hasText = value.text.trim().isNotEmpty;
+                          return Opacity(
+                            opacity: hasText ? 1.0 : 0.0,
+                            child: IgnorePointer(
+                              ignoring: !hasText || _sending,
+                              child: Semantics(
+                                label: isEditing ? 'Confirm edit' : 'Send note',
+                                button: true,
+                                child: GestureDetector(
+                                  onTap: isEditing ? _confirmEdit : _sendNote,
+                                  child: _sending
+                                      ? const SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                    accent),
+                                          ),
+                                        )
+                                      : Icon(
+                                          isEditing
+                                              ? Icons.check_circle_outline
+                                              : Icons.send,
+                                          color: accent,
+                                        ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-      ),
-      ),
-      if (bottomInset > 0)
-        Container(
-          height: bottomInset,
-          color: const Color(0xFFEEEEEE),
-        ),
-    ]);
+        if (bottomInset > 0)
+          Container(
+            height: bottomInset,
+            color: const Color(0xFFEEEEEE),
+          ),
+      ],
+    );
   }
 
   @override
@@ -433,14 +511,16 @@ class _NotesScreenState extends State<NotesScreen> {
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
     _textController.dispose();
     _scrollController.dispose();
+    _inputFocusNode.dispose();
     super.dispose();
   }
 }
 
 class _NoteCard extends StatefulWidget {
   final DecryptedNote note;
+  final VoidCallback? onEdit;
 
-  const _NoteCard({required this.note});
+  const _NoteCard({required this.note, this.onEdit});
 
   @override
   State<_NoteCard> createState() => _NoteCardState();
@@ -499,8 +579,7 @@ class _NoteCardState extends State<_NoteCard> {
     _activeMenuId.value = widget.note.id;
 
     // Capture selection now — it may clear once the overlay appears
-    final selectedText =
-        _isDesktopOrWeb ? _desktopSelectedContent : null;
+    final selectedText = _isDesktopOrWeb ? _desktopSelectedContent : null;
     final hasSelection = selectedText != null && selectedText.isNotEmpty;
 
     final completer = Completer<String?>();
@@ -521,6 +600,8 @@ class _NoteCardState extends State<_NoteCard> {
             (widget.note.syncStatus == SyncStatus.pending &&
                 widget.note.nostrId == null),
         showSelectText: !_isDesktopOrWeb,
+        showEdit: widget.note.error == null,
+        editedAt: widget.note.editedAt,
         copyLabel: hasSelection ? 'Copy selected text' : 'Copy text',
       ),
     );
@@ -530,7 +611,9 @@ class _NoteCardState extends State<_NoteCard> {
 
     _activeMenuId.value = null;
 
-    if (result == 'retry_sync') {
+    if (result == 'edit') {
+      widget.onEdit?.call();
+    } else if (result == 'retry_sync') {
       NoteCache.instance.retrySync(widget.note.id);
     } else if (result == 'copy') {
       final textToCopy = hasSelection ? selectedText : widget.note.text;
@@ -736,9 +819,8 @@ class _NoteCardState extends State<_NoteCard> {
               textSpan,
               onSelectionChanged: (sel, _) {
                 if (!sel.isCollapsed && sel.isValid) {
-                  final raw = widget.note.text
-                      .substring(sel.start, sel.end)
-                      .trim();
+                  final raw =
+                      widget.note.text.substring(sel.start, sel.end).trim();
                   _desktopSelectedContent = raw.isEmpty ? null : raw;
                 } else {
                   _desktopSelectedContent = null;
@@ -781,6 +863,8 @@ class _NoteMenuOverlay extends StatelessWidget {
   final bool showRetry;
   final bool showRetrySync;
   final bool showSelectText;
+  final bool showEdit;
+  final DateTime? editedAt;
   final String copyLabel;
 
   const _NoteMenuOverlay({
@@ -789,8 +873,30 @@ class _NoteMenuOverlay extends StatelessWidget {
     required this.showRetry,
     this.showRetrySync = false,
     this.showSelectText = false,
+    this.showEdit = false,
+    this.editedAt,
     this.copyLabel = 'Copy text',
   });
+
+  String _formatEditedAt(DateTime dt) {
+    final months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
+    final time =
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    return 'Edited ${dt.day} ${months[dt.month - 1]} $time';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -837,8 +943,8 @@ class _NoteMenuOverlay extends StatelessWidget {
                                 horizontal: 16, vertical: 12),
                             child: Text(
                               'Retry sync',
-                              style:
-                                  TextStyle(fontSize: 14, color: Colors.black87),
+                              style: TextStyle(
+                                  fontSize: 14, color: Colors.black87),
                             ),
                           ),
                         ),
@@ -851,8 +957,8 @@ class _NoteMenuOverlay extends StatelessWidget {
                               horizontal: 16, vertical: 12),
                           child: Text(
                             copyLabel,
-                            style:
-                                const TextStyle(fontSize: 14, color: Colors.black87),
+                            style: const TextStyle(
+                                fontSize: 14, color: Colors.black87),
                           ),
                         ),
                       ),
@@ -886,6 +992,21 @@ class _NoteMenuOverlay extends StatelessWidget {
                           ),
                         ),
                       ],
+                      if (showEdit) ...[
+                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                        InkWell(
+                          onTap: () => onSelect('edit'),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Text(
+                              'Edit',
+                              style: TextStyle(
+                                  fontSize: 14, color: Colors.black87),
+                            ),
+                          ),
+                        ),
+                      ],
                       const Divider(height: 1, color: Color(0xFFE0E0E0)),
                       InkWell(
                         onTap: () => onSelect('delete'),
@@ -898,6 +1019,18 @@ class _NoteMenuOverlay extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (editedAt != null) ...[
+                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 10),
+                          child: Text(
+                            _formatEditedAt(editedAt!),
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey[500]),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

@@ -79,6 +79,7 @@ class NoteCache {
       }
 
       if (text == null && errorMsg == null) continue;
+      final editedAtRaw = row['edited_at'] as int?;
       _map[id] = DecryptedNote(
         id: id,
         nostrId: row['nostr_id'] as String?,
@@ -86,6 +87,9 @@ class NoteCache {
         error: errorMsg,
         createdAt: DateTime.fromMillisecondsSinceEpoch(
             (row['created_at'] as int) * 1000),
+        editedAt: editedAtRaw != null
+            ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
+            : null,
         syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
       );
     }
@@ -116,6 +120,36 @@ class NoteCache {
     _emit();
 
     _publishToRelays(id, text, now.millisecondsSinceEpoch ~/ 1000);
+  }
+
+  Future<void> update(String id, String newText) async {
+    if (_localKey == null) return;
+    final existing = _map[id];
+    if (existing == null || existing.error != null) return;
+
+    final editedAt = DateTime.now();
+    final editedAtSeconds = editedAt.millisecondsSinceEpoch ~/ 1000;
+    final localContent = await LocalCrypto.encrypt(_localKey!, newText);
+
+    if (_db != null) {
+      await _db!.updateForEdit(
+        id: id,
+        localContent: localContent,
+        editedAt: editedAtSeconds,
+      );
+    }
+
+    _map[id] = DecryptedNote(
+      id: id,
+      nostrId: existing.nostrId,
+      text: newText,
+      createdAt: existing.createdAt,
+      editedAt: editedAt,
+      syncStatus: SyncStatus.pending,
+    );
+    _emit();
+
+    _publishToRelays(id, newText, editedAtSeconds);
   }
 
   Future<void> _publishToRelays(
@@ -216,8 +250,10 @@ class NoteCache {
     );
     _emit();
 
-    _publishToRelays(
-        id, existing.text, existing.createdAt.millisecondsSinceEpoch ~/ 1000);
+    final eventTime =
+        (existing.editedAt ?? existing.createdAt).millisecondsSinceEpoch ~/
+            1000;
+    _publishToRelays(id, existing.text, eventTime);
   }
 
   Future<void> sync() async {
@@ -310,21 +346,77 @@ class NoteCache {
       if (_map.values.any((n) => n.nostrId == event.id)) return;
     }
 
+    // Use d tag as stable local ID so both devices share the same identifier
+    final dTag = event.tags.where((t) => t.length >= 2 && t[0] == 'd').firstOrNull;
+    final localId = dTag?[1] ?? _generateId();
+
+    // Check if this is an edit of an existing note (same d tag, different event id)
+    final existingRow = _db != null ? await _db!.getById(localId) : null;
+    final existingNote = _map[localId];
+    if (existingRow != null || existingNote != null) {
+      final existingVersionTime = existingRow != null
+          ? ((existingRow['edited_at'] as int?) ?? (existingRow['created_at'] as int))
+          : (existingNote!.editedAt ?? existingNote.createdAt)
+              .millisecondsSinceEpoch ~/
+              1000;
+      if (event.createdAt <= existingVersionTime) return;
+
+      final result = await _decryptViaSigner(_signer!, event.content);
+      final text = result.text;
+      final localContent =
+          text != null ? await LocalCrypto.encrypt(_localKey!, text) : null;
+
+      if (_db != null) {
+        await _db!.updateSyncedEdit(
+          id: localId,
+          nostrId: event.id,
+          encryptedContent: event.content,
+          localContent: localContent,
+          editedAt: event.createdAt,
+        );
+      }
+
+      final originalCreatedAt = existingRow != null
+          ? DateTime.fromMillisecondsSinceEpoch(
+              (existingRow['created_at'] as int) * 1000)
+          : existingNote!.createdAt;
+
+      _map[localId] = DecryptedNote(
+        id: localId,
+        nostrId: event.id,
+        text: text ?? existingNote?.text ?? '',
+        error: text == null
+            ? 'The remote decryption failed with the error "${result.error}".'
+            : null,
+        createdAt: originalCreatedAt,
+        editedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+        syncStatus: SyncStatus.synced,
+      );
+      _emit();
+      return;
+    }
+
     final result = await _decryptViaSigner(_signer!, event.content);
     final text = result.text;
     final localContent =
         text != null ? await LocalCrypto.encrypt(_localKey!, text) : null;
-    // Use d tag as stable local ID so both devices share the same identifier
-    final dTag = event.tags.where((t) => t.length >= 2 && t[0] == 'd').firstOrNull;
-    final localId = dTag?[1] ?? _generateId();
+
+    // Decode original creation time from the d tag; compare to detect edits
+    final originalCreatedAt = _createdAtFromId(localId);
+    final originalCreatedAtSeconds =
+        originalCreatedAt.millisecondsSinceEpoch ~/ 1000;
+    final editedAt = event.createdAt > originalCreatedAtSeconds
+        ? DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000)
+        : null;
 
     if (_db != null) {
       await _db!.insertSynced(
         id: localId,
         nostrId: event.id,
-        createdAt: event.createdAt,
+        createdAt: originalCreatedAtSeconds,
         encryptedContent: event.content,
         localContent: localContent,
+        editedAt: editedAt != null ? event.createdAt : null,
       );
     }
 
@@ -335,7 +427,8 @@ class NoteCache {
       error: text == null
           ? 'The remote decryption failed with the error "${result.error}".'
           : null,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+      createdAt: originalCreatedAt,
+      editedAt: editedAt,
       syncStatus: SyncStatus.synced,
     );
     _emit();
@@ -364,12 +457,16 @@ class NoteCache {
       final localContent = await LocalCrypto.encrypt(_localKey!, text);
       await _db!.updateLocalContent(id, localContent);
 
+      final editedAtRaw = row['edited_at'] as int?;
       _map[id] = DecryptedNote(
         id: id,
         nostrId: row['nostr_id'] as String?,
         text: text,
         createdAt: DateTime.fromMillisecondsSinceEpoch(
             (row['created_at'] as int) * 1000),
+        editedAt: editedAtRaw != null
+            ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
+            : null,
         syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
       );
       retried++;
@@ -404,12 +501,16 @@ class NoteCache {
     if (localEncoded != null) {
       final text = await LocalCrypto.decrypt(_localKey!, localEncoded);
       if (text != null) {
+        final editedAtRaw = row['edited_at'] as int?;
         _map[id] = DecryptedNote(
           id: id,
           nostrId: row['nostr_id'] as String?,
           text: text,
           createdAt: DateTime.fromMillisecondsSinceEpoch(
               (row['created_at'] as int) * 1000),
+          editedAt: editedAtRaw != null
+              ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
+              : null,
           syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
         );
         _emit();
@@ -428,12 +529,16 @@ class NoteCache {
     final text = result.text!;
     final localContent = await LocalCrypto.encrypt(_localKey!, text);
     await _db!.updateLocalContent(id, localContent);
+    final editedAtRaw = row['edited_at'] as int?;
     _map[id] = DecryptedNote(
       id: id,
       nostrId: row['nostr_id'] as String?,
       text: text,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
           (row['created_at'] as int) * 1000),
+      editedAt: editedAtRaw != null
+          ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
+          : null,
       syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
     );
     _emit();
@@ -501,5 +606,14 @@ class NoteCache {
     final ts = DateTime.now().millisecondsSinceEpoch;
     final rand = Random.secure().nextInt(0xFFFFFF);
     return '${ts.toRadixString(16)}${rand.toRadixString(16).padLeft(6, '0')}';
+  }
+
+  // Decodes original creation time from id (format: hex(ts_ms) + 6 hex random chars)
+  DateTime _createdAtFromId(String id) {
+    if (id.length > 6) {
+      final ms = int.tryParse(id.substring(0, id.length - 6), radix: 16);
+      if (ms != null) return DateTime.fromMillisecondsSinceEpoch(ms);
+    }
+    return DateTime.now();
   }
 }

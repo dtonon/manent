@@ -24,7 +24,7 @@ class AppDatabase {
 
     _db = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE notes (
@@ -33,7 +33,8 @@ class AppDatabase {
             created_at INTEGER NOT NULL,
             encrypted_content TEXT NOT NULL DEFAULT '',
             local_content TEXT,
-            synced_to_relay INTEGER NOT NULL DEFAULT 0
+            synced_to_relay INTEGER NOT NULL DEFAULT 0,
+            edited_at INTEGER
           )
         ''');
       },
@@ -43,6 +44,9 @@ class AppDatabase {
         }
         if (oldVersion < 3) {
           await db.execute('ALTER TABLE notes ADD COLUMN local_content TEXT');
+        }
+        if (oldVersion < 4) {
+          await db.execute('ALTER TABLE notes ADD COLUMN edited_at INTEGER');
         }
       },
     );
@@ -92,6 +96,7 @@ class AppDatabase {
     required int createdAt,
     required String encryptedContent,
     String? localContent,
+    int? editedAt,
   }) async {
     final db = await _getDb();
     await db.insert('notes', {
@@ -100,6 +105,7 @@ class AppDatabase {
       'created_at': createdAt,
       'encrypted_content': encryptedContent,
       'local_content': localContent,
+      'edited_at': editedAt,
       'synced_to_relay': 1,
     });
   }
@@ -165,5 +171,43 @@ class AppDatabase {
   Future<void> deleteAll() async {
     final db = await _getDb();
     await db.delete('notes');
+  }
+
+  // Sets local_content + edited_at + resets sync to pending, for local edits
+  Future<void> updateForEdit({
+    required String id,
+    required String localContent,
+    required int editedAt,
+  }) async {
+    final db = await _getDb();
+    await db.update(
+      'notes',
+      {'local_content': localContent, 'edited_at': editedAt, 'synced_to_relay': 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Updates an existing row when a newer version arrives from relay (cross-device edit)
+  Future<void> updateSyncedEdit({
+    required String id,
+    required String nostrId,
+    required String encryptedContent,
+    String? localContent,
+    required int editedAt,
+  }) async {
+    final db = await _getDb();
+    await db.update(
+      'notes',
+      {
+        'nostr_id': nostrId,
+        'encrypted_content': encryptedContent,
+        'local_content': localContent,
+        'edited_at': editedAt,
+        'synced_to_relay': 1,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 }

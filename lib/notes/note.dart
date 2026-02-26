@@ -22,6 +22,7 @@ class DecryptedNote {
   final String text;
   final String? error;
   final DateTime createdAt;
+  final DateTime? editedAt;
   final SyncStatus syncStatus;
 
   const DecryptedNote({
@@ -30,6 +31,7 @@ class DecryptedNote {
     required this.text,
     this.error,
     required this.createdAt,
+    this.editedAt,
     required this.syncStatus,
   });
 }
