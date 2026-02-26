@@ -450,6 +450,8 @@ class _NoteCardState extends State<_NoteCard> {
   static final _activeMenuId = ValueNotifier<String?>(null);
   static final _selectionModeId = ValueNotifier<String?>(null);
 
+  String? _desktopSelectedContent;
+
   bool _retrying = false;
   Offset _tapPosition = Offset.zero;
 
@@ -476,6 +478,11 @@ class _NoteCardState extends State<_NoteCard> {
   Future<void> _showContextMenu() async {
     _activeMenuId.value = widget.note.id;
 
+    // Capture selection now — it may clear once the overlay appears
+    final selectedText =
+        _isDesktopOrWeb ? _desktopSelectedContent : null;
+    final hasSelection = selectedText != null && selectedText.isNotEmpty;
+
     final completer = Completer<String?>();
     OverlayEntry? entry;
 
@@ -491,6 +498,7 @@ class _NoteCardState extends State<_NoteCard> {
         onSelect: dismiss,
         showRetry: widget.note.error != null,
         showSelectText: !_isDesktopOrWeb,
+        copyLabel: hasSelection ? 'Copy selected text' : 'Copy text',
       ),
     );
 
@@ -500,7 +508,8 @@ class _NoteCardState extends State<_NoteCard> {
     _activeMenuId.value = null;
 
     if (result == 'copy') {
-      await Clipboard.setData(ClipboardData(text: widget.note.text));
+      final textToCopy = hasSelection ? selectedText : widget.note.text;
+      await Clipboard.setData(ClipboardData(text: textToCopy));
     } else if (result == 'select_text') {
       _selectionModeId.value = widget.note.id;
     } else if (result == 'retry') {
@@ -568,7 +577,7 @@ class _NoteCardState extends State<_NoteCard> {
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
+    final core = ListenableBuilder(
       listenable: Listenable.merge([_activeMenuId, _selectionModeId]),
       builder: (context, _) {
         final menuId = _activeMenuId.value;
@@ -576,9 +585,10 @@ class _NoteCardState extends State<_NoteCard> {
         final isActiveSelection = selectionId == widget.note.id;
         final inAnyMode = menuId != null || selectionId != null;
 
-        final color = (!inAnyMode || menuId == widget.note.id || isActiveSelection)
-            ? Colors.white
-            : const Color(0xFFEEEEEE);
+        final color =
+            (!inAnyMode || menuId == widget.note.id || isActiveSelection)
+                ? Colors.white
+                : const Color(0xFFEEEEEE);
 
         void Function(TapDownDetails)? onTapDown;
         void Function()? onTap;
@@ -616,11 +626,14 @@ class _NoteCardState extends State<_NoteCard> {
               color: color,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: _retrying ? _buildSpinner() : _buildContent(isActiveSelection),
+            child:
+                _retrying ? _buildSpinner() : _buildContent(isActiveSelection),
           ),
         );
       },
     );
+
+    return core;
   }
 
   Widget _buildSpinner() {
@@ -681,20 +694,34 @@ class _NoteCardState extends State<_NoteCard> {
       ),
     );
 
-    return DefaultSelectionStyle(
-      selectionColor: textSelectionColor,
-      child: Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (_isDesktopOrWeb)
-          // Suppress built-in menu so the right-click overlay still works
-          SelectableText.rich(
-            textSpan,
-            contextMenuBuilder: (_, __) => const SizedBox.shrink(),
+          DefaultSelectionStyle(
+            selectionColor: textSelectionColor,
+            child: SelectableText.rich(
+              textSpan,
+              onSelectionChanged: (sel, _) {
+                if (!sel.isCollapsed && sel.isValid) {
+                  final raw = widget.note.text
+                      .substring(sel.start, sel.end)
+                      .trim();
+                  _desktopSelectedContent = raw.isEmpty ? null : raw;
+                } else {
+                  _desktopSelectedContent = null;
+                }
+              },
+              // Suppress built-in menu so the right-click overlay still works
+              contextMenuBuilder: (_, __) => const SizedBox.shrink(),
+            ),
           )
         else if (inSelectionMode)
           // Default context menu — shows the native OS toolbar (copy, select all…)
-          SelectableText.rich(textSpan)
+          DefaultSelectionStyle(
+            selectionColor: textSelectionColor,
+            child: SelectableText.rich(textSpan),
+          )
         else
           RichText(text: textSpan),
         Align(
@@ -705,7 +732,7 @@ class _NoteCardState extends State<_NoteCard> {
           ),
         ),
       ],
-    ));
+    );
   }
 }
 
@@ -714,12 +741,14 @@ class _NoteMenuOverlay extends StatelessWidget {
   final void Function([String?]) onSelect;
   final bool showRetry;
   final bool showSelectText;
+  final String copyLabel;
 
   const _NoteMenuOverlay({
     required this.tapPosition,
     required this.onSelect,
     required this.showRetry,
     this.showSelectText = false,
+    this.copyLabel = 'Copy text',
   });
 
   @override
@@ -761,13 +790,13 @@ class _NoteMenuOverlay extends StatelessWidget {
                     children: [
                       InkWell(
                         onTap: () => onSelect('copy'),
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 12),
                           child: Text(
-                            'Copy',
+                            copyLabel,
                             style:
-                                TextStyle(fontSize: 14, color: Colors.black87),
+                                const TextStyle(fontSize: 14, color: Colors.black87),
                           ),
                         ),
                       ),
