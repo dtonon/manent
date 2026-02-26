@@ -469,6 +469,26 @@ class _NoteCardState extends State<_NoteCard> {
   String _formatTime(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
+  Widget _buildSyncIcon() {
+    switch (widget.note.syncStatus) {
+      case SyncStatus.synced:
+        return Semantics(
+          label: 'Synced to relay',
+          child: Icon(Icons.check, size: 14, color: Colors.grey[400]),
+        );
+      case SyncStatus.failed:
+        return Semantics(
+          label: 'Sync failed',
+          child: const Icon(Icons.sync_problem, size: 14, color: accent),
+        );
+      case SyncStatus.pending:
+        return Semantics(
+          label: 'Sync pending',
+          child: Icon(Icons.access_time, size: 14, color: Colors.grey[400]),
+        );
+    }
+  }
+
   Future<void> _retry() async {
     setState(() => _retrying = true);
     final success = await NoteCache.instance.retryDecrypt(widget.note.id);
@@ -497,6 +517,9 @@ class _NoteCardState extends State<_NoteCard> {
         tapPosition: _tapPosition,
         onSelect: dismiss,
         showRetry: widget.note.error != null,
+        showRetrySync: widget.note.syncStatus == SyncStatus.failed ||
+            (widget.note.syncStatus == SyncStatus.pending &&
+                widget.note.nostrId == null),
         showSelectText: !_isDesktopOrWeb,
         copyLabel: hasSelection ? 'Copy selected text' : 'Copy text',
       ),
@@ -507,7 +530,9 @@ class _NoteCardState extends State<_NoteCard> {
 
     _activeMenuId.value = null;
 
-    if (result == 'copy') {
+    if (result == 'retry_sync') {
+      NoteCache.instance.retrySync(widget.note.id);
+    } else if (result == 'copy') {
       final textToCopy = hasSelection ? selectedText : widget.note.text;
       await Clipboard.setData(ClipboardData(text: textToCopy));
     } else if (result == 'select_text') {
@@ -678,9 +703,16 @@ class _NoteCardState extends State<_NoteCard> {
             ),
           Align(
             alignment: Alignment.centerRight,
-            child: Text(
-              _formatTime(widget.note.createdAt),
-              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _formatTime(widget.note.createdAt),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                ),
+                const SizedBox(width: 4),
+                _buildSyncIcon(),
+              ],
             ),
           ),
         ],
@@ -726,9 +758,16 @@ class _NoteCardState extends State<_NoteCard> {
           Text.rich(textSpan),
         Align(
           alignment: Alignment.centerRight,
-          child: Text(
-            _formatTime(widget.note.createdAt),
-            style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildSyncIcon(),
+              const SizedBox(width: 4),
+              Text(
+                _formatTime(widget.note.createdAt),
+                style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+              ),
+            ],
           ),
         ),
       ],
@@ -740,6 +779,7 @@ class _NoteMenuOverlay extends StatelessWidget {
   final Offset tapPosition;
   final void Function([String?]) onSelect;
   final bool showRetry;
+  final bool showRetrySync;
   final bool showSelectText;
   final String copyLabel;
 
@@ -747,6 +787,7 @@ class _NoteMenuOverlay extends StatelessWidget {
     required this.tapPosition,
     required this.onSelect,
     required this.showRetry,
+    this.showRetrySync = false,
     this.showSelectText = false,
     this.copyLabel = 'Copy text',
   });
@@ -788,6 +829,21 @@ class _NoteMenuOverlay extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      if (showRetrySync) ...[
+                        InkWell(
+                          onTap: () => onSelect('retry_sync'),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Text(
+                              'Retry sync',
+                              style:
+                                  TextStyle(fontSize: 14, color: Colors.black87),
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                      ],
                       InkWell(
                         onTap: () => onSelect('copy'),
                         child: Padding(

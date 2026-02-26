@@ -86,7 +86,7 @@ class NoteCache {
         error: errorMsg,
         createdAt: DateTime.fromMillisecondsSinceEpoch(
             (row['created_at'] as int) * 1000),
-        syncedToRelay: (row['synced_to_relay'] as int) == 1,
+        syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
       );
     }
     _emit();
@@ -111,7 +111,7 @@ class NoteCache {
       id: id,
       text: text,
       createdAt: now,
-      syncedToRelay: false,
+      syncStatus: SyncStatus.pending,
     );
     _emit();
 
@@ -141,10 +141,11 @@ class NoteCache {
         createdAt: createdAt,
       );
       final signed = await _signer!.sign(event);
-      // Update DB and in-memory map BEFORE broadcasting so the relay echo
-      // is recognised as a duplicate in _onRelayEvent (both DB and web paths)
+
+      // Set nostrId BEFORE broadcasting so the relay echo is recognised
+      // as a duplicate in _onRelayEvent; sync status stays pending until result
       if (_db != null) {
-        await _db!.updateSynced(localId: localId, nostrId: signed.id);
+        await _db!.updateNostrId(localId: localId, nostrId: signed.id);
       }
       final existing = _map[localId];
       if (existing != null) {
@@ -153,21 +154,68 @@ class NoteCache {
           nostrId: signed.id,
           text: existing.text,
           createdAt: existing.createdAt,
-          syncedToRelay: true,
+          syncStatus: SyncStatus.pending,
         );
-        _emit();
       }
-      await NostrClient()
+
+      final responses = await NostrClient()
           .ndk
           .broadcast
           .broadcast(nostrEvent: signed, specificRelays: _writeRelays)
           .broadcastDoneFuture;
 
-      // Signer is working — retry events that couldn't be decrypted earlier
+      final newStatus = responses.any((r) => r.broadcastSuccessful)
+          ? SyncStatus.synced
+          : SyncStatus.failed;
+
+      if (_db != null) {
+        await _db!.updateSyncStatus(localId, newStatus.value);
+      }
+      final updated = _map[localId];
+      if (updated != null) {
+        _map[localId] = DecryptedNote(
+          id: localId,
+          nostrId: updated.nostrId,
+          text: updated.text,
+          createdAt: updated.createdAt,
+          syncStatus: newStatus,
+        );
+        _emit();
+      }
+
       _retryPendingDecryptions();
     } catch (_) {
-      // Will retry on next sync pass
+      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      final existing = _map[localId];
+      if (existing != null) {
+        _map[localId] = DecryptedNote(
+          id: localId,
+          nostrId: existing.nostrId,
+          text: existing.text,
+          createdAt: existing.createdAt,
+          syncStatus: SyncStatus.failed,
+        );
+        _emit();
+      }
     }
+  }
+
+  Future<void> retrySync(String id) async {
+    final existing = _map[id];
+    if (existing == null || existing.error != null) return;
+
+    if (_db != null) await _db!.updateSyncStatus(id, SyncStatus.pending.value);
+    _map[id] = DecryptedNote(
+      id: id,
+      nostrId: existing.nostrId,
+      text: existing.text,
+      createdAt: existing.createdAt,
+      syncStatus: SyncStatus.pending,
+    );
+    _emit();
+
+    _publishToRelays(
+        id, existing.text, existing.createdAt.millisecondsSinceEpoch ~/ 1000);
   }
 
   Future<void> sync() async {
@@ -262,7 +310,7 @@ class NoteCache {
           ? 'The remote decryption failed with the error "${result.error}".'
           : null,
       createdAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
-      syncedToRelay: true,
+      syncStatus: SyncStatus.synced,
     );
     _emit();
   }
@@ -296,7 +344,7 @@ class NoteCache {
         text: text,
         createdAt: DateTime.fromMillisecondsSinceEpoch(
             (row['created_at'] as int) * 1000),
-        syncedToRelay: (row['synced_to_relay'] as int) == 1,
+        syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
       );
       retried++;
     }
@@ -336,7 +384,7 @@ class NoteCache {
           text: text,
           createdAt: DateTime.fromMillisecondsSinceEpoch(
               (row['created_at'] as int) * 1000),
-          syncedToRelay: (row['synced_to_relay'] as int) == 1,
+          syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
         );
         _emit();
         return true;
@@ -360,7 +408,7 @@ class NoteCache {
       text: text,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
           (row['created_at'] as int) * 1000),
-      syncedToRelay: (row['synced_to_relay'] as int) == 1,
+      syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
     );
     _emit();
     return true;

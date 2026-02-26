@@ -117,14 +117,24 @@ class AppDatabase {
     );
   }
 
-  Future<void> updateSynced({
+  Future<void> updateNostrId({
     required String localId,
     required String nostrId,
   }) async {
     final db = await _getDb();
     await db.update(
       'notes',
-      {'synced_to_relay': 1, 'nostr_id': nostrId},
+      {'nostr_id': nostrId},
+      where: 'id = ?',
+      whereArgs: [localId],
+    );
+  }
+
+  Future<void> updateSyncStatus(String localId, int status) async {
+    final db = await _getDb();
+    await db.update(
+      'notes',
+      {'synced_to_relay': status},
       where: 'id = ?',
       whereArgs: [localId],
     );
