@@ -135,8 +135,10 @@ class NoteCache {
 
       final event = Nip01Event(
         pubKey: _signer!.getPublicKey(),
-        kind: 40001,
-        tags: [],
+        kind: 33301,
+        tags: [
+          ['d', localId]
+        ],
         content: encrypted,
         createdAt: createdAt,
       );
@@ -238,7 +240,7 @@ class NoteCache {
 
     final response = NostrClient().ndk.requests.subscription(
       filter: Filter(
-        kinds: [40001],
+        kinds: [33301],
         authors: [_signer!.getPublicKey()],
         since: since,
       ),
@@ -264,17 +266,28 @@ class NoteCache {
   }
 
   Future<void> _onDeletionEvent(Nip01Event event) async {
-    final referencedIds = event.tags
+    final referencedEventIds = event.tags
         .where((t) => t.length >= 2 && t[0] == 'e')
         .map((t) => t[1])
         .toSet();
-    if (referencedIds.isEmpty) return;
 
-    // Remember so kind:40001 echoes arriving later in the same session are ignored
-    _pendingDeletions.addAll(referencedIds);
+    // a tags: "33301:<pubkey>:<d-tag>" — extract the d-tag portion
+    final referencedDTags = event.tags
+        .where((t) => t.length >= 2 && t[0] == 'a')
+        .map((t) => t[1].split(':'))
+        .where((parts) => parts.length == 3 && parts[0] == '33301')
+        .map((parts) => parts[2])
+        .toSet();
+
+    if (referencedEventIds.isEmpty && referencedDTags.isEmpty) return;
+
+    // Remember so relay echoes arriving later in the same session are ignored
+    _pendingDeletions.addAll(referencedEventIds);
 
     final toDelete = _map.values
-        .where((n) => n.nostrId != null && referencedIds.contains(n.nostrId))
+        .where((n) =>
+            (n.nostrId != null && referencedEventIds.contains(n.nostrId)) ||
+            referencedDTags.contains(n.id))
         .map((n) => n.id)
         .toList();
 
@@ -301,7 +314,9 @@ class NoteCache {
     final text = result.text;
     final localContent =
         text != null ? await LocalCrypto.encrypt(_localKey!, text) : null;
-    final localId = _generateId();
+    // Use d tag as stable local ID so both devices share the same identifier
+    final dTag = event.tags.where((t) => t.length >= 2 && t[0] == 'd').firstOrNull;
+    final localId = dTag?[1] ?? _generateId();
 
     if (_db != null) {
       await _db!.insertSynced(
@@ -429,17 +444,19 @@ class NoteCache {
     if (_db != null) await _db!.delete(id);
     _map.remove(id);
     _emit();
-    if (nostrId != null) _broadcastDeletion(nostrId);
+    if (nostrId != null) _broadcastDeletion(id, nostrId);
   }
 
-  Future<void> _broadcastDeletion(String nostrId) async {
+  Future<void> _broadcastDeletion(String localId, String nostrId) async {
     if (_writeRelays.isEmpty || _signer == null) return;
     try {
+      final pubkey = _signer!.getPublicKey();
       final event = Nip01Event(
-        pubKey: _signer!.getPublicKey(),
+        pubKey: pubkey,
         kind: 5,
         tags: [
-          ['e', nostrId]
+          ['e', nostrId],
+          ['a', '33301:$pubkey:$localId'],
         ],
         content: '',
         createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
