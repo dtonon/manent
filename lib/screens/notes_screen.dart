@@ -437,23 +437,35 @@ class _NotesScreenState extends State<NotesScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: TextField(
-                          controller: _textController,
-                          focusNode: _inputFocusNode,
-                          maxLines: null,
-                          keyboardType: TextInputType.multiline,
-                          textInputAction: TextInputAction.newline,
-                          decoration: const InputDecoration(
-                            hintText: 'Memo...',
-                            border: InputBorder.none,
-                            isDense: true,
-                            contentPadding: EdgeInsets.zero,
-                            hintStyle: TextStyle(
-                              color: Colors.grey,
-                              fontSize: 14,
+                        child: CallbackShortcuts(
+                          bindings: <ShortcutActivator, VoidCallback>{
+                            const SingleActivator(LogicalKeyboardKey.enter,
+                                control: true): () => _editingNoteId != null
+                                ? _confirmEdit()
+                                : _sendNote(),
+                            const SingleActivator(LogicalKeyboardKey.enter,
+                                meta: true): () => _editingNoteId != null
+                                ? _confirmEdit()
+                                : _sendNote(),
+                          },
+                          child: TextField(
+                            controller: _textController,
+                            focusNode: _inputFocusNode,
+                            maxLines: null,
+                            keyboardType: TextInputType.multiline,
+                            textInputAction: TextInputAction.newline,
+                            decoration: const InputDecoration(
+                              hintText: 'Memo...',
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: EdgeInsets.zero,
+                              hintStyle: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 14,
+                              ),
                             ),
+                            style: const TextStyle(fontSize: 14, height: 1.3),
                           ),
-                          style: const TextStyle(fontSize: 14, height: 1.3),
                         ),
                       ),
                       const SizedBox(width: 12),
