@@ -74,7 +74,10 @@ class _NotesScreenState extends State<NotesScreen> {
     _textController.text = note.text;
     _textController.selection =
         TextSelection.collapsed(offset: note.text.length);
-    _inputFocusNode.requestFocus();
+    // Defer so the overlay is fully removed before requesting focus (opens keyboard on mobile)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _inputFocusNode.requestFocus();
+    });
   }
 
   void _cancelEdit() {
