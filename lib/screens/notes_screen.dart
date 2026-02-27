@@ -531,14 +531,58 @@ class _NoteCardState extends State<_NoteCard> {
   static final _selectionModeId = ValueNotifier<String?>(null);
 
   String? _desktopSelectedContent;
+  // Captured in onSecondaryTapDown before SelectionArea word-selects on right-click
+  String? _capturedSelectionOnRightClick;
+  final _selectionAreaKey = GlobalKey<SelectionAreaState>();
 
   bool _retrying = false;
   Offset _tapPosition = Offset.zero;
+
+  // Cached to keep the same TextSpan instance across rebuilds so SelectableText
+  // doesn't reset its selection when _activeMenuId / _selectionModeId change.
+  late TextSpan _textSpan;
+  final List<TapGestureRecognizer> _urlRecognizers = [];
 
   static final _urlRegex = RegExp(
     r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9\-]*\.[a-zA-Z]{2,}(?:/[^\s]*)?',
     caseSensitive: false,
   );
+
+  @override
+  void initState() {
+    super.initState();
+    _rebuildTextSpan();
+  }
+
+  @override
+  void didUpdateWidget(_NoteCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.note.text != widget.note.text) {
+      _disposeRecognizers();
+      _rebuildTextSpan();
+    }
+  }
+
+  void _rebuildTextSpan() {
+    const baseStyle =
+        TextStyle(fontSize: 14, height: 1.3, color: Colors.black87);
+    _textSpan = TextSpan(
+      children: _buildTextSpans(widget.note.text, baseStyle),
+    );
+  }
+
+  void _disposeRecognizers() {
+    for (final r in _urlRecognizers) {
+      r.dispose();
+    }
+    _urlRecognizers.clear();
+  }
+
+  @override
+  void dispose() {
+    _disposeRecognizers();
+    super.dispose();
+  }
 
   static bool get _isDesktopOrWeb =>
       kIsWeb ||
@@ -578,8 +622,8 @@ class _NoteCardState extends State<_NoteCard> {
   Future<void> _showContextMenu() async {
     _activeMenuId.value = widget.note.id;
 
-    // Capture selection now — it may clear once the overlay appears
-    final selectedText = _isDesktopOrWeb ? _desktopSelectedContent : null;
+    // Use captured selection (grabbed before right-click word-selection fired)
+    final selectedText = _isDesktopOrWeb ? _capturedSelectionOnRightClick : null;
     final hasSelection = selectedText != null && selectedText.isNotEmpty;
 
     final completer = Completer<String?>();
@@ -592,17 +636,19 @@ class _NoteCardState extends State<_NoteCard> {
     }
 
     entry = OverlayEntry(
-      builder: (_) => _NoteMenuOverlay(
-        tapPosition: _tapPosition,
-        onSelect: dismiss,
-        showRetry: widget.note.error != null,
-        showRetrySync: widget.note.syncStatus == SyncStatus.failed ||
-            (widget.note.syncStatus == SyncStatus.pending &&
-                widget.note.nostrId == null),
-        showSelectText: !_isDesktopOrWeb,
-        showEdit: widget.note.error == null,
-        editedAt: widget.note.editedAt,
-        copyLabel: hasSelection ? 'Copy selected text' : 'Copy text',
+      builder: (_) => ExcludeFocus(
+        child: _NoteMenuOverlay(
+          tapPosition: _tapPosition,
+          onSelect: dismiss,
+          showRetry: widget.note.error != null,
+          showRetrySync: widget.note.syncStatus == SyncStatus.failed ||
+              (widget.note.syncStatus == SyncStatus.pending &&
+                  widget.note.nostrId == null),
+          showSelectText: !_isDesktopOrWeb,
+          showEdit: widget.note.error == null,
+          editedAt: widget.note.editedAt,
+          copyLabel: hasSelection ? 'Copy selected text' : 'Copy text',
+        ),
       ),
     );
 
@@ -662,6 +708,10 @@ class _NoteCardState extends State<_NoteCard> {
       String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
       final fullUrl = url.startsWith('http') ? url : 'https://$url';
 
+      final recognizer = TapGestureRecognizer()
+        ..onTap =
+            () => launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault);
+      _urlRecognizers.add(recognizer);
       spans.add(TextSpan(
         text: url,
         style: baseStyle.copyWith(
@@ -669,9 +719,7 @@ class _NoteCardState extends State<_NoteCard> {
           decoration: TextDecoration.underline,
           decorationColor: accent,
         ),
-        recognizer: TapGestureRecognizer()
-          ..onTap = () =>
-              launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault),
+        recognizer: recognizer,
       ));
       lastEnd = match.start + url.length;
     }
@@ -714,8 +762,15 @@ class _NoteCardState extends State<_NoteCard> {
             onTap = _showContextMenu;
           }
           if (_isDesktopOrWeb) {
+            onTap = () {
+              _desktopSelectedContent = null;
+              _capturedSelectionOnRightClick = null;
+              _selectionAreaKey.currentState?.selectableRegion.clearSelection();
+            };
             onSecondaryTapDown = (d) {
               _tapPosition = d.globalPosition;
+              // Capture before SelectionArea word-selects on right-click
+              _capturedSelectionOnRightClick = _desktopSelectedContent;
               _showContextMenu();
             };
           }
@@ -802,12 +857,7 @@ class _NoteCardState extends State<_NoteCard> {
       );
     }
 
-    final textSpan = TextSpan(
-      children: _buildTextSpans(
-        widget.note.text,
-        const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
-      ),
-    );
+    final textSpan = _textSpan;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -815,19 +865,15 @@ class _NoteCardState extends State<_NoteCard> {
         if (_isDesktopOrWeb)
           DefaultSelectionStyle(
             selectionColor: textSelectionColor,
-            child: SelectableText.rich(
-              textSpan,
-              onSelectionChanged: (sel, _) {
-                if (!sel.isCollapsed && sel.isValid) {
-                  final raw =
-                      widget.note.text.substring(sel.start, sel.end).trim();
-                  _desktopSelectedContent = raw.isEmpty ? null : raw;
-                } else {
-                  _desktopSelectedContent = null;
-                }
+            child: SelectionArea(
+              key: _selectionAreaKey,
+              onSelectionChanged: (content) {
+                final raw = content?.plainText.trim();
+                _desktopSelectedContent =
+                    (raw != null && raw.isNotEmpty) ? raw : null;
               },
-              // Suppress built-in menu so the right-click overlay still works
               contextMenuBuilder: (_, __) => const SizedBox.shrink(),
+              child: Text.rich(textSpan),
             ),
           )
         else if (inSelectionMode)
