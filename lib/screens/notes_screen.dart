@@ -1113,7 +1113,9 @@ class _MenuPositionDelegate extends SingleChildLayoutDelegate {
         x = size.width - childSize.width - 26.0;
       }
     }
-    return Offset(x, tapPosition.dy + 4);
+    final double y =
+        (tapPosition.dy + 4).clamp(48.0, size.height - childSize.height - 48.0);
+    return Offset(x, y);
   }
 
   @override
