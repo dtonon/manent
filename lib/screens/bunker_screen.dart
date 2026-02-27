@@ -30,8 +30,9 @@ class _BunkerScreenState extends State<BunkerScreen> {
   // without restrictive filter policies. relay.damus.io may send CLOSED for
   // broad kind 24133 subscriptions without an authors filter.
   static const _nostrConnectRelays = [
+    'wss://relay.primal.net',
     'wss://relay.nsec.app',
-    'wss://relay.damus.io',
+    'wss://nostr.oxtr.dev',
   ];
 
   // NDK's secret is base64 with '==' padding — signer URL parsers split on '=' producing garbage.
@@ -166,7 +167,11 @@ class _BunkerScreenState extends State<BunkerScreen> {
           'id': id,
           'method': 'connect',
           // Third param requests specific permissions from the bunker
-          'params': [signerPubkey, secret, 'sign_event,nip44_encrypt,nip44_decrypt']
+          'params': [
+            signerPubkey,
+            secret,
+            'sign_event,nip44_encrypt,nip44_decrypt'
+          ]
         }),
         signerPubkey,
         relays);
