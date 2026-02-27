@@ -42,17 +42,28 @@ class _NotesScreenState extends State<NotesScreen> {
     }
     _inputFocusNode.onKeyEvent = (_, event) {
       if (event is KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.arrowUp &&
-          _textController.text.isEmpty &&
-          (kIsWeb ||
-              defaultTargetPlatform == TargetPlatform.macOS ||
-              defaultTargetPlatform == TargetPlatform.windows ||
-              defaultTargetPlatform == TargetPlatform.linux)) {
-        _editLastNote();
+          event.logicalKey == LogicalKeyboardKey.escape &&
+          _editingNoteId != null) {
+        _cancelEdit();
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
     };
+    if (kIsWeb ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux) {
+      HardwareKeyboard.instance.addHandler(_onHardwareKey);
+    }
+  }
+
+  bool _onHardwareKey(KeyEvent event) {
+    if (!mounted) return false;
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.arrowUp) return false;
+    if (_textController.text.isNotEmpty || _editingNoteId != null) return false;
+    _editLastNote();
+    return true;
   }
 
   void _onNotesChanged() {
@@ -454,83 +465,86 @@ class _NotesScreenState extends State<NotesScreen> {
                   ),
                 Flexible(
                   child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        child: CallbackShortcuts(
-                          bindings: <ShortcutActivator, VoidCallback>{
-                            const SingleActivator(LogicalKeyboardKey.enter,
-                                control: true): () => _editingNoteId != null
-                                ? _confirmEdit()
-                                : _sendNote(),
-                            const SingleActivator(LogicalKeyboardKey.enter,
-                                meta: true): () => _editingNoteId != null
-                                ? _confirmEdit()
-                                : _sendNote(),
-                          },
-                          child: TextField(
-                            controller: _textController,
-                            focusNode: _inputFocusNode,
-                            maxLines: null,
-                            keyboardType: TextInputType.multiline,
-                            textInputAction: TextInputAction.newline,
-                            decoration: const InputDecoration(
-                              hintText: 'Memo...',
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: EdgeInsets.zero,
-                              hintStyle: TextStyle(
-                                color: Colors.grey,
-                                fontSize: 14,
-                              ),
-                            ),
-                            style: const TextStyle(fontSize: 14, height: 1.3),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      ValueListenableBuilder<TextEditingValue>(
-                        valueListenable: _textController,
-                        builder: (context, value, _) {
-                          final hasText = value.text.trim().isNotEmpty;
-                          return Opacity(
-                            opacity: hasText ? 1.0 : 0.0,
-                            child: IgnorePointer(
-                              ignoring: !hasText || _sending,
-                              child: Semantics(
-                                label: isEditing ? 'Confirm edit' : 'Send note',
-                                button: true,
-                                child: GestureDetector(
-                                  onTap: isEditing ? _confirmEdit : _sendNote,
-                                  child: _sending
-                                      ? const SizedBox(
-                                          width: 24,
-                                          height: 24,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            valueColor:
-                                                AlwaysStoppedAnimation<Color>(
-                                                    accent),
-                                          ),
-                                        )
-                                      : Icon(
-                                          isEditing
-                                              ? Icons.check_circle_outline
-                                              : Icons.send,
-                                          color: accent,
-                                        ),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 32, vertical: 18),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: CallbackShortcuts(
+                            bindings: <ShortcutActivator, VoidCallback>{
+                              const SingleActivator(LogicalKeyboardKey.enter,
+                                      control: true):
+                                  () => _editingNoteId != null
+                                      ? _confirmEdit()
+                                      : _sendNote(),
+                              const SingleActivator(LogicalKeyboardKey.enter,
+                                      meta: true):
+                                  () => _editingNoteId != null
+                                      ? _confirmEdit()
+                                      : _sendNote(),
+                            },
+                            child: TextField(
+                              controller: _textController,
+                              focusNode: _inputFocusNode,
+                              maxLines: null,
+                              keyboardType: TextInputType.multiline,
+                              textInputAction: TextInputAction.newline,
+                              decoration: const InputDecoration(
+                                hintText: 'Memo...',
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.zero,
+                                hintStyle: TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 14,
                                 ),
                               ),
+                              style: const TextStyle(fontSize: 14, height: 1.3),
                             ),
-                          );
-                        },
-                      ),
-                    ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _textController,
+                          builder: (context, value, _) {
+                            final hasText = value.text.trim().isNotEmpty;
+                            return Opacity(
+                              opacity: hasText ? 1.0 : 0.0,
+                              child: IgnorePointer(
+                                ignoring: !hasText || _sending,
+                                child: Semantics(
+                                  label:
+                                      isEditing ? 'Confirm edit' : 'Send note',
+                                  button: true,
+                                  child: GestureDetector(
+                                    onTap: isEditing ? _confirmEdit : _sendNote,
+                                    child: _sending
+                                        ? const SizedBox(
+                                            width: 24,
+                                            height: 24,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                      accent),
+                                            ),
+                                          )
+                                        : Icon(
+                                            isEditing
+                                                ? Icons.check_circle_outline
+                                                : Icons.send,
+                                            color: accent,
+                                          ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                ),
                 ),
               ],
             ),
@@ -549,6 +563,7 @@ class _NotesScreenState extends State<NotesScreen> {
   void dispose() {
     _NoteCardState._selectionModeId.value = null;
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
+    HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     _textController.dispose();
     _scrollController.dispose();
     _inputFocusNode.dispose();
@@ -663,7 +678,8 @@ class _NoteCardState extends State<_NoteCard> {
     _activeMenuId.value = widget.note.id;
 
     // Use captured selection (grabbed before right-click word-selection fired)
-    final selectedText = _isDesktopOrWeb ? _capturedSelectionOnRightClick : null;
+    final selectedText =
+        _isDesktopOrWeb ? _capturedSelectionOnRightClick : null;
     final hasSelection = selectedText != null && selectedText.isNotEmpty;
 
     final completer = Completer<String?>();
@@ -712,20 +728,32 @@ class _NoteCardState extends State<_NoteCard> {
       if (!mounted) return;
       final confirmed = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Delete note'),
-          content: const Text('Are you sure you want to delete this message?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
+        builder: (ctx) => CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
+            const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
+                Navigator.pop(ctx, true),
+            const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
+                Navigator.pop(ctx, true),
+          },
+          child: Focus(
+            autofocus: true,
+            child: AlertDialog(
+              title: const Text('Delete note'),
+              content:
+                  const Text('Are you sure you want to delete this message?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  child: const Text('Delete'),
+                ),
+              ],
             ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Delete'),
-            ),
-          ],
+          ),
         ),
       );
       if (confirmed == true) {
@@ -749,8 +777,8 @@ class _NoteCardState extends State<_NoteCard> {
       final fullUrl = url.startsWith('http') ? url : 'https://$url';
 
       final recognizer = TapGestureRecognizer()
-        ..onTap =
-            () => launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault);
+        ..onTap = () =>
+            launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault);
       _urlRecognizers.add(recognizer);
       spans.add(TextSpan(
         text: url,
