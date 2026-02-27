@@ -426,7 +426,8 @@ class _NotesScreenState extends State<NotesScreen> {
                       ],
                     ),
                   ),
-                Padding(
+                Flexible(
+                  child: Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
                   child: Row(
@@ -491,6 +492,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       ),
                     ],
                   ),
+                ),
                 ),
               ],
             ),
