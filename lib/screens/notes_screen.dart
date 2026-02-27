@@ -40,6 +40,19 @@ class _NotesScreenState extends State<NotesScreen> {
     if (_noteCount > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
+    _inputFocusNode.onKeyEvent = (_, event) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.arrowUp &&
+          _textController.text.isEmpty &&
+          (kIsWeb ||
+              defaultTargetPlatform == TargetPlatform.macOS ||
+              defaultTargetPlatform == TargetPlatform.windows ||
+              defaultTargetPlatform == TargetPlatform.linux)) {
+        _editLastNote();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
   }
 
   void _onNotesChanged() {
@@ -67,6 +80,16 @@ class _NotesScreenState extends State<NotesScreen> {
     _textController.clear();
     await NoteCache.instance.add(text);
     if (mounted) setState(() => _sending = false);
+  }
+
+  void _editLastNote() {
+    final notes = NoteCache.instance.notifier.value;
+    for (int i = notes.length - 1; i >= 0; i--) {
+      if (notes[i].error == null) {
+        _startEdit(notes[i]);
+        return;
+      }
+    }
   }
 
   void _startEdit(DecryptedNote note) {
