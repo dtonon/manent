@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:ndk/data_layer/repositories/verifiers/bip340_event_verifier.dart';
 import 'package:ndk/domain_layer/entities/filter.dart';
 import 'package:ndk/domain_layer/entities/nip_01_event.dart';
 import 'package:ndk/domain_layer/repositories/event_signer.dart';
@@ -27,6 +28,7 @@ class NoteCache {
   StreamSubscription<Nip01Event>? _relaySubscription;
   String? _relaySubId;
   final _pendingDeletions = <String>{};
+  final _verifier = Bip340EventVerifier();
 
   List<DecryptedNote> get _sorted =>
       _map.values.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
@@ -274,7 +276,8 @@ class NoteCache {
       // Always go back at least 30 days to catch notes from other devices
       since = latest != null ? min(latest, thirtyDaysAgo) : thirtyDaysAgo;
     } else {
-      since = null;
+      // Web has no persistent store; fall back to the same 30-day minimum
+      since = thirtyDaysAgo;
     }
 
     final response = NostrClient().ndk.requests.subscription(
@@ -315,15 +318,20 @@ class NoteCache {
 
     if (referencedEventIds.isEmpty && referencedDTags.isEmpty) return;
 
-    // Remember so relay echoes arriving later in the same session are ignored
-    _pendingDeletions.addAll(referencedEventIds);
-
     final toDelete = _map.values
         .where((n) =>
             (n.nostrId != null && referencedEventIds.contains(n.nostrId)) ||
             referencedDTags.contains(n.id))
         .map((n) => n.id)
         .toList();
+
+    if (toDelete.isEmpty) return;
+
+    // Only verify the signature when it actually targets a known note
+    if (!await _verifier.verify(event)) return;
+
+    // Remember so relay echoes arriving later in the same session are ignored
+    _pendingDeletions.addAll(referencedEventIds);
 
     for (final localId in toDelete) {
       if (_db != null) await _db!.delete(localId);
