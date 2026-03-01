@@ -26,8 +26,6 @@ class NoteCache {
 
   StreamSubscription<Nip01Event>? _relaySubscription;
   String? _relaySubId;
-  StreamSubscription<Nip01Event>? _deletionSubscription;
-  String? _deletionSubId;
   final _pendingDeletions = <String>{};
 
   List<DecryptedNote> get _sorted =>
@@ -281,7 +279,7 @@ class NoteCache {
 
     final response = NostrClient().ndk.requests.subscription(
       filter: Filter(
-        kinds: [33301],
+        kinds: [33301, 5],
         authors: [_signer!.getPublicKey()],
         since: since,
       ),
@@ -289,18 +287,13 @@ class NoteCache {
     );
 
     _relaySubId = response.requestId;
-    _relaySubscription = response.stream.listen(_onRelayEvent);
-
-    final deletionResponse = NostrClient().ndk.requests.subscription(
-      filter: Filter(
-        kinds: [5],
-        authors: [_signer!.getPublicKey()],
-      ),
-      explicitRelays: _writeRelays,
-    );
-    _deletionSubId = deletionResponse.requestId;
-    _deletionSubscription =
-        deletionResponse.stream.listen(_onDeletionEvent);
+    _relaySubscription = response.stream.listen((event) {
+      if (event.kind == 5) {
+        _onDeletionEvent(event);
+      } else {
+        _onRelayEvent(event);
+      }
+    });
 
     // After relays have sent historical events, retry any that failed to decrypt
     Future.delayed(const Duration(seconds: 5), _retryPendingDecryptions);
@@ -488,12 +481,6 @@ class NoteCache {
     if (_relaySubId != null) {
       await NostrClient().ndk.requests.closeSubscription(_relaySubId!);
       _relaySubId = null;
-    }
-    await _deletionSubscription?.cancel();
-    _deletionSubscription = null;
-    if (_deletionSubId != null) {
-      await NostrClient().ndk.requests.closeSubscription(_deletionSubId!);
-      _deletionSubId = null;
     }
   }
 
