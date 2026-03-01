@@ -25,7 +25,7 @@ class NoteCache {
   List<String> _writeRelays = [];
   List<int>? _localKey;
 
-  StreamSubscription<Nip01Event>? _relaySubscription;
+  StreamSubscription<void>? _relaySubscription;
   String? _relaySubId;
   final _pendingDeletions = <String>{};
   final _verifier = Bip340EventVerifier();
@@ -290,13 +290,13 @@ class NoteCache {
     );
 
     _relaySubId = response.requestId;
-    _relaySubscription = response.stream.listen((event) {
+    _relaySubscription = response.stream.asyncMap<void>((event) async {
       if (event.kind == 5) {
-        _onDeletionEvent(event);
+        await _onDeletionEvent(event);
       } else {
-        _onRelayEvent(event);
+        await _onRelayEvent(event);
       }
-    });
+    }).listen(null);
 
     // After relays have sent historical events, retry any that failed to decrypt
     Future.delayed(const Duration(seconds: 5), _retryPendingDecryptions);
