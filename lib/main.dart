@@ -21,8 +21,15 @@ import 'theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   NostrClient().init();
-  final user = await AuthService.loadUser();
-  if (user != null) await _restoreSession(user);
+  AuthUser? user = await AuthService.loadUser();
+  if (user != null) {
+    // nsec private key is never stored on web — treat session as expired
+    if (kIsWeb && user.signingMethod == SigningMethod.nsec) {
+      user = null;
+    } else {
+      await _restoreSession(user);
+    }
+  }
   runApp(ManentApp(initialUser: user));
 }
 
