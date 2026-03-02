@@ -611,6 +611,15 @@ class _NoteCardState extends State<_NoteCard> {
   bool _retrying = false;
   Offset _tapPosition = Offset.zero;
 
+  // Converts a global position to the overlay's local coordinate space.
+  // Needed on web where the app is in a centered max-width container,
+  // so the Overlay is offset from the Flutter view origin.
+  static Offset _toOverlayLocal(BuildContext context, Offset globalPosition) {
+    final box =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    return box.globalToLocal(globalPosition);
+  }
+
   // Cached to keep the same TextSpan instance across rebuilds so SelectableText
   // doesn't reset its selection when _activeMenuId / _selectionModeId change.
   late TextSpan _textSpan;
@@ -713,6 +722,7 @@ class _NoteCardState extends State<_NoteCard> {
       builder: (_) => ExcludeFocus(
         child: _NoteMenuOverlay(
           tapPosition: _tapPosition,
+          isDesktopOrWeb: _isDesktopOrWeb,
           onSelect: dismiss,
           showRetry: widget.note.error != null,
           showRetrySync: widget.note.syncStatus == SyncStatus.failed ||
@@ -844,7 +854,7 @@ class _NoteCardState extends State<_NoteCard> {
         } else {
           // Normal mode
           if (!_isDesktopOrWeb) {
-            onTapDown = (d) => _tapPosition = d.globalPosition;
+            onTapDown = (d) => _tapPosition = _toOverlayLocal(context, d.globalPosition);
             onTap = _showContextMenu;
           }
           if (_isDesktopOrWeb) {
@@ -854,7 +864,7 @@ class _NoteCardState extends State<_NoteCard> {
               _selectionAreaKey.currentState?.selectableRegion.clearSelection();
             };
             onSecondaryTapDown = (d) {
-              _tapPosition = d.globalPosition;
+              _tapPosition = _toOverlayLocal(context, d.globalPosition);
               // Capture before SelectionArea word-selects on right-click
               _capturedSelectionOnRightClick = _desktopSelectedContent;
               _showContextMenu();
@@ -991,6 +1001,7 @@ class _NoteCardState extends State<_NoteCard> {
 
 class _NoteMenuOverlay extends StatelessWidget {
   final Offset tapPosition;
+  final bool isDesktopOrWeb;
   final void Function([String?]) onSelect;
   final bool showRetry;
   final bool showRetrySync;
@@ -1001,6 +1012,7 @@ class _NoteMenuOverlay extends StatelessWidget {
 
   const _NoteMenuOverlay({
     required this.tapPosition,
+    required this.isDesktopOrWeb,
     required this.onSelect,
     required this.showRetry,
     this.showRetrySync = false,
@@ -1043,7 +1055,7 @@ class _NoteMenuOverlay extends StatelessWidget {
         ),
         CustomSingleChildLayout(
           delegate: _MenuPositionDelegate(tapPosition,
-              isDesktopOrWeb: _NoteCardState._isDesktopOrWeb),
+              isDesktopOrWeb: isDesktopOrWeb),
           child: Container(
             decoration: BoxDecoration(
               color: Colors.white,
