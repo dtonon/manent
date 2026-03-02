@@ -110,7 +110,7 @@ class LoginScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 16, color: Colors.black87),
               ),
               const SizedBox(height: 24),
-              if (kIsWeb) ...[
+              if (kIsWeb && nip07Available()) ...[
                 _Button(
                   label: 'Browser Extension',
                   onPressed: () => _loginWithBrowserExtension(context),
