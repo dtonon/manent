@@ -144,13 +144,26 @@ class _ManentAppState extends State<ManentApp> {
       builder: (context, child) {
         final isMobile = defaultTargetPlatform == TargetPlatform.iOS ||
             defaultTargetPlatform == TargetPlatform.android;
-        if (!isMobile) return child!;
-        return MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: TextScaler.linear(1.2),
-          ),
-          child: child!,
-        );
+        Widget result = isMobile
+            ? MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  textScaler: TextScaler.linear(1.2),
+                ),
+                child: child!,
+              )
+            : child!;
+        if (kIsWeb) {
+          result = ColoredBox(
+            color: const Color(0xFFAAAAAA),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 800),
+                child: result,
+              ),
+            ),
+          );
+        }
+        return result;
       },
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
