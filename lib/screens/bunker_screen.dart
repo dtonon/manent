@@ -48,7 +48,7 @@ class _BunkerScreenState extends State<BunkerScreen> {
   final _nostrConnect = NostrConnect(
     relays: _nostrConnectRelays,
     appName: 'Manent',
-    perms: ['nip44_encrypt', 'nip44_decrypt'],
+    perms: ['get_public_key', 'nip44_decrypt', 'nip44_encrypt', 'sign_event:33301', 'sign_event:5'],
   );
 
   bool _connectingWithUrl = false;
@@ -170,7 +170,7 @@ class _BunkerScreenState extends State<BunkerScreen> {
           'params': [
             signerPubkey,
             secret,
-            'sign_event,nip44_encrypt,nip44_decrypt'
+            'get_public_key,nip44_decrypt,nip44_encrypt,sign_event:33301,sign_event:5'
           ]
         }),
         signerPubkey,
