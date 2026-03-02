@@ -19,6 +19,7 @@ class NoteCache {
 
   final _map = <String, DecryptedNote>{};
   final notifier = ValueNotifier<List<DecryptedNote>>([]);
+  final loading = ValueNotifier<bool>(true);
 
   AppDatabase? _db;
   EventSigner? _signer;
@@ -27,6 +28,7 @@ class NoteCache {
 
   StreamSubscription<Nip01Event>? _relaySubscription;
   String? _relaySubId;
+  Timer? _syncLoadingTimer;
   final _pendingDeletions = <String>{};
   final _verifier = Bip340EventVerifier();
 
@@ -39,6 +41,7 @@ class NoteCache {
 
   Future<void> loadAll(
       AppDatabase? db, EventSigner signer, List<String> writeRelays) async {
+    loading.value = true;
     try {
       _db = db;
       _signer = signer;
@@ -96,6 +99,7 @@ class NoteCache {
         );
       }
       _emit();
+      if (_map.isNotEmpty) loading.value = false;
     } catch (_) {
       _emit();
     }
@@ -261,9 +265,15 @@ class NoteCache {
     _publishToRelays(id, existing.text, eventTime);
   }
 
-  Future<void> sync() async {
-    if (_writeRelays.isEmpty || _signer == null) return;
+  Future<void> sync({bool showLoading = false}) async {
+    _syncLoadingTimer?.cancel();
 
+    if (_writeRelays.isEmpty || _signer == null) {
+      if (showLoading) loading.value = false;
+      return;
+    }
+
+    if (showLoading && _map.isEmpty) loading.value = true;
     await _cancelRelaySubscription();
 
     final thirtyDaysAgo = DateTime.now()
@@ -296,10 +306,24 @@ class NoteCache {
       } else {
         await _onRelayEvent(event);
       }
+      if (showLoading && _map.isNotEmpty) _clearSyncLoading();
     });
+
+    // Clear loading after timeout in case relays don't respond
+    if (showLoading) {
+      _syncLoadingTimer =
+          Timer(const Duration(seconds: 5), () => loading.value = false);
+    }
 
     // After relays have sent historical events, retry any that failed to decrypt
     Future.delayed(const Duration(seconds: 5), _retryPendingDecryptions);
+  }
+
+  void _clearSyncLoading() {
+    if (!loading.value) return;
+    _syncLoadingTimer?.cancel();
+    _syncLoadingTimer = null;
+    loading.value = false;
   }
 
   Future<void> _onDeletionEvent(Nip01Event event) async {
@@ -484,6 +508,8 @@ class NoteCache {
   }
 
   Future<void> _cancelRelaySubscription() async {
+    _syncLoadingTimer?.cancel();
+    _syncLoadingTimer = null;
     await _relaySubscription?.cancel();
     _relaySubscription = null;
     if (_relaySubId != null) {
@@ -587,6 +613,7 @@ class NoteCache {
     _map.clear();
     _pendingDeletions.clear();
     notifier.value = [];
+    loading.value = false;
   }
 
   Future<({String? text, String? error})> _decryptViaSigner(

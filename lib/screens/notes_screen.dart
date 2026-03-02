@@ -329,22 +329,38 @@ class _NotesScreenState extends State<NotesScreen> {
               child: Column(
                 children: [
                   Expanded(
-                    child: ValueListenableBuilder<List<DecryptedNote>>(
-                      valueListenable: NoteCache.instance.notifier,
-                      builder: (context, notes, _) {
-                        if (notes.isEmpty) {
-                          return const Center(
-                            child: Text(
-                              'No notes yet',
-                              style:
-                                  TextStyle(color: Colors.grey, fontSize: 14),
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: NoteCache.instance.loading,
+                      builder: (context, isLoading, _) {
+                        if (isLoading) {
+                          return Center(
+                            child: Semantics(
+                              label: 'Loading notes',
+                              child: CircularProgressIndicator(
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(accent),
+                              ),
                             ),
                           );
                         }
-                        return ListView(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(16),
-                          children: _buildNoteItems(notes),
+                        return ValueListenableBuilder<List<DecryptedNote>>(
+                          valueListenable: NoteCache.instance.notifier,
+                          builder: (context, notes, _) {
+                            if (notes.isEmpty) {
+                              return const Center(
+                                child: Text(
+                                  'No notes yet',
+                                  style: TextStyle(
+                                      color: Colors.grey, fontSize: 14),
+                                ),
+                              );
+                            }
+                            return ListView(
+                              controller: _scrollController,
+                              padding: const EdgeInsets.all(16),
+                              children: _buildNoteItems(notes),
+                            );
+                          },
                         );
                       },
                     ),

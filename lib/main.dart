@@ -83,7 +83,7 @@ class _ManentAppState extends State<ManentApp> {
     if (signer == null) return;
     final db = kIsWeb ? null : AppDatabase.instance;
     await NoteCache.instance.loadAll(db, signer, _user!.writeRelays);
-    NoteCache.instance.sync();
+    NoteCache.instance.sync(showLoading: true);
   }
 
   Future<void> _refreshProfile() async {
