@@ -16,9 +16,17 @@ import '../widgets/manent_app_bar.dart';
 
 class NotesScreen extends StatefulWidget {
   final AuthUser user;
+  final List<String> additionalRelays;
+  final Future<void> Function(List<String>) onAdditionalRelaysChanged;
   final Future<void> Function() onLogout;
 
-  const NotesScreen({super.key, required this.user, required this.onLogout});
+  const NotesScreen({
+    super.key,
+    required this.user,
+    required this.additionalRelays,
+    required this.onAdditionalRelaysChanged,
+    required this.onLogout,
+  });
 
   @override
   State<NotesScreen> createState() => _NotesScreenState();
@@ -36,6 +44,10 @@ class _NotesScreenState extends State<NotesScreen> {
   void initState() {
     super.initState();
     NoteCache.instance.notifier.addListener(_onNotesChanged);
+    NoteCache.instance.promptFallbackRelays.addListener(_onFallbackRelaysPrompt);
+    if (NoteCache.instance.promptFallbackRelays.value) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onFallbackRelaysPrompt());
+    }
     _noteCount = NoteCache.instance.notifier.value.length;
     if (_noteCount > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
@@ -71,6 +83,47 @@ class _NotesScreenState extends State<NotesScreen> {
     final notes = NoteCache.instance.notifier.value;
     if (notes.length > _noteCount) _scrollToBottom();
     _noteCount = notes.length;
+  }
+
+  void _onFallbackRelaysPrompt() {
+    if (!NoteCache.instance.promptFallbackRelays.value) return;
+    NoteCache.instance.promptFallbackRelays.value = false;
+    if (widget.additionalRelays.isNotEmpty) return;
+    _showFallbackRelaysDialog();
+  }
+
+  Future<void> _showFallbackRelaysDialog() async {
+    final shown = await AuthService.getFallbackPromptShown();
+    if (shown || !mounted) return;
+    await AuthService.setFallbackPromptShown();
+    if (!mounted) return;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add fallback relays'),
+        content: const Text(
+          "Your relays don't appear to support Manent events (kind 33301), "
+          'would you like to use nos.lol and nostr.oxtr.dev relays? '
+          'They are only used locally (no NIP-65 update) and you can remove them anytime in the profile page.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No thanks'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Add relays'),
+          ),
+        ],
+      ),
+    );
+    if (accepted == true) {
+      await widget.onAdditionalRelaysChanged([
+        'wss://nos.lol',
+        'wss://nostr.oxtr.dev',
+      ]);
+    }
   }
 
   void _scrollToBottom() {
@@ -137,6 +190,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
   void _showProfileSheet() {
     final npub = Nip19.encodePubKey(widget.user.pubkey);
+    var localAdditional = List<String>.from(widget.additionalRelays);
 
     showModalBottomSheet(
       context: context,
@@ -144,100 +198,153 @@ class _NotesScreenState extends State<NotesScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          24,
-          16,
-          24,
-          MediaQuery.of(ctx).viewInsets.bottom + 32,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 24),
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            CircleAvatar(
-              radius: 48,
-              backgroundImage: widget.user.avatarUrl != null
-                  ? NetworkImage(widget.user.avatarUrl!)
-                  : null,
-              backgroundColor: accent,
-              child: widget.user.avatarUrl == null
-                  ? Text(
-                      widget.user.name.isNotEmpty
-                          ? widget.user.name[0].toUpperCase()
-                          : '?',
-                      style: const TextStyle(color: Colors.white, fontSize: 32),
-                    )
-                  : null,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              widget.user.name,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '${npub.substring(0, 8)}...${npub.substring(npub.length - 8)}',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[500],
-              ),
-              textAlign: TextAlign.center,
-            ),
-            if (widget.user.writeRelays.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              Text(
-                'Write relays',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey[600],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            24,
+            16,
+            24,
+            MediaQuery.of(ctx).viewInsets.bottom + 32,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 24),
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(height: 8),
-              ...widget.user.writeRelays.map(
-                (url) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(
-                    url,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey[700],
-                    ),
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
+              CircleAvatar(
+                radius: 48,
+                backgroundImage: widget.user.avatarUrl != null
+                    ? NetworkImage(widget.user.avatarUrl!)
+                    : null,
+                backgroundColor: accent,
+                child: widget.user.avatarUrl == null
+                    ? Text(
+                        widget.user.name.isNotEmpty
+                            ? widget.user.name[0].toUpperCase()
+                            : '?',
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 32),
+                      )
+                    : null,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                widget.user.name,
+                style:
+                    const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${npub.substring(0, 8)}...${npub.substring(npub.length - 8)}',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[500],
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (widget.user.writeRelays.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Write relays',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[600],
                   ),
+                ),
+                const SizedBox(height: 8),
+                ...widget.user.writeRelays.map(
+                  (url) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      url,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[700],
+                      ),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+              if (localAdditional.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Additional write relays',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...localAdditional.map(
+                  (url) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              url,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[700],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Semantics(
+                            label: 'Remove relay',
+                            button: true,
+                            child: GestureDetector(
+                              onTap: () {
+                                final updated = localAdditional.toList()
+                                  ..remove(url);
+                                setSheetState(() => localAdditional = updated);
+                                widget.onAdditionalRelaysChanged(updated);
+                              },
+                              child: const Icon(Icons.close, size: 16, color: accent),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    await widget.onLogout();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    elevation: 0,
+                  ),
+                  child:
+                      const Text('Log out', style: TextStyle(fontSize: 16)),
                 ),
               ),
             ],
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () async {
-                  Navigator.pop(ctx);
-                  await widget.onLogout();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                  elevation: 0,
-                ),
-                child: const Text('Log out', style: TextStyle(fontSize: 16)),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -581,6 +688,7 @@ class _NotesScreenState extends State<NotesScreen> {
     if (kIsWeb) BrowserContextMenu.enableContextMenu();
     _NoteCardState._selectionModeId.value = null;
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
+    NoteCache.instance.promptFallbackRelays.removeListener(_onFallbackRelaysPrompt);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     _textController.dispose();
     _scrollController.dispose();

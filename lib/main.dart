@@ -66,6 +66,7 @@ class ManentApp extends StatefulWidget {
 
 class _ManentAppState extends State<ManentApp> {
   AuthUser? _user;
+  List<String> _additionalRelays = [];
 
   @override
   void initState() {
@@ -74,16 +75,37 @@ class _ManentAppState extends State<ManentApp> {
     if (_user != null) {
       _refreshProfile();
       _refreshRelays();
-      _loadNotes();
+      _initNotes();
     }
+  }
+
+  List<String> _mergedRelays() {
+    if (_user == null) return [];
+    return {..._user!.writeRelays, ..._additionalRelays}.toList();
+  }
+
+  Future<void> _initNotes() async {
+    _additionalRelays = await AuthService.loadAdditionalRelays();
+    if (mounted) setState(() {});
+    await _loadNotes();
   }
 
   Future<void> _loadNotes() async {
     final signer = SignerSession.signer;
     if (signer == null) return;
     final db = kIsWeb ? null : AppDatabase.instance;
-    await NoteCache.instance.loadAll(db, signer, _user!.writeRelays);
+    await NoteCache.instance.loadAll(db, signer, _mergedRelays());
     NoteCache.instance.sync(showLoading: true);
+  }
+
+  Future<void> _onAdditionalRelaysChanged(List<String> relays) async {
+    setState(() => _additionalRelays = relays);
+    await AuthService.saveAdditionalRelays(relays);
+    NoteCache.instance.updateWriteRelays(_mergedRelays());
+    if (relays.isNotEmpty) {
+      NoteCache.instance.retryAllFailed();
+      NoteCache.instance.sync(showLoading: true);
+    }
   }
 
   Future<void> _refreshProfile() async {
@@ -105,6 +127,7 @@ class _ManentAppState extends State<ManentApp> {
 
   Future<void> _onLogin(AuthUser user) async {
     await AuthService.save(user);
+    _additionalRelays = await AuthService.loadAdditionalRelays();
     setState(() => _user = user);
     _refreshRelays();
     _loadNotes();
@@ -112,7 +135,13 @@ class _ManentAppState extends State<ManentApp> {
 
   Future<void> _refreshRelays() async {
     final relays = await RelayFetcher.fetchWriteRelays(_user!.pubkey);
-    if (!mounted || relays.isEmpty) return;
+    if (!mounted) return;
+    if (relays.isEmpty) {
+      if (_user!.writeRelays.isEmpty && _additionalRelays.isEmpty) {
+        NoteCache.instance.promptFallbackRelays.value = true;
+      }
+      return;
+    }
     final current = _user!.writeRelays;
     if (relays.length == current.length && relays.every(current.contains)) {
       return;
@@ -125,7 +154,7 @@ class _ManentAppState extends State<ManentApp> {
       writeRelays: relays,
     );
     await AuthService.save(updated);
-    NoteCache.instance.updateWriteRelays(relays);
+    NoteCache.instance.updateWriteRelays([...relays, ..._additionalRelays]);
     NoteCache.instance.sync();
     if (mounted) setState(() => _user = updated);
   }
@@ -133,7 +162,10 @@ class _ManentAppState extends State<ManentApp> {
   Future<void> _onLogout() async {
     await NoteCache.instance.clear();
     SignerSession.clear();
-    setState(() => _user = null);
+    setState(() {
+      _user = null;
+      _additionalRelays = [];
+    });
     await AuthService.clear();
   }
 
@@ -181,7 +213,12 @@ class _ManentAppState extends State<ManentApp> {
       ),
       home: _user == null
           ? LoginScreen(onLogin: _onLogin)
-          : NotesScreen(user: _user!, onLogout: _onLogout),
+          : NotesScreen(
+              user: _user!,
+              additionalRelays: _additionalRelays,
+              onAdditionalRelaysChanged: _onAdditionalRelaysChanged,
+              onLogout: _onLogout,
+            ),
     );
   }
 }

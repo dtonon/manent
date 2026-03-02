@@ -26,6 +26,8 @@ class AuthService {
   static const _kAvatarUrl = 'avatar_url';
   static const _kSigningMethod = 'signing_method';
   static const _kWriteRelays = 'write_relays';
+  static const _kAdditionalRelays = 'additional_write_relays';
+  static const _kFallbackPromptShown = 'fallback_relay_prompt_shown';
 
   static Future<AuthUser?> loadUser() async {
     final prefs = await SharedPreferences.getInstance();
@@ -53,6 +55,26 @@ class AuthService {
       await prefs.setString(_kAvatarUrl, user.avatarUrl!);
     }
     await prefs.setStringList(_kWriteRelays, user.writeRelays);
+  }
+
+  static Future<List<String>> loadAdditionalRelays() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_kAdditionalRelays) ?? [];
+  }
+
+  static Future<void> saveAdditionalRelays(List<String> relays) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kAdditionalRelays, relays);
+  }
+
+  static Future<bool> getFallbackPromptShown() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kFallbackPromptShown) ?? false;
+  }
+
+  static Future<void> setFallbackPromptShown() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kFallbackPromptShown, true);
   }
 
   static Future<void> clear() async {

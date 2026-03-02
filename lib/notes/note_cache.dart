@@ -20,6 +20,8 @@ class NoteCache {
   final _map = <String, DecryptedNote>{};
   final notifier = ValueNotifier<List<DecryptedNote>>([]);
   final loading = ValueNotifier<bool>(true);
+  // Fires true when a publish attempt finds zero accepting relays
+  final promptFallbackRelays = ValueNotifier<bool>(false);
 
   AppDatabase? _db;
   EventSigner? _signer;
@@ -163,7 +165,24 @@ class NoteCache {
 
   Future<void> _publishToRelays(
       String localId, String plaintext, int createdAt) async {
-    if (_writeRelays.isEmpty || _signer == null) return;
+    if (_signer == null) return;
+    if (_writeRelays.isEmpty) {
+      promptFallbackRelays.value = true;
+      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      final existing = _map[localId];
+      if (existing != null) {
+        _map[localId] = DecryptedNote(
+          id: localId,
+          nostrId: existing.nostrId,
+          text: existing.text,
+          createdAt: existing.createdAt,
+          editedAt: existing.editedAt,
+          syncStatus: SyncStatus.failed,
+        );
+        _emit();
+      }
+      return;
+    }
     try {
       final encrypted = await _signer!.encryptNip44(
         plaintext: plaintext,
@@ -212,6 +231,8 @@ class NoteCache {
       final newStatus = responses.any((r) => r.broadcastSuccessful)
           ? SyncStatus.synced
           : SyncStatus.failed;
+
+      if (newStatus == SyncStatus.failed) promptFallbackRelays.value = true;
 
       if (_db != null) {
         await _db!.updateSyncStatus(localId, newStatus.value);
@@ -580,6 +601,16 @@ class NoteCache {
     if (nostrId != null) _broadcastDeletion(id, nostrId);
   }
 
+  void retryAllFailed() {
+    final failed = _map.values
+        .where((n) => n.error == null && n.syncStatus == SyncStatus.failed)
+        .map((n) => n.id)
+        .toList();
+    for (final id in failed) {
+      retrySync(id);
+    }
+  }
+
   Future<void> _broadcastDeletion(String localId, String nostrId) async {
     if (_writeRelays.isEmpty || _signer == null) return;
     try {
@@ -614,6 +645,7 @@ class NoteCache {
     _pendingDeletions.clear();
     notifier.value = [];
     loading.value = false;
+    promptFallbackRelays.value = false;
   }
 
   Future<({String? text, String? error})> _decryptViaSigner(
