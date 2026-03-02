@@ -1,12 +1,13 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:amberflutter/amberflutter.dart';
 import 'package:ndk/shared/nips/nip19/nip19.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../auth/amber_event_signer.dart';
 import '../auth/auth_state.dart';
+import '../auth/nip07_event_signer.dart';
 import '../auth/profile_fetcher.dart';
 import '../auth/signer_session.dart';
 import '../theme.dart';
@@ -20,6 +21,44 @@ class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key, required this.onLogin});
 
   bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;
+
+  Future<void> _loginWithBrowserExtension(BuildContext context) async {
+    if (!nip07Available()) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No Nostr browser extension found')),
+      );
+      return;
+    }
+    if (!nip07SupportsNip44()) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Your extension does not support NIP-44 encryption, which is required by Manent',
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      final pubkey = await nip07GetPublicKey();
+      if (!context.mounted) return;
+      SignerSession.set(Nip07EventSigner(pubkey: pubkey));
+      final profile = await ProfileFetcher.fetch(pubkey);
+      await onLogin(AuthUser(
+        pubkey: pubkey,
+        name: profile.name,
+        avatarUrl: profile.avatarUrl,
+        signingMethod: SigningMethod.browserExtension,
+      ));
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
+    }
+  }
 
   Future<void> _loginWithAndroidSigner(BuildContext context) async {
     final amber = Amberflutter();
@@ -71,6 +110,13 @@ class LoginScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 16, color: Colors.black87),
               ),
               const SizedBox(height: 24),
+              if (kIsWeb) ...[
+                _Button(
+                  label: 'Browser Extension',
+                  onPressed: () => _loginWithBrowserExtension(context),
+                ),
+                const SizedBox(height: 16),
+              ],
               _Button(
                 label: 'Nostr Connect / Bunker',
                 onPressed: () => Navigator.push(

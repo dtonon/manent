@@ -5,6 +5,7 @@ import 'package:ndk/shared/nips/nip01/bip340.dart';
 import 'package:ndk/data_layer/repositories/signers/nip46_event_signer.dart';
 
 import 'auth/amber_event_signer.dart';
+import 'auth/nip07_event_signer.dart';
 import 'auth/auth_state.dart';
 import 'auth/nostr_client.dart';
 import 'auth/profile_fetcher.dart';
@@ -49,6 +50,8 @@ Future<void> _restoreSession(AuthUser user) async {
       }
     case SigningMethod.androidSigner:
       SignerSession.set(AmberEventSigner(pubkey: user.pubkey));
+    case SigningMethod.browserExtension:
+      if (kIsWeb) SignerSession.set(Nip07EventSigner(pubkey: user.pubkey));
   }
 }
 

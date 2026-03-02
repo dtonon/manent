@@ -1,7 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'signer_store.dart';
 
-enum SigningMethod { nsec, bunker, androidSigner }
+enum SigningMethod { nsec, bunker, androidSigner, browserExtension }
 
 class AuthUser {
   final String pubkey;
