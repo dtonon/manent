@@ -55,6 +55,7 @@ class _NotesScreenState extends State<NotesScreen> {
         defaultTargetPlatform == TargetPlatform.linux) {
       HardwareKeyboard.instance.addHandler(_onHardwareKey);
     }
+    if (kIsWeb) BrowserContextMenu.disableContextMenu();
   }
 
   bool _onHardwareKey(KeyEvent event) {
@@ -561,6 +562,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
   @override
   void dispose() {
+    if (kIsWeb) BrowserContextMenu.enableContextMenu();
     _NoteCardState._selectionModeId.value = null;
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
