@@ -20,7 +20,7 @@ class LoginScreen extends StatelessWidget {
 
   const LoginScreen({super.key, required this.onLogin});
 
-  bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;
+  bool get _isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   Future<void> _loginWithBrowserExtension(BuildContext context) async {
     if (!nip07Available()) {
