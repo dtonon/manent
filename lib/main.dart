@@ -116,17 +116,19 @@ class _ManentAppState extends State<ManentApp> {
   }
 
   Future<void> _refreshProfile() async {
-    final profile = await ProfileFetcher.fetch(_user!.pubkey);
-    if (!mounted) return;
-    if (profile.name == _user!.name && profile.avatarUrl == _user!.avatarUrl) {
+    final user = _user;
+    if (user == null) return;
+    final profile = await ProfileFetcher.fetch(user.pubkey);
+    if (!mounted || _user == null) return;
+    if (profile.name == user.name && profile.avatarUrl == user.avatarUrl) {
       return;
     }
     final updated = AuthUser(
-      pubkey: _user!.pubkey,
+      pubkey: user.pubkey,
       name: profile.name,
       avatarUrl: profile.avatarUrl,
-      signingMethod: _user!.signingMethod,
-      writeRelays: _user!.writeRelays,
+      signingMethod: user.signingMethod,
+      writeRelays: user.writeRelays,
     );
     await AuthService.save(updated);
     if (mounted) setState(() => _user = updated);
@@ -141,23 +143,25 @@ class _ManentAppState extends State<ManentApp> {
   }
 
   Future<void> _refreshRelays() async {
-    final relays = await RelayFetcher.fetchWriteRelays(_user!.pubkey);
-    if (!mounted) return;
+    final user = _user;
+    if (user == null) return;
+    final relays = await RelayFetcher.fetchWriteRelays(user.pubkey);
+    if (!mounted || _user == null) return;
     if (relays.isEmpty) {
-      if (_user!.writeRelays.isEmpty && _additionalRelays.isEmpty) {
+      if (user.writeRelays.isEmpty && _additionalRelays.isEmpty) {
         NoteCache.instance.promptFallbackRelays.value = true;
       }
       return;
     }
-    final current = _user!.writeRelays;
+    final current = user.writeRelays;
     if (relays.length == current.length && relays.every(current.contains)) {
       return;
     }
     final updated = AuthUser(
-      pubkey: _user!.pubkey,
-      name: _user!.name,
-      avatarUrl: _user!.avatarUrl,
-      signingMethod: _user!.signingMethod,
+      pubkey: user.pubkey,
+      name: user.name,
+      avatarUrl: user.avatarUrl,
+      signingMethod: user.signingMethod,
       writeRelays: relays,
     );
     await AuthService.save(updated);
