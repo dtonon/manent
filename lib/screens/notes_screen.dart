@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:ndk/ndk.dart';
 
 import '../auth/auth_state.dart';
+import '../auth/relay_constants.dart';
 import '../notes/note.dart';
 import '../notes/note_cache.dart';
 import '../theme.dart';
@@ -119,10 +120,7 @@ class _NotesScreenState extends State<NotesScreen> {
       ),
     );
     if (accepted == true) {
-      await widget.onAdditionalRelaysChanged([
-        'wss://nos.lol',
-        'wss://nostr.oxtr.dev',
-      ]);
+      await widget.onAdditionalRelaysChanged(fallbackRelays);
     }
   }
 

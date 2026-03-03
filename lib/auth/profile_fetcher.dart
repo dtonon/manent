@@ -1,20 +1,16 @@
 import 'dart:convert';
 import 'package:ndk/ndk.dart';
 import 'nostr_client.dart';
+import 'relay_constants.dart';
 
 class ProfileFetcher {
-  static const _relays = [
-    'wss://relay.damus.io',
-    'wss://purplepag.es',
-    'wss://nos.lol',
-  ];
 
   // Fetches NIP-01 kind:0 metadata. Falls back to truncated pubkey on any error.
   static Future<({String name, String? avatarUrl})> fetch(String pubkey) async {
     try {
       final response = NostrClient().ndk.requests.query(
             filter: Filter(authors: [pubkey], kinds: [0], limit: 1),
-            explicitRelays: _relays,
+            explicitRelays: discoveryRelays,
           );
       final events = await response.future.timeout(const Duration(seconds: 6));
       if (events.isEmpty) return _fallback(pubkey);
