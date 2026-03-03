@@ -218,6 +218,7 @@ class NoteCache {
           nostrId: signed.id,
           text: existing.text,
           createdAt: existing.createdAt,
+          editedAt: existing.editedAt,
           syncStatus: SyncStatus.pending,
         );
       }
@@ -244,6 +245,7 @@ class NoteCache {
           nostrId: updated.nostrId,
           text: updated.text,
           createdAt: updated.createdAt,
+          editedAt: updated.editedAt,
           syncStatus: newStatus,
         );
         _emit();
@@ -259,6 +261,7 @@ class NoteCache {
           nostrId: existing.nostrId,
           text: existing.text,
           createdAt: existing.createdAt,
+          editedAt: existing.editedAt,
           syncStatus: SyncStatus.failed,
         );
         _emit();
@@ -276,6 +279,7 @@ class NoteCache {
       nostrId: existing.nostrId,
       text: existing.text,
       createdAt: existing.createdAt,
+      editedAt: existing.editedAt,
       syncStatus: SyncStatus.pending,
     );
     _emit();
