@@ -223,7 +223,7 @@ class _BunkerScreenState extends State<BunkerScreen> {
           .ndk
           .bunkers
           .connectWithBunkerUrl(_bunkerController.text.trim())
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 30));
       await _onConnected(connection);
     } catch (e) {
       if (mounted) {

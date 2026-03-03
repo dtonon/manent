@@ -12,7 +12,7 @@ class ProfileFetcher {
             filter: Filter(authors: [pubkey], kinds: [0], limit: 1),
             explicitRelays: discoveryRelays,
           );
-      final events = await response.future.timeout(const Duration(seconds: 6));
+      final events = await response.future.timeout(const Duration(seconds: 20));
       if (events.isEmpty) return _fallback(pubkey);
       final content = jsonDecode(events.first.content) as Map<String, dynamic>;
       final name = ((content['name'] as String?)?.trim().isNotEmpty == true

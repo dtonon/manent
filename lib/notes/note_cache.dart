@@ -333,11 +333,11 @@ class NoteCache {
     // Clear loading after timeout in case relays don't respond
     if (showLoading) {
       _syncLoadingTimer =
-          Timer(const Duration(seconds: 5), () => loading.value = false);
+          Timer(const Duration(seconds: 10), () => loading.value = false);
     }
 
     // After relays have sent historical events, retry any that failed to decrypt
-    Future.delayed(const Duration(seconds: 5), _retryPendingDecryptions);
+    Future.delayed(const Duration(seconds: 10), _retryPendingDecryptions);
   }
 
   void _clearSyncLoading() {

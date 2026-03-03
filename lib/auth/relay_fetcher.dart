@@ -16,7 +16,7 @@ class RelayFetcher {
             ),
             explicitRelays: discoveryRelays,
           );
-      final events = await response.future.timeout(const Duration(seconds: 6));
+      final events = await response.future.timeout(const Duration(seconds: 20));
       if (events.isEmpty) return [];
       final nip65 = entities.Nip65.fromEvent(events.first);
       return nip65.relays.entries
