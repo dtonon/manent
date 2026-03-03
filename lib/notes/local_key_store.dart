@@ -11,7 +11,9 @@ class LocalKeyStore {
   static const _kKey = 'local_notes_key';
 
   static bool get _isMacOS =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.linux);
 
   static Future<List<int>> loadOrCreate() async {
     final existing = await _read(_kKey);

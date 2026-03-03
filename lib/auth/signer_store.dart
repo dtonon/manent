@@ -15,7 +15,10 @@ class SignerStore {
 
   // True on platforms where SharedPreferences is used instead of secure storage
   static bool get _useSharedPrefs =>
-      kIsWeb || (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS);
+      kIsWeb ||
+      (!kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.macOS ||
+              defaultTargetPlatform == TargetPlatform.linux));
 
   static Future<void> _write(String key, String value) async {
     if (_useSharedPrefs) {
