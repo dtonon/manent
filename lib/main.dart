@@ -4,6 +4,7 @@ import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/nips/nip01/bip340.dart';
 import 'package:ndk/data_layer/repositories/signers/nip46_event_signer.dart';
 
+import 'app_flavor.dart';
 import 'auth/amber_event_signer.dart';
 import 'auth/nip07_event_signer.dart';
 import 'auth/auth_state.dart';
@@ -183,7 +184,7 @@ class _ManentAppState extends State<ManentApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Manent',
+      title: AppFlavor.appName,
       builder: (context, child) {
         final isMobile = defaultTargetPlatform == TargetPlatform.iOS ||
             defaultTargetPlatform == TargetPlatform.android;

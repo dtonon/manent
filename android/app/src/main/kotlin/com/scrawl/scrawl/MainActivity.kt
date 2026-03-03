@@ -1,4 +1,4 @@
-package com.manent.manent
+package com.dtonon.manent
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../app_flavor.dart';
 
 // OS-encrypted storage for sensitive auth credentials.
 // macOS and web use SharedPreferences — keychain requires dev certificate on macOS,
@@ -9,9 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 // nsec is never persisted on web (session-only).
 class SignerStore {
   static const _storage = FlutterSecureStorage();
-  static const _kNsecPrivkey = 'nsec_privkey';
-  static const _kBunkerConnection = 'bunker_connection';
-  static const _kAndroidPackage = 'android_package';
+  static String get _kNsecPrivkey      => '${AppFlavor.storagePrefix}nsec_privkey';
+  static String get _kBunkerConnection => '${AppFlavor.storagePrefix}bunker_connection';
+  static String get _kAndroidPackage   => '${AppFlavor.storagePrefix}android_package';
 
   // True on platforms where SharedPreferences is used instead of secure storage
   static bool get _useSharedPrefs =>

@@ -3,12 +3,13 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../app_flavor.dart';
 
 // Persists a 32-byte AES key for local note encryption.
 // macOS uses SharedPreferences (UserDefaults) — keychain requires dev certificate.
 class LocalKeyStore {
   static const _storage = FlutterSecureStorage();
-  static const _kKey = 'local_notes_key';
+  static String get _kKey => '${AppFlavor.storagePrefix}local_notes_key';
 
   static bool get _isMacOS =>
       !kIsWeb &&

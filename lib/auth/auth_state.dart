@@ -1,4 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import '../app_flavor.dart';
 import 'signer_store.dart';
 
 enum SigningMethod { nsec, bunker, androidSigner, browserExtension }
@@ -20,14 +21,15 @@ class AuthUser {
 }
 
 class AuthService {
-  static const _kLoggedIn = 'logged_in';
-  static const _kPubkey = 'pubkey';
-  static const _kName = 'name';
-  static const _kAvatarUrl = 'avatar_url';
-  static const _kSigningMethod = 'signing_method';
-  static const _kWriteRelays = 'write_relays';
-  static const _kAdditionalRelays = 'additional_write_relays';
-  static const _kFallbackPromptShown = 'fallback_relay_prompt_shown';
+  static String get _p => AppFlavor.storagePrefix;
+  static final _kLoggedIn            = '${_p}logged_in';
+  static final _kPubkey              = '${_p}pubkey';
+  static final _kName                = '${_p}name';
+  static final _kAvatarUrl           = '${_p}avatar_url';
+  static final _kSigningMethod       = '${_p}signing_method';
+  static final _kWriteRelays         = '${_p}write_relays';
+  static final _kAdditionalRelays    = '${_p}additional_write_relays';
+  static final _kFallbackPromptShown = '${_p}fallback_relay_prompt_shown';
 
   static Future<AuthUser?> loadUser() async {
     final prefs = await SharedPreferences.getInstance();

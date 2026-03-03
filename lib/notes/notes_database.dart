@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../app_flavor.dart';
 
 class AppDatabase {
   AppDatabase._();
@@ -20,7 +21,7 @@ class AppDatabase {
     }
 
     final dir = await getApplicationSupportDirectory();
-    final path = p.join(dir.path, 'manent.db');
+    final path = p.join(dir.path, AppFlavor.dbName);
 
     _db = await openDatabase(
       path,

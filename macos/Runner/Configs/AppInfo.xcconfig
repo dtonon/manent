@@ -8,7 +8,7 @@
 PRODUCT_NAME = Manent
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.manent.manent
+PRODUCT_BUNDLE_IDENTIFIER = com.dtonon.manent
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.manent. All rights reserved.
