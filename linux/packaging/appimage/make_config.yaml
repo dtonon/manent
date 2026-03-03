@@ -1,0 +1,11 @@
+display_name: Manent
+icon: assets/icon.png
+generic_name: Nostr Client
+keywords:
+  - nostr
+  - notes
+  - encrypted
+categories:
+  - Network
+  - InstantMessaging
+startup_notify: true

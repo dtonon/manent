@@ -1,0 +1,11 @@
+output: dist/
+
+releases:
+  - name: linux
+    jobs:
+      - name: release-linux-appimage
+        package:
+          platform: linux
+          target: appimage
+          build_args:
+            build-name: 1.0.0
