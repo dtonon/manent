@@ -1161,7 +1161,8 @@ class _NoteMenuOverlay extends StatelessWidget {
         ),
         CustomSingleChildLayout(
           delegate: _MenuPositionDelegate(tapPosition,
-              isDesktopOrWeb: isDesktopOrWeb),
+              isDesktopOrWeb: isDesktopOrWeb,
+              keyboardHeight: MediaQuery.of(context).viewInsets.bottom),
           child: Container(
             decoration: BoxDecoration(
               color: Colors.white,
@@ -1296,8 +1297,10 @@ class _NoteMenuOverlay extends StatelessWidget {
 class _MenuPositionDelegate extends SingleChildLayoutDelegate {
   final Offset tapPosition;
   final bool isDesktopOrWeb;
+  final double keyboardHeight;
 
-  const _MenuPositionDelegate(this.tapPosition, {required this.isDesktopOrWeb});
+  const _MenuPositionDelegate(this.tapPosition,
+      {required this.isDesktopOrWeb, this.keyboardHeight = 0});
 
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
@@ -1307,7 +1310,6 @@ class _MenuPositionDelegate extends SingleChildLayoutDelegate {
   Offset getPositionForChild(Size size, Size childSize) {
     final double x;
     if (isDesktopOrWeb) {
-      // Follow the cursor, clamped to screen edges
       x = tapPosition.dx.clamp(8.0, size.width - childSize.width - 8.0);
     } else {
       // Pin to the opposite edge so the finger never covers the menu
@@ -1317,12 +1319,16 @@ class _MenuPositionDelegate extends SingleChildLayoutDelegate {
         x = size.width - childSize.width - 26.0;
       }
     }
-    final double y =
-        (tapPosition.dy + 4).clamp(48.0, size.height - childSize.height - 48.0);
+    // Clamp above the keyboard when it's open
+    final double bottomLimit =
+        size.height - keyboardHeight - childSize.height - 48.0;
+    final double y = (tapPosition.dy + 4).clamp(48.0, bottomLimit);
     return Offset(x, y);
   }
 
   @override
   bool shouldRelayout(_MenuPositionDelegate old) =>
-      old.tapPosition != tapPosition || old.isDesktopOrWeb != isDesktopOrWeb;
+      old.tapPosition != tapPosition ||
+      old.isDesktopOrWeb != isDesktopOrWeb ||
+      old.keyboardHeight != keyboardHeight;
 }
