@@ -56,9 +56,11 @@ class _NotesScreenState extends State<NotesScreen> {
   void initState() {
     super.initState();
     NoteCache.instance.notifier.addListener(_onNotesChanged);
-    NoteCache.instance.promptFallbackRelays.addListener(_onFallbackRelaysPrompt);
+    NoteCache.instance.promptFallbackRelays
+        .addListener(_onFallbackRelaysPrompt);
     if (NoteCache.instance.promptFallbackRelays.value) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _onFallbackRelaysPrompt());
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _onFallbackRelaysPrompt());
     }
     _noteCount = NoteCache.instance.notifier.value.length;
     if (_noteCount > 0) {
@@ -185,10 +187,9 @@ class _NotesScreenState extends State<NotesScreen> {
       if (pf.path == null) return;
       bytes = await File(pf.path!).readAsBytes();
     }
-    final mimeType =
-        lookupMimeType(pf.name) ?? 'application/octet-stream';
-    setState(() =>
-        _pendingFile = (bytes: bytes, name: pf.name, mimeType: mimeType));
+    final mimeType = lookupMimeType(pf.name) ?? 'application/octet-stream';
+    setState(
+        () => _pendingFile = (bytes: bytes, name: pf.name, mimeType: mimeType));
   }
 
   void _editLastNote() {
@@ -358,7 +359,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                 setSheetState(() => localAdditional = updated);
                                 widget.onAdditionalRelaysChanged(updated);
                               },
-                              child: const Icon(Icons.close, size: 16, color: accent),
+                              child: const Icon(Icons.close,
+                                  size: 16, color: accent),
                             ),
                           ),
                         ],
@@ -383,8 +385,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         borderRadius: BorderRadius.circular(8)),
                     elevation: 0,
                   ),
-                  child:
-                      const Text('Log out', style: TextStyle(fontSize: 16)),
+                  child: const Text('Log out', style: TextStyle(fontSize: 16)),
                 ),
               ),
             ],
@@ -728,8 +729,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                 label: isEditing ? 'Confirm edit' : 'Send',
                                 button: true,
                                 child: GestureDetector(
-                                  onTap:
-                                      isEditing ? _confirmEdit : _sendNote,
+                                  onTap: isEditing ? _confirmEdit : _sendNote,
                                   child: _sending
                                       ? const SizedBox(
                                           width: 24,
@@ -757,8 +757,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                 child: GestureDetector(
                                   onTap: _pickFile,
                                   child: Padding(
-                                    padding:
-                                        const EdgeInsets.only(bottom: 2),
+                                    padding: const EdgeInsets.only(bottom: 2),
                                     child: Icon(Icons.attach_file,
                                         size: 22, color: Colors.grey[400]),
                                   ),
@@ -790,7 +789,8 @@ class _NotesScreenState extends State<NotesScreen> {
     if (kIsWeb) BrowserContextMenu.enableContextMenu();
     _NoteCardState._selectionModeId.value = null;
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
-    NoteCache.instance.promptFallbackRelays.removeListener(_onFallbackRelaysPrompt);
+    NoteCache.instance.promptFallbackRelays
+        .removeListener(_onFallbackRelaysPrompt);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     _textController.dispose();
     _scrollController.dispose();
@@ -825,8 +825,7 @@ class _NoteCardState extends State<_NoteCard> {
   // Needed on web where the app is in a centered max-width container,
   // so the Overlay is offset from the Flutter view origin.
   static Offset _toOverlayLocal(BuildContext context, Offset globalPosition) {
-    final box =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final box = Overlay.of(context).context.findRenderObject()! as RenderBox;
     return box.globalToLocal(globalPosition);
   }
 
@@ -911,6 +910,49 @@ class _NoteCardState extends State<_NoteCard> {
     if (mounted && !success) setState(() => _retrying = false);
   }
 
+  void _showJsonModal(DecryptedNote note) {
+    final json = note.toDebugJson();
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Expanded(child: Text('JSON', style: TextStyle(fontSize: 16))),
+            IconButton(
+              icon: const Icon(Icons.copy, size: 20),
+              tooltip: 'Copy',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: json));
+                Navigator.pop(ctx);
+              },
+            ),
+          ],
+        ),
+        titlePadding: const EdgeInsets.fromLTRB(20, 12, 8, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              json,
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  height: 1.5,
+                  color: Colors.black87),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveFile() async {
     final attachment = widget.note.attachment;
     if (attachment == null) return;
@@ -979,8 +1021,9 @@ class _NoteCardState extends State<_NoteCard> {
           showEdit: widget.note.error == null && !isFileNote,
           showSave: isFileNote,
           showShare: isFileNote && !_isDesktopOrWeb,
-          showCopyComment: isFileNote &&
-              widget.note.attachment?.comment != null,
+          showCopyComment:
+              isFileNote && widget.note.attachment?.comment != null,
+          showDebugJson: kDebugMode,
           editedAt: widget.note.editedAt,
           copyLabel: isFileNote
               ? 'Copy filename'
@@ -994,7 +1037,9 @@ class _NoteCardState extends State<_NoteCard> {
 
     _activeMenuId.value = null;
 
-    if (result == 'save') {
+    if (result == 'show_json') {
+      if (mounted) _showJsonModal(widget.note);
+    } else if (result == 'save') {
       _saveFile();
     } else if (result == 'share') {
       _shareFile();
@@ -1020,8 +1065,8 @@ class _NoteCardState extends State<_NoteCard> {
         context: context,
         builder: (ctx) => CallbackShortcuts(
           bindings: <ShortcutActivator, VoidCallback>{
-            const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
-                Navigator.pop(ctx, true),
+            const SingleActivator(LogicalKeyboardKey.enter, control: true):
+                () => Navigator.pop(ctx, true),
             const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
                 Navigator.pop(ctx, true),
           },
@@ -1108,8 +1153,8 @@ class _NoteCardState extends State<_NoteCard> {
         void Function()? onTap;
         void Function(TapDownDetails)? onSecondaryTapDown;
 
-        final isFileNote = widget.note.kind == NoteKind.file &&
-            widget.note.error == null;
+        final isFileNote =
+            widget.note.kind == NoteKind.file && widget.note.error == null;
 
         if (isActiveSelection) {
           // All null — SelectableText handles everything
@@ -1119,7 +1164,8 @@ class _NoteCardState extends State<_NoteCard> {
         } else {
           // Normal mode
           if (!_isDesktopOrWeb) {
-            onTapDown = (d) => _tapPosition = _toOverlayLocal(context, d.globalPosition);
+            onTapDown = (d) =>
+                _tapPosition = _toOverlayLocal(context, d.globalPosition);
             onTap = _showContextMenu;
           }
           if (_isDesktopOrWeb) {
@@ -1129,8 +1175,7 @@ class _NoteCardState extends State<_NoteCard> {
                 : () {
                     _desktopSelectedContent = null;
                     _capturedSelectionOnRightClick = null;
-                    _selectionAreaKey.currentState
-                        ?.selectableRegion
+                    _selectionAreaKey.currentState?.selectableRegion
                         .clearSelection();
                   };
             onSecondaryTapDown = (d) {
@@ -1155,9 +1200,7 @@ class _NoteCardState extends State<_NoteCard> {
           onSecondaryTapDown: onSecondaryTapDown,
           child: Container(
             // Image file notes use zero padding — the image fills the card
-            padding: isFileImage
-                ? EdgeInsets.zero
-                : const EdgeInsets.all(16),
+            padding: isFileImage ? EdgeInsets.zero : const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(8),
@@ -1403,67 +1446,67 @@ class _FileNoteContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: const Color(0xFF333333),
-                child: Semantics(
-                  label: 'File: ${attachment.filename}',
-                  child: const Icon(Icons.insert_drive_file,
-                      color: Colors.white, size: 20),
-                ),
+        Row(
+          children: [
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: const Color(0xFF333333),
+              child: Semantics(
+                label: 'File: ${attachment.filename}',
+                child: const Icon(Icons.insert_drive_file,
+                    color: Colors.white, size: 20),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      attachment.filename,
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.bold),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      _formatFileSize(attachment.size),
-                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  buildSyncIcon(),
                   Text(
-                    formatTime(note.createdAt),
-                    style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                    attachment.filename,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    _formatFileSize(attachment.size),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                   ),
                 ],
               ),
-            ],
-          ),
-          if (attachment.comment != null) ...[
-            const SizedBox(height: 8),
-            Builder(builder: (ctx) {
-              final t = Text(
-                attachment.comment!,
-                style: const TextStyle(
-                    fontSize: 14, height: 1.3, color: Colors.black87),
-              );
-              return isDesktopOrWeb
-                  ? DefaultSelectionStyle(
-                      selectionColor: textSelectionColor,
-                      child: SelectionArea(
-                        contextMenuBuilder: (_, __) => const SizedBox.shrink(),
-                        child: t,
-                      ),
-                    )
-                  : t;
-            }),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                buildSyncIcon(),
+                Text(
+                  formatTime(note.createdAt),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                ),
+              ],
+            ),
           ],
+        ),
+        if (attachment.comment != null) ...[
+          const SizedBox(height: 8),
+          Builder(builder: (ctx) {
+            final t = Text(
+              attachment.comment!,
+              style: const TextStyle(
+                  fontSize: 14, height: 1.3, color: Colors.black87),
+            );
+            return isDesktopOrWeb
+                ? DefaultSelectionStyle(
+                    selectionColor: textSelectionColor,
+                    child: SelectionArea(
+                      contextMenuBuilder: (_, __) => const SizedBox.shrink(),
+                      child: t,
+                    ),
+                  )
+                : t;
+          }),
+        ],
       ],
     );
   }
@@ -1543,6 +1586,7 @@ class _NoteMenuOverlay extends StatelessWidget {
   final bool showSave;
   final bool showShare;
   final bool showCopyComment;
+  final bool showDebugJson;
 
   const _NoteMenuOverlay({
     required this.tapPosition,
@@ -1555,6 +1599,7 @@ class _NoteMenuOverlay extends StatelessWidget {
     this.showSave = false,
     this.showShare = false,
     this.showCopyComment = false,
+    this.showDebugJson = false,
     this.editedAt,
     this.copyLabel = 'Copy text',
   });
@@ -1746,6 +1791,21 @@ class _NoteMenuOverlay extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (showDebugJson) ...[
+                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                        InkWell(
+                          onTap: () => onSelect('show_json'),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Text(
+                              'Show raw data',
+                              style: TextStyle(
+                                  fontSize: 14, color: Colors.black54),
+                            ),
+                          ),
+                        ),
+                      ],
                       if (editedAt != null) ...[
                         const Divider(height: 1, color: Color(0xFFE0E0E0)),
                         Padding(

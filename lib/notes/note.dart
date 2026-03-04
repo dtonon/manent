@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'note_attachment.dart';
 
 enum NoteKind {
@@ -53,4 +55,20 @@ class DecryptedNote {
     this.kind = NoteKind.text,
     this.attachment,
   });
+
+  String toDebugJson() {
+    final map = <String, dynamic>{
+      'id': id,
+      if (nostrId != null) 'nostr_id': nostrId,
+      'kind': kind.eventKind,
+      'created_at': createdAt.toIso8601String(),
+      if (editedAt != null) 'edited_at': editedAt!.toIso8601String(),
+      'sync_status': syncStatus.name,
+      if (error != null) 'error': error,
+      if (attachment != null) 'attachment': attachment!.toJson(),
+      if (kind == NoteKind.text) 'text': text,
+    };
+    const encoder = JsonEncoder.withIndent('  ');
+    return encoder.convert(map);
+  }
 }
