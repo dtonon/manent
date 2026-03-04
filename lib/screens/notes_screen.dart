@@ -28,6 +28,8 @@ class NotesScreen extends StatefulWidget {
   final AuthUser user;
   final List<String> additionalRelays;
   final Future<void> Function(List<String>) onAdditionalRelaysChanged;
+  final List<String> blossomServers;
+  final Future<void> Function(List<String>) onBlossomServersChanged;
   final Future<void> Function() onLogout;
 
   const NotesScreen({
@@ -35,6 +37,8 @@ class NotesScreen extends StatefulWidget {
     required this.user,
     required this.additionalRelays,
     required this.onAdditionalRelaysChanged,
+    required this.blossomServers,
+    required this.onBlossomServersChanged,
     required this.onLogout,
   });
 
@@ -153,6 +157,12 @@ class _NotesScreenState extends State<NotesScreen> {
     if (_sending) return;
     final file = _pendingFile;
     if (file != null) {
+      // Files ≥32KB require a Blossom server for upload
+      if (file.bytes.length >= 32 * 1024 &&
+          NoteCache.instance.blossomServers.isEmpty) {
+        final added = await _showFallbackBlossomDialog();
+        if (!added) return;
+      }
       final comment = _textController.text.trim();
       setState(() {
         _sending = true;
@@ -173,6 +183,35 @@ class _NotesScreenState extends State<NotesScreen> {
     _textController.clear();
     await NoteCache.instance.add(text);
     if (mounted) setState(() => _sending = false);
+  }
+
+  Future<bool> _showFallbackBlossomDialog() async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No Blossom servers'),
+        content: const Text(
+          'File uploads larger than 32KB require a Blossom server. '
+          "Your account has none configured — would you like to use blossom.primal.net? "
+          'You can see, and eventually remove it, in the profile page.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No thanks'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Add server'),
+          ),
+        ],
+      ),
+    );
+    if (accepted == true) {
+      await widget.onBlossomServersChanged(['https://blossom.primal.net']);
+      return true;
+    }
+    return false;
   }
 
   Future<void> _pickFile() async {
@@ -236,6 +275,11 @@ class _NotesScreenState extends State<NotesScreen> {
   void _showProfileSheet() {
     final npub = Nip19.encodePubKey(widget.user.pubkey);
     var localAdditional = List<String>.from(widget.additionalRelays);
+    // kind:10063 servers fetched from relay (read-only); snapshot at open time
+    final kind10063Servers = NoteCache.instance.blossomServers
+        .where((s) => !widget.blossomServers.contains(s))
+        .toList();
+    var localBlossom = List<String>.from(widget.blossomServers);
 
     showModalBottomSheet(
       context: context,
@@ -358,6 +402,68 @@ class _NotesScreenState extends State<NotesScreen> {
                                   ..remove(url);
                                 setSheetState(() => localAdditional = updated);
                                 widget.onAdditionalRelaysChanged(updated);
+                              },
+                              child: const Icon(Icons.close,
+                                  size: 16, color: accent),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              if (kind10063Servers.isNotEmpty || localBlossom.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Blossom servers',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // kind:10063 servers are read-only (no X button)
+                ...kind10063Servers.map(
+                  (url) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      url,
+                      style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                // User-saved fallback servers are removable
+                ...localBlossom.map(
+                  (url) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              url,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[700],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Semantics(
+                            label: 'Remove Blossom server',
+                            button: true,
+                            child: GestureDetector(
+                              onTap: () {
+                                final updated = localBlossom.toList()
+                                  ..remove(url);
+                                setSheetState(() => localBlossom = updated);
+                                widget.onBlossomServersChanged(updated);
                               },
                               child: const Icon(Icons.close,
                                   size: 16, color: accent),

@@ -37,7 +37,9 @@ class NoteCache {
   EventSigner? _signer;
   List<String> _writeRelays = [];
   List<int>? _localKey;
-  List<String> _blossomServers = ['https://blossom.primal.net'];
+  List<String> _blossomServers = [];
+
+  List<String> get blossomServers => List.unmodifiable(_blossomServers);
 
   // In-memory decrypted file bytes keyed by sha256
   final _fileCache = <String, Uint8List>{};
@@ -56,7 +58,7 @@ class NoteCache {
   void updateWriteRelays(List<String> relays) => _writeRelays = relays;
 
   void updateBlossomServers(List<String> servers) {
-    if (servers.isNotEmpty) _blossomServers = servers;
+    _blossomServers = servers;
   }
 
   Future<void> loadAll(
@@ -323,6 +325,16 @@ class NoteCache {
         signer: _signer!,
       );
       if (url != null) break;
+    }
+
+    if (url == null) {
+      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      final existing = _map[localId];
+      if (existing != null) {
+        _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
+        _emit();
+      }
+      return;
     }
 
     final updated = attachment.copyWith(url: url);

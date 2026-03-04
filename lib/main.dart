@@ -76,6 +76,7 @@ class ManentApp extends StatefulWidget {
 class _ManentAppState extends State<ManentApp> {
   AuthUser? _user;
   List<String> _additionalRelays = [];
+  List<String> _blossomServers = [];
 
   @override
   void initState() {
@@ -95,6 +96,7 @@ class _ManentAppState extends State<ManentApp> {
 
   Future<void> _initNotes() async {
     _additionalRelays = await AuthService.loadAdditionalRelays();
+    _blossomServers = await AuthService.loadBlossomServers();
     if (mounted) setState(() {});
     await _loadNotes();
   }
@@ -150,9 +152,12 @@ class _ManentAppState extends State<ManentApp> {
     final relaysFuture = RelayFetcher.fetchWriteRelays(user.pubkey);
     final blossomFuture = BlossomServerFetcher.getServers(user.pubkey);
     final relays = await relaysFuture;
-    final blossomServers = await blossomFuture;
+    final fetchedBlossom = await blossomFuture;
     // Both futures run concurrently since we started them before awaiting
-    NoteCache.instance.updateBlossomServers(blossomServers);
+    // Prefer kind:10063 servers; fall back to user-saved servers
+    final effectiveBlossom =
+        fetchedBlossom.isNotEmpty ? fetchedBlossom : _blossomServers;
+    NoteCache.instance.updateBlossomServers(effectiveBlossom);
     if (!mounted || _user == null) return;
     if (relays.isEmpty) {
       if (user.writeRelays.isEmpty && _additionalRelays.isEmpty) {
@@ -177,12 +182,19 @@ class _ManentAppState extends State<ManentApp> {
     if (mounted) setState(() => _user = updated);
   }
 
+  Future<void> _onBlossomServersChanged(List<String> servers) async {
+    setState(() => _blossomServers = servers);
+    await AuthService.saveBlossomServers(servers);
+    NoteCache.instance.updateBlossomServers(servers);
+  }
+
   Future<void> _onLogout() async {
     await NoteCache.instance.clear();
     SignerSession.clear();
     setState(() {
       _user = null;
       _additionalRelays = [];
+      _blossomServers = [];
     });
     await AuthService.clear();
   }
@@ -235,6 +247,8 @@ class _ManentAppState extends State<ManentApp> {
               user: _user!,
               additionalRelays: _additionalRelays,
               onAdditionalRelaysChanged: _onAdditionalRelaysChanged,
+              blossomServers: _blossomServers,
+              onBlossomServersChanged: _onBlossomServersChanged,
               onLogout: _onLogout,
             ),
     );

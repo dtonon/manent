@@ -30,6 +30,7 @@ class AuthService {
   static final _kWriteRelays         = '${_p}write_relays';
   static final _kAdditionalRelays    = '${_p}additional_write_relays';
   static final _kFallbackPromptShown = '${_p}fallback_relay_prompt_shown';
+  static final _kBlossomServers      = '${_p}blossom_servers';
 
   static Future<AuthUser?> loadUser() async {
     final prefs = await SharedPreferences.getInstance();
@@ -67,6 +68,16 @@ class AuthService {
   static Future<void> saveAdditionalRelays(List<String> relays) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_kAdditionalRelays, relays);
+  }
+
+  static Future<List<String>> loadBlossomServers() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_kBlossomServers) ?? [];
+  }
+
+  static Future<void> saveBlossomServers(List<String> servers) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_kBlossomServers, servers);
   }
 
   static Future<bool> getFallbackPromptShown() async {
