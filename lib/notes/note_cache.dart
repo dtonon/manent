@@ -58,7 +58,8 @@ class NoteCache {
   void updateWriteRelays(List<String> relays) => _writeRelays = relays;
 
   void updateBlossomServers(List<String> servers) {
-    _blossomServers = servers;
+    _blossomServers =
+        servers.map((s) => s.trim().replaceAll(RegExp(r'/+$'), '')).toList();
   }
 
   Future<void> loadAll(
@@ -308,6 +309,20 @@ class NoteCache {
     return plain;
   }
 
+  Future<void> _retryUploadAndPublish(
+    String localId,
+    NoteAttachment attachment,
+    int createdAt,
+  ) async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final file = File(p.join(dir.path, 'files', '${attachment.sha256}.enc'));
+      if (!await file.exists()) return;
+      final encryptedBytes = await file.readAsBytes();
+      await _uploadFileAndPublish(localId, attachment, encryptedBytes, createdAt);
+    } catch (_) {}
+  }
+
   Future<void> _uploadFileAndPublish(
     String localId,
     NoteAttachment attachment,
@@ -369,6 +384,8 @@ class NoteCache {
     int createdAt,
   ) async {
     if (_signer == null) return;
+    // Never publish a remote file note that hasn't been uploaded yet
+    if (!attachment.isInline && attachment.url == null) return;
     if (_writeRelays.isEmpty) {
       promptFallbackRelays.value = true;
       if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
@@ -573,10 +590,16 @@ class NoteCache {
     _emit();
 
     if (existing.kind == NoteKind.file && existing.attachment != null) {
+      final att = existing.attachment!;
       final eventTime =
           (existing.editedAt ?? existing.createdAt).millisecondsSinceEpoch ~/
               1000;
-      _publishFileEvent(id, existing.attachment!, eventTime);
+      if (att.isInline || att.url != null) {
+        _publishFileEvent(id, att, eventTime);
+      } else {
+        // Encrypted file never uploaded — re-read from disk and retry upload
+        _retryUploadAndPublish(id, att, eventTime);
+      }
     } else {
       final eventTime =
           (existing.editedAt ?? existing.createdAt).millisecondsSinceEpoch ~/

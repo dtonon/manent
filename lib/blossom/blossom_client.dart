@@ -13,6 +13,7 @@ class BlossomClient {
     required String sha256,
     required EventSigner signer,
   }) async {
+    final uri = Uri.parse('$server/upload');
     try {
       final expiration =
           (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 3600;
@@ -31,7 +32,6 @@ class BlossomClient {
       final eventJson = jsonEncode(Nip01EventModel.fromEntity(signed).toJson());
       final authHeader = 'Nostr ${base64Encode(utf8.encode(eventJson))}';
 
-      final uri = Uri.parse('${server.trimRight()}/upload');
       final response = await http
           .put(
             uri,
