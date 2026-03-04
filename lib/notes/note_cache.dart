@@ -698,8 +698,9 @@ class NoteCache {
 
     for (final localId in toDelete) {
       final note = _map[localId];
-      if (note?.attachment?.sha256 != null) {
+      if (note?.attachment != null) {
         await _deleteEncFile(note!.attachment!.sha256);
+        _deleteFromBlossom(note.attachment!);
       }
       if (_db != null) await _db!.delete(localId);
       _map.remove(localId);
@@ -989,8 +990,9 @@ class NoteCache {
 
   Future<void> delete(String id, {String? nostrId}) async {
     final note = _map[id];
-    if (note?.attachment?.sha256 != null) {
+    if (note?.attachment != null) {
       await _deleteEncFile(note!.attachment!.sha256);
+      _deleteFromBlossom(note.attachment!);
     }
     if (_db != null) await _db!.delete(id);
     _map.remove(id);
@@ -1095,6 +1097,17 @@ class NoteCache {
     final filesDir = Directory(p.join(dir.path, 'files'));
     if (!await filesDir.exists()) await filesDir.create(recursive: true);
     return filesDir.path;
+  }
+
+  Future<void> _deleteFromBlossom(NoteAttachment attachment) async {
+    if (_signer == null || attachment.url == null) return;
+    for (final server in _blossomServers) {
+      BlossomClient.delete(
+        server: server,
+        sha256: attachment.sha256,
+        signer: _signer!,
+      );
+    }
   }
 
   Future<void> _deleteEncFile(String sha256) async {

@@ -53,6 +53,37 @@ class BlossomClient {
     }
   }
 
+  // Deletes a blob from a Blossom server using BUD-01 auth. Best-effort.
+  static Future<void> delete({
+    required String server,
+    required String sha256,
+    required EventSigner signer,
+  }) async {
+    final uri = Uri.parse('$server/$sha256');
+    try {
+      final expiration =
+          (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 3600;
+      final authEvent = Nip01Event(
+        pubKey: signer.getPublicKey(),
+        kind: 24242,
+        tags: [
+          ['t', 'delete'],
+          ['x', sha256],
+          ['expiration', expiration.toString()],
+        ],
+        content: 'Delete blob',
+        createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      );
+      final signed = await signer.sign(authEvent);
+      final eventJson = jsonEncode(Nip01EventModel.fromEntity(signed).toJson());
+      final authHeader = 'Nostr ${base64Encode(utf8.encode(eventJson))}';
+
+      await http
+          .delete(uri, headers: {'Authorization': authHeader})
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {}
+  }
+
   static Future<Uint8List?> download(String url) async {
     try {
       final response = await http
