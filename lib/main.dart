@@ -11,6 +11,7 @@ import 'auth/auth_state.dart';
 import 'auth/nostr_client.dart';
 import 'auth/profile_fetcher.dart';
 import 'auth/relay_fetcher.dart';
+import 'blossom/blossom_server_fetcher.dart';
 import 'auth/signer_session.dart';
 import 'auth/signer_store.dart';
 import 'notes/note_cache.dart';
@@ -146,7 +147,12 @@ class _ManentAppState extends State<ManentApp> {
   Future<void> _refreshRelays() async {
     final user = _user;
     if (user == null) return;
-    final relays = await RelayFetcher.fetchWriteRelays(user.pubkey);
+    final relaysFuture = RelayFetcher.fetchWriteRelays(user.pubkey);
+    final blossomFuture = BlossomServerFetcher.getServers(user.pubkey);
+    final relays = await relaysFuture;
+    final blossomServers = await blossomFuture;
+    // Both futures run concurrently since we started them before awaiting
+    NoteCache.instance.updateBlossomServers(blossomServers);
     if (!mounted || _user == null) return;
     if (relays.isEmpty) {
       if (user.writeRelays.isEmpty && _additionalRelays.isEmpty) {
@@ -191,7 +197,7 @@ class _ManentAppState extends State<ManentApp> {
         Widget result = isMobile
             ? MediaQuery(
                 data: MediaQuery.of(context).copyWith(
-                  textScaler: TextScaler.linear(1.2),
+                  textScaler: const TextScaler.linear(1.2),
                 ),
                 child: child!,
               )

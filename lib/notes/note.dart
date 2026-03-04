@@ -1,3 +1,18 @@
+import 'note_attachment.dart';
+
+enum NoteKind {
+  text,
+  file;
+
+  int get eventKind => switch (this) {
+        text => 33301,
+        file => 33302,
+      };
+
+  static NoteKind fromEventKind(int k) =>
+      k == 33302 ? file : text;
+}
+
 enum SyncStatus {
   pending,
   synced,
@@ -24,6 +39,8 @@ class DecryptedNote {
   final DateTime createdAt;
   final DateTime? editedAt;
   final SyncStatus syncStatus;
+  final NoteKind kind;
+  final NoteAttachment? attachment;
 
   const DecryptedNote({
     required this.id,
@@ -33,5 +50,7 @@ class DecryptedNote {
     required this.createdAt,
     this.editedAt,
     required this.syncStatus,
+    this.kind = NoteKind.text,
+    this.attachment,
   });
 }

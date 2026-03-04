@@ -445,7 +445,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 : manentAppBar(
                     actions: [
                       Padding(
-                        padding: const EdgeInsets.only(right: 20),
+                        padding: const EdgeInsets.only(right: 12),
                         child: Semantics(
                           label: 'Profile: ${widget.user.name}',
                           button: true,
@@ -634,7 +634,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   ),
                 if (hasPendingFile)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(32, 18, 35, 0),
+                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
                     child: Row(
                       children: [
                         if (_pendingFile!.mimeType.startsWith('image/')) ...[
@@ -676,7 +676,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 Flexible(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 32, vertical: 18),
+                        horizontal: 16, vertical: 18),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [

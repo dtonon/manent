@@ -25,7 +25,7 @@ class AppDatabase {
 
     _db = await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE notes (
@@ -35,7 +35,8 @@ class AppDatabase {
             encrypted_content TEXT NOT NULL DEFAULT '',
             local_content TEXT,
             synced_to_relay INTEGER NOT NULL DEFAULT 0,
-            edited_at INTEGER
+            edited_at INTEGER,
+            kind INTEGER NOT NULL DEFAULT 33301
           )
         ''');
       },
@@ -48,6 +49,14 @@ class AppDatabase {
         }
         if (oldVersion < 4) {
           await db.execute('ALTER TABLE notes ADD COLUMN edited_at INTEGER');
+        }
+        if (oldVersion < 5) {
+          final cols = await db.rawQuery('PRAGMA table_info(notes)');
+          final hasKind = cols.any((r) => r['name'] == 'kind');
+          if (!hasKind) {
+            await db.execute(
+                'ALTER TABLE notes ADD COLUMN kind INTEGER NOT NULL DEFAULT 33301');
+          }
         }
       },
     );
@@ -63,6 +72,7 @@ class AppDatabase {
     required String id,
     required int createdAt,
     required String localContent,
+    int kind = 33301,
   }) async {
     final db = await _getDb();
     await db.insert('notes', {
@@ -71,6 +81,7 @@ class AppDatabase {
       'encrypted_content': '',
       'local_content': localContent,
       'synced_to_relay': 0,
+      'kind': kind,
     });
   }
 
@@ -98,6 +109,7 @@ class AppDatabase {
     required String encryptedContent,
     String? localContent,
     int? editedAt,
+    int kind = 33301,
   }) async {
     final db = await _getDb();
     await db.insert('notes', {
@@ -108,6 +120,7 @@ class AppDatabase {
       'local_content': localContent,
       'edited_at': editedAt,
       'synced_to_relay': 1,
+      'kind': kind,
     });
   }
 

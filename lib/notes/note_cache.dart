@@ -1,16 +1,26 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:mime/mime.dart';
 import 'package:ndk/data_layer/repositories/verifiers/bip340_event_verifier.dart';
 import 'package:ndk/domain_layer/entities/filter.dart';
 import 'package:ndk/domain_layer/entities/nip_01_event.dart';
 import 'package:ndk/domain_layer/repositories/event_signer.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:thumbhash/thumbhash.dart';
 
 import '../auth/nostr_client.dart';
+import '../blossom/blossom_client.dart';
+import '../blossom/file_crypto.dart';
 import 'local_crypto.dart';
 import 'local_key_store.dart';
 import 'note.dart';
+import 'note_attachment.dart';
 import 'notes_database.dart';
 
 class NoteCache {
@@ -27,6 +37,10 @@ class NoteCache {
   EventSigner? _signer;
   List<String> _writeRelays = [];
   List<int>? _localKey;
+  List<String> _blossomServers = ['https://blossom.primal.net'];
+
+  // In-memory decrypted file bytes keyed by sha256
+  final _fileCache = <String, Uint8List>{};
 
   StreamSubscription<Nip01Event>? _relaySubscription;
   String? _relaySubId;
@@ -40,6 +54,10 @@ class NoteCache {
   void _emit() => notifier.value = _sorted;
 
   void updateWriteRelays(List<String> relays) => _writeRelays = relays;
+
+  void updateBlossomServers(List<String> servers) {
+    if (servers.isNotEmpty) _blossomServers = servers;
+  }
 
   Future<void> loadAll(
       AppDatabase? db, EventSigner signer, List<String> writeRelays) async {
@@ -59,25 +77,50 @@ class NoteCache {
       final rows = await _db!.getAll();
       for (final row in rows) {
         final id = row['id'] as String;
+        final rowKind = (row['kind'] as int?) ?? 33301;
+        final kind = NoteKind.fromEventKind(rowKind);
         final localEncoded = row['local_content'] as String?;
         String? text;
         String? errorMsg;
+        NoteAttachment? attachment;
 
         if (localEncoded != null) {
-          // Fast path — local AES key, no signer needed
-          text = await LocalCrypto.decrypt(_localKey!, localEncoded);
-          if (text == null) {
+          final decoded = await LocalCrypto.decrypt(_localKey!, localEncoded);
+          if (decoded == null) {
             errorMsg = 'The local decryption failed.';
+          } else if (kind == NoteKind.file) {
+            try {
+              attachment =
+                  NoteAttachment.fromJson(jsonDecode(decoded) as Map<String, dynamic>);
+              text = '';
+            } catch (_) {
+              errorMsg = 'Failed to parse file metadata.';
+            }
+          } else {
+            text = decoded;
           }
         } else {
-          // Migration path — event stored before local-key support, or pending retry
+          // Migration / pending retry path
           final ciphertext = row['encrypted_content'] as String;
           if (ciphertext.isNotEmpty) {
             final result = await _decryptViaSigner(signer, ciphertext);
-            text = result.text;
-            if (text != null) {
-              final cached = await LocalCrypto.encrypt(_localKey!, text);
-              await _db!.updateLocalContent(id, cached);
+            final plain = result.text;
+            if (plain != null) {
+              if (kind == NoteKind.file) {
+                try {
+                  attachment = NoteAttachment.fromJson(
+                      jsonDecode(plain) as Map<String, dynamic>);
+                  text = '';
+                } catch (_) {
+                  errorMsg = 'Failed to parse file metadata.';
+                }
+              } else {
+                text = plain;
+              }
+              if (errorMsg == null) {
+                final cached = await LocalCrypto.encrypt(_localKey!, plain);
+                await _db!.updateLocalContent(id, cached);
+              }
             } else {
               errorMsg =
                   'The remote decryption failed with the error "${result.error}".';
@@ -85,7 +128,7 @@ class NoteCache {
           }
         }
 
-        if (text == null && errorMsg == null) continue;
+        if (text == null && attachment == null && errorMsg == null) continue;
         final editedAtRaw = row['edited_at'] as int?;
         _map[id] = DecryptedNote(
           id: id,
@@ -98,6 +141,8 @@ class NoteCache {
               ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
               : null,
           syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
+          kind: kind,
+          attachment: attachment,
         );
       }
       _emit();
@@ -131,6 +176,267 @@ class NoteCache {
     _emit();
 
     _publishToRelays(id, text, now.millisecondsSinceEpoch ~/ 1000);
+  }
+
+  Future<void> addFile(Uint8List bytes, String filename,
+      {String? comment}) async {
+    if (_localKey == null) return;
+
+    filename = p.basename(filename);
+    final mimeType = lookupMimeType(filename) ?? 'application/octet-stream';
+    final key = FileCrypto.generateKey();
+    final encryptedBytes = await FileCrypto.encrypt(key, bytes);
+    final sha256 = await FileCrypto.sha256Hex(encryptedBytes);
+    final keyHex = FileCrypto.keyToHex(key);
+
+    // Compute thumbhash for images
+    String? thumbhash;
+    if (mimeType.startsWith('image/')) {
+      thumbhash = await _computeThumbhash(bytes);
+    }
+
+    final isInline = encryptedBytes.length < 32 * 1024;
+
+    NoteAttachment attachment;
+    if (isInline) {
+      attachment = NoteAttachment(
+        data: base64Encode(encryptedBytes),
+        filename: filename,
+        mimeType: mimeType,
+        size: bytes.length,
+        sha256: sha256,
+        key: keyHex,
+        thumbhash: thumbhash,
+        comment: comment,
+      );
+    } else {
+      // Save encrypted file to disk cache for later display
+      if (!kIsWeb) {
+        final dir = await _filesCacheDir();
+        final encFile = File(p.join(dir, '$sha256.enc'));
+        await encFile.writeAsBytes(encryptedBytes);
+      }
+      attachment = NoteAttachment(
+        filename: filename,
+        mimeType: mimeType,
+        size: bytes.length,
+        sha256: sha256,
+        key: keyHex,
+        thumbhash: thumbhash,
+        comment: comment,
+      );
+    }
+
+    // Cache decrypted bytes in memory
+    _fileCache[sha256] = bytes;
+
+    final metaJson = attachment.toJsonString();
+    final localContent = await LocalCrypto.encrypt(_localKey!, metaJson);
+    final id = _generateId();
+    final now = DateTime.now();
+
+    if (_db != null) {
+      await _db!.insert(
+        id: id,
+        createdAt: now.millisecondsSinceEpoch ~/ 1000,
+        localContent: localContent,
+        kind: 33302,
+      );
+    }
+
+    _map[id] = DecryptedNote(
+      id: id,
+      text: '',
+      createdAt: now,
+      syncStatus: SyncStatus.pending,
+      kind: NoteKind.file,
+      attachment: attachment,
+    );
+    _emit();
+
+    if (isInline) {
+      _publishFileEvent(id, attachment, now.millisecondsSinceEpoch ~/ 1000);
+    } else {
+      _uploadFileAndPublish(id, attachment, encryptedBytes, now.millisecondsSinceEpoch ~/ 1000);
+    }
+  }
+
+  // Returns decrypted file bytes for an attachment.
+  Future<Uint8List?> getFileBytes(NoteAttachment attachment) async {
+    // Check memory cache
+    final cached = _fileCache[attachment.sha256];
+    if (cached != null) return cached;
+
+    final key = FileCrypto.hexToKey(attachment.key);
+
+    // Inline data
+    if (attachment.isInline && attachment.data != null) {
+      final encBytes = base64Decode(attachment.data!);
+      final plain = await FileCrypto.decrypt(key, encBytes);
+      if (plain != null) _fileCache[attachment.sha256] = plain;
+      return plain;
+    }
+
+    // Check disk cache
+    if (!kIsWeb) {
+      final dir = await _filesCacheDir();
+      final encFile = File(p.join(dir, '${attachment.sha256}.enc'));
+      if (await encFile.exists()) {
+        final encBytes = await encFile.readAsBytes();
+        final plain = await FileCrypto.decrypt(key, encBytes);
+        if (plain != null) _fileCache[attachment.sha256] = plain;
+        return plain;
+      }
+    }
+
+    // Download from Blossom
+    if (attachment.url == null) return null;
+    final encBytes = await BlossomClient.download(attachment.url!);
+    if (encBytes == null) return null;
+
+    // Save to disk cache
+    if (!kIsWeb) {
+      final dir = await _filesCacheDir();
+      final encFile = File(p.join(dir, '${attachment.sha256}.enc'));
+      await encFile.writeAsBytes(encBytes);
+    }
+
+    final plain = await FileCrypto.decrypt(key, encBytes);
+    if (plain != null) _fileCache[attachment.sha256] = plain;
+    return plain;
+  }
+
+  Future<void> _uploadFileAndPublish(
+    String localId,
+    NoteAttachment attachment,
+    Uint8List encryptedBytes,
+    int createdAt,
+  ) async {
+    if (_signer == null || _blossomServers.isEmpty) return;
+
+    String? url;
+    for (final server in _blossomServers) {
+      url = await BlossomClient.upload(
+        server: server,
+        data: encryptedBytes,
+        sha256: attachment.sha256,
+        signer: _signer!,
+      );
+      if (url != null) break;
+    }
+
+    final updated = attachment.copyWith(url: url);
+
+    // Update local_content with the URL
+    if (_localKey != null && _db != null) {
+      final metaJson = updated.toJsonString();
+      final localContent = await LocalCrypto.encrypt(_localKey!, metaJson);
+      await _db!.updateLocalContent(localId, localContent);
+    }
+
+    // Update in-memory note
+    final existing = _map[localId];
+    if (existing != null) {
+      _map[localId] = DecryptedNote(
+        id: localId,
+        nostrId: existing.nostrId,
+        text: '',
+        createdAt: existing.createdAt,
+        syncStatus: SyncStatus.pending,
+        kind: NoteKind.file,
+        attachment: updated,
+      );
+    }
+
+    await _publishFileEvent(localId, updated, createdAt);
+  }
+
+  Future<void> _publishFileEvent(
+    String localId,
+    NoteAttachment attachment,
+    int createdAt,
+  ) async {
+    if (_signer == null) return;
+    if (_writeRelays.isEmpty) {
+      promptFallbackRelays.value = true;
+      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      final existing = _map[localId];
+      if (existing != null) {
+        _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
+        _emit();
+      }
+      return;
+    }
+    try {
+      final metaJson = attachment.toJsonString();
+      final encrypted = await _signer!.encryptNip44(
+        plaintext: metaJson,
+        recipientPubKey: _signer!.getPublicKey(),
+      );
+      if (encrypted == null) return;
+
+      if (_db != null) {
+        await _db!.updateEncryptedContent(
+            localId: localId, encryptedContent: encrypted);
+      }
+
+      final event = Nip01Event(
+        pubKey: _signer!.getPublicKey(),
+        kind: 33302,
+        tags: [
+          ['d', localId]
+        ],
+        content: encrypted,
+        createdAt: createdAt,
+      );
+      final signed = await _signer!.sign(event);
+
+      if (_db != null) {
+        await _db!.updateNostrId(localId: localId, nostrId: signed.id);
+      }
+      final existing = _map[localId];
+      if (existing != null) {
+        _map[localId] = DecryptedNote(
+          id: localId,
+          nostrId: signed.id,
+          text: '',
+          createdAt: existing.createdAt,
+          syncStatus: SyncStatus.pending,
+          kind: NoteKind.file,
+          attachment: existing.attachment,
+        );
+      }
+
+      final responses = await NostrClient()
+          .ndk
+          .broadcast
+          .broadcast(nostrEvent: signed, specificRelays: _writeRelays)
+          .broadcastDoneFuture;
+
+      final newStatus = responses.any((r) => r.broadcastSuccessful)
+          ? SyncStatus.synced
+          : SyncStatus.failed;
+
+      if (newStatus == SyncStatus.failed) promptFallbackRelays.value = true;
+
+      if (_db != null) {
+        await _db!.updateSyncStatus(localId, newStatus.value);
+      }
+      final updated = _map[localId];
+      if (updated != null) {
+        _map[localId] = _withSyncStatus(updated, newStatus);
+        _emit();
+      }
+
+      _retryPendingDecryptions();
+    } catch (_) {
+      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      final existing = _map[localId];
+      if (existing != null) {
+        _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
+        _emit();
+      }
+    }
   }
 
   Future<void> update(String id, String newText) async {
@@ -171,14 +477,7 @@ class NoteCache {
       if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
       if (existing != null) {
-        _map[localId] = DecryptedNote(
-          id: localId,
-          nostrId: existing.nostrId,
-          text: existing.text,
-          createdAt: existing.createdAt,
-          editedAt: existing.editedAt,
-          syncStatus: SyncStatus.failed,
-        );
+        _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
         _emit();
       }
       return;
@@ -206,8 +505,6 @@ class NoteCache {
       );
       final signed = await _signer!.sign(event);
 
-      // Set nostrId BEFORE broadcasting so the relay echo is recognised
-      // as a duplicate in _onRelayEvent; sync status stays pending until result
       if (_db != null) {
         await _db!.updateNostrId(localId: localId, nostrId: signed.id);
       }
@@ -240,14 +537,7 @@ class NoteCache {
       }
       final updated = _map[localId];
       if (updated != null) {
-        _map[localId] = DecryptedNote(
-          id: localId,
-          nostrId: updated.nostrId,
-          text: updated.text,
-          createdAt: updated.createdAt,
-          editedAt: updated.editedAt,
-          syncStatus: newStatus,
-        );
+        _map[localId] = _withSyncStatus(updated, newStatus);
         _emit();
       }
 
@@ -256,14 +546,7 @@ class NoteCache {
       if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
       if (existing != null) {
-        _map[localId] = DecryptedNote(
-          id: localId,
-          nostrId: existing.nostrId,
-          text: existing.text,
-          createdAt: existing.createdAt,
-          editedAt: existing.editedAt,
-          syncStatus: SyncStatus.failed,
-        );
+        _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
         _emit();
       }
     }
@@ -274,20 +557,20 @@ class NoteCache {
     if (existing == null || existing.error != null) return;
 
     if (_db != null) await _db!.updateSyncStatus(id, SyncStatus.pending.value);
-    _map[id] = DecryptedNote(
-      id: id,
-      nostrId: existing.nostrId,
-      text: existing.text,
-      createdAt: existing.createdAt,
-      editedAt: existing.editedAt,
-      syncStatus: SyncStatus.pending,
-    );
+    _map[id] = _withSyncStatus(existing, SyncStatus.pending);
     _emit();
 
-    final eventTime =
-        (existing.editedAt ?? existing.createdAt).millisecondsSinceEpoch ~/
-            1000;
-    _publishToRelays(id, existing.text, eventTime);
+    if (existing.kind == NoteKind.file && existing.attachment != null) {
+      final eventTime =
+          (existing.editedAt ?? existing.createdAt).millisecondsSinceEpoch ~/
+              1000;
+      _publishFileEvent(id, existing.attachment!, eventTime);
+    } else {
+      final eventTime =
+          (existing.editedAt ?? existing.createdAt).millisecondsSinceEpoch ~/
+              1000;
+      _publishToRelays(id, existing.text, eventTime);
+    }
   }
 
   Future<void> sync({bool showLoading = false}) async {
@@ -308,16 +591,14 @@ class NoteCache {
     final int? since;
     if (_db != null) {
       final latest = await _db!.getLatestCreatedAt();
-      // Always go back at least 30 days to catch notes from other devices
       since = latest != null ? min(latest, thirtyDaysAgo) : thirtyDaysAgo;
     } else {
-      // Web has no persistent store; fall back to the same 30-day minimum
       since = thirtyDaysAgo;
     }
 
     final response = NostrClient().ndk.requests.subscription(
       filter: Filter(
-        kinds: [33301, 5],
+        kinds: [33301, 33302, 5],
         authors: [_signer!.getPublicKey()],
         since: since,
       ),
@@ -334,13 +615,11 @@ class NoteCache {
       if (showLoading && _map.isNotEmpty) _clearSyncLoading();
     });
 
-    // Clear loading after timeout in case relays don't respond
     if (showLoading) {
       _syncLoadingTimer =
           Timer(const Duration(seconds: 10), () => loading.value = false);
     }
 
-    // After relays have sent historical events, retry any that failed to decrypt
     Future.delayed(const Duration(seconds: 10), _retryPendingDecryptions);
   }
 
@@ -357,11 +636,13 @@ class NoteCache {
         .map((t) => t[1])
         .toSet();
 
-    // a tags: "33301:<pubkey>:<d-tag>" — extract the d-tag portion
+    // a tags: "33301:<pubkey>:<d-tag>" or "33302:<pubkey>:<d-tag>"
     final referencedDTags = event.tags
         .where((t) => t.length >= 2 && t[0] == 'a')
         .map((t) => t[1].split(':'))
-        .where((parts) => parts.length == 3 && parts[0] == '33301')
+        .where((parts) =>
+            parts.length == 3 &&
+            (parts[0] == '33301' || parts[0] == '33302'))
         .map((parts) => parts[2])
         .toSet();
 
@@ -376,13 +657,15 @@ class NoteCache {
 
     if (toDelete.isEmpty) return;
 
-    // Only verify the signature when it actually targets a known note
     if (!await _verifier.verify(event)) return;
 
-    // Remember so relay echoes arriving later in the same session are ignored
     _pendingDeletions.addAll(referencedEventIds);
 
     for (final localId in toDelete) {
+      final note = _map[localId];
+      if (note?.attachment?.sha256 != null) {
+        await _deleteEncFile(note!.attachment!.sha256);
+      }
       if (_db != null) await _db!.delete(localId);
       _map.remove(localId);
     }
@@ -394,32 +677,49 @@ class NoteCache {
     if (_signer == null || _localKey == null) return;
     if (_pendingDeletions.contains(event.id)) return;
 
-    // Dedup: prefer DB check; fall back to in-memory map on web
     if (_db != null) {
       if (await _db!.existsByNostrId(event.id)) return;
     } else {
       if (_map.values.any((n) => n.nostrId == event.id)) return;
     }
 
-    // Use d tag as stable local ID so both devices share the same identifier
-    final dTag = event.tags.where((t) => t.length >= 2 && t[0] == 'd').firstOrNull;
+    final kind = NoteKind.fromEventKind(event.kind);
+    final dTag = event.tags
+        .where((t) => t.length >= 2 && t[0] == 'd')
+        .firstOrNull;
     final localId = dTag?[1] ?? _generateId();
 
-    // Check if this is an edit of an existing note (same d tag, different event id)
     final existingRow = _db != null ? await _db!.getById(localId) : null;
     final existingNote = _map[localId];
     if (existingRow != null || existingNote != null) {
       final existingVersionTime = existingRow != null
-          ? ((existingRow['edited_at'] as int?) ?? (existingRow['created_at'] as int))
+          ? ((existingRow['edited_at'] as int?) ??
+              (existingRow['created_at'] as int))
           : (existingNote!.editedAt ?? existingNote.createdAt)
-              .millisecondsSinceEpoch ~/
+                  .millisecondsSinceEpoch ~/
               1000;
       if (event.createdAt <= existingVersionTime) return;
 
       final result = await _decryptViaSigner(_signer!, event.content);
-      final text = result.text;
+      final plain = result.text;
+      NoteAttachment? attachment;
+      String? errorMsg;
+
+      if (plain != null) {
+        if (kind == NoteKind.file) {
+          try {
+            attachment = NoteAttachment.fromJson(
+                jsonDecode(plain) as Map<String, dynamic>);
+          } catch (_) {
+            errorMsg = 'Failed to parse file metadata.';
+          }
+        }
+      } else {
+        errorMsg = 'The remote decryption failed with the error "${result.error}".';
+      }
+
       final localContent =
-          text != null ? await LocalCrypto.encrypt(_localKey!, text) : null;
+          plain != null ? await LocalCrypto.encrypt(_localKey!, plain) : null;
 
       if (_db != null) {
         await _db!.updateSyncedEdit(
@@ -439,13 +739,13 @@ class NoteCache {
       _map[localId] = DecryptedNote(
         id: localId,
         nostrId: event.id,
-        text: text ?? existingNote?.text ?? '',
-        error: text == null
-            ? 'The remote decryption failed with the error "${result.error}".'
-            : null,
+        text: kind == NoteKind.file ? '' : (plain ?? existingNote?.text ?? ''),
+        error: errorMsg,
         createdAt: originalCreatedAt,
         editedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
         syncStatus: SyncStatus.synced,
+        kind: kind,
+        attachment: attachment,
       );
       _emit();
       return;
@@ -453,11 +753,27 @@ class NoteCache {
 
     try {
       final result = await _decryptViaSigner(_signer!, event.content);
-      final text = result.text;
-      final localContent =
-          text != null ? await LocalCrypto.encrypt(_localKey!, text) : null;
+      final plain = result.text;
+      NoteAttachment? attachment;
+      String? errorMsg;
 
-      // Decode original creation time from the d tag; compare to detect edits
+      if (plain != null) {
+        if (kind == NoteKind.file) {
+          try {
+            attachment = NoteAttachment.fromJson(
+                jsonDecode(plain) as Map<String, dynamic>);
+          } catch (_) {
+            errorMsg = 'Failed to parse file metadata.';
+          }
+        }
+      } else {
+        errorMsg =
+            'The remote decryption failed with the error "${result.error}".';
+      }
+
+      final localContent =
+          plain != null ? await LocalCrypto.encrypt(_localKey!, plain) : null;
+
       final originalCreatedAt = _createdAtFromId(localId);
       final originalCreatedAtSeconds =
           originalCreatedAt.millisecondsSinceEpoch ~/ 1000;
@@ -473,28 +789,27 @@ class NoteCache {
           encryptedContent: event.content,
           localContent: localContent,
           editedAt: editedAt != null ? event.createdAt : null,
+          kind: event.kind,
         );
       }
 
       _map[localId] = DecryptedNote(
         id: localId,
         nostrId: event.id,
-        text: text ?? '',
-        error: text == null
-            ? 'The remote decryption failed with the error "${result.error}".'
-            : null,
+        text: kind == NoteKind.file ? '' : (plain ?? ''),
+        error: errorMsg,
         createdAt: originalCreatedAt,
         editedAt: editedAt,
         syncStatus: SyncStatus.synced,
+        kind: kind,
+        attachment: attachment,
       );
       _emit();
     } catch (_) {}
   }
 
-  // Retries decryption for events stored encrypted-only (local_content is null).
-  // Called after a successful signer operation proves the session is alive.
   Future<void> _retryPendingDecryptions() async {
-    if (_db == null || _signer == null || _localKey == null) return; // no-op on web
+    if (_db == null || _signer == null || _localKey == null) return;
 
     final rows = await _db!.getAll();
     int retried = 0;
@@ -507,24 +822,39 @@ class NoteCache {
       final id = row['id'] as String;
       if (_map.containsKey(id) && _map[id]!.error == null) continue;
 
+      final rowKind = (row['kind'] as int?) ?? 33301;
+      final kind = NoteKind.fromEventKind(rowKind);
+
       final result = await _decryptViaSigner(_signer!, ciphertext);
       if (result.text == null) continue;
-      final text = result.text!;
+      final plain = result.text!;
 
-      final localContent = await LocalCrypto.encrypt(_localKey!, text);
+      NoteAttachment? attachment;
+      if (kind == NoteKind.file) {
+        try {
+          attachment =
+              NoteAttachment.fromJson(jsonDecode(plain) as Map<String, dynamic>);
+        } catch (_) {
+          continue;
+        }
+      }
+
+      final localContent = await LocalCrypto.encrypt(_localKey!, plain);
       await _db!.updateLocalContent(id, localContent);
 
       final editedAtRaw = row['edited_at'] as int?;
       _map[id] = DecryptedNote(
         id: id,
         nostrId: row['nostr_id'] as String?,
-        text: text,
+        text: kind == NoteKind.file ? '' : plain,
         createdAt: DateTime.fromMillisecondsSinceEpoch(
             (row['created_at'] as int) * 1000),
         editedAt: editedAtRaw != null
             ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
             : null,
         syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
+        kind: kind,
+        attachment: attachment,
       );
       retried++;
     }
@@ -549,29 +879,41 @@ class NoteCache {
     final row = await _db!.getById(id);
     if (row == null) return false;
 
-    // Try local key first (handles transient errors)
+    final rowKind = (row['kind'] as int?) ?? 33301;
+    final kind = NoteKind.fromEventKind(rowKind);
+
     final localEncoded = row['local_content'] as String?;
     if (localEncoded != null) {
-      final text = await LocalCrypto.decrypt(_localKey!, localEncoded);
-      if (text != null) {
+      final plain = await LocalCrypto.decrypt(_localKey!, localEncoded);
+      if (plain != null) {
+        NoteAttachment? attachment;
+        if (kind == NoteKind.file) {
+          try {
+            attachment =
+                NoteAttachment.fromJson(jsonDecode(plain) as Map<String, dynamic>);
+          } catch (_) {
+            return false;
+          }
+        }
         final editedAtRaw = row['edited_at'] as int?;
         _map[id] = DecryptedNote(
           id: id,
           nostrId: row['nostr_id'] as String?,
-          text: text,
+          text: kind == NoteKind.file ? '' : plain,
           createdAt: DateTime.fromMillisecondsSinceEpoch(
               (row['created_at'] as int) * 1000),
           editedAt: editedAtRaw != null
               ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
               : null,
           syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
+          kind: kind,
+          attachment: attachment,
         );
         _emit();
         return true;
       }
     }
 
-    // Try signer on encrypted_content
     if (_signer == null) return false;
     final ciphertext = (row['encrypted_content'] as String?) ?? '';
     if (ciphertext.isEmpty) return false;
@@ -579,30 +921,46 @@ class NoteCache {
     final result = await _decryptViaSigner(_signer!, ciphertext);
     if (result.text == null) return false;
 
-    final text = result.text!;
-    final localContent = await LocalCrypto.encrypt(_localKey!, text);
+    final plain = result.text!;
+    NoteAttachment? attachment;
+    if (kind == NoteKind.file) {
+      try {
+        attachment =
+            NoteAttachment.fromJson(jsonDecode(plain) as Map<String, dynamic>);
+      } catch (_) {
+        return false;
+      }
+    }
+
+    final localContent = await LocalCrypto.encrypt(_localKey!, plain);
     await _db!.updateLocalContent(id, localContent);
     final editedAtRaw = row['edited_at'] as int?;
     _map[id] = DecryptedNote(
       id: id,
       nostrId: row['nostr_id'] as String?,
-      text: text,
+      text: kind == NoteKind.file ? '' : plain,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
           (row['created_at'] as int) * 1000),
       editedAt: editedAtRaw != null
           ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
           : null,
       syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
+      kind: kind,
+      attachment: attachment,
     );
     _emit();
     return true;
   }
 
   Future<void> delete(String id, {String? nostrId}) async {
+    final note = _map[id];
+    if (note?.attachment?.sha256 != null) {
+      await _deleteEncFile(note!.attachment!.sha256);
+    }
     if (_db != null) await _db!.delete(id);
     _map.remove(id);
     _emit();
-    if (nostrId != null) _broadcastDeletion(id, nostrId);
+    if (nostrId != null) _broadcastDeletion(id, nostrId, note?.kind ?? NoteKind.text);
   }
 
   void retryAllFailed() {
@@ -615,16 +973,17 @@ class NoteCache {
     }
   }
 
-  Future<void> _broadcastDeletion(String localId, String nostrId) async {
+  Future<void> _broadcastDeletion(String localId, String nostrId, NoteKind kind) async {
     if (_writeRelays.isEmpty || _signer == null) return;
     try {
       final pubkey = _signer!.getPublicKey();
+      final kindNum = kind.eventKind;
       final event = Nip01Event(
         pubKey: pubkey,
         kind: 5,
         tags: [
           ['e', nostrId],
-          ['a', '33301:$pubkey:$localId'],
+          ['a', '$kindNum:$pubkey:$localId'],
         ],
         content: '',
         createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -645,6 +1004,7 @@ class NoteCache {
     _signer = null;
     _writeRelays = [];
     _localKey = null;
+    _fileCache.clear();
     _map.clear();
     _pendingDeletions.clear();
     notifier.value = [];
@@ -675,12 +1035,58 @@ class NoteCache {
     return '${ts.toRadixString(16)}${rand.toRadixString(16).padLeft(6, '0')}';
   }
 
-  // Decodes original creation time from id (format: hex(ts_ms) + 6 hex random chars)
   DateTime _createdAtFromId(String id) {
     if (id.length > 6) {
       final ms = int.tryParse(id.substring(0, id.length - 6), radix: 16);
       if (ms != null) return DateTime.fromMillisecondsSinceEpoch(ms);
     }
     return DateTime.now();
+  }
+
+  DecryptedNote _withSyncStatus(DecryptedNote n, SyncStatus s) => DecryptedNote(
+        id: n.id,
+        nostrId: n.nostrId,
+        text: n.text,
+        error: n.error,
+        createdAt: n.createdAt,
+        editedAt: n.editedAt,
+        syncStatus: s,
+        kind: n.kind,
+        attachment: n.attachment,
+      );
+
+  Future<String> _filesCacheDir() async {
+    final dir = await getApplicationSupportDirectory();
+    final filesDir = Directory(p.join(dir.path, 'files'));
+    if (!await filesDir.exists()) await filesDir.create(recursive: true);
+    return filesDir.path;
+  }
+
+  Future<void> _deleteEncFile(String sha256) async {
+    if (kIsWeb) return;
+    try {
+      final dir = await _filesCacheDir();
+      final f = File(p.join(dir, '$sha256.enc'));
+      if (await f.exists()) await f.delete();
+    } catch (_) {}
+  }
+
+  // Computes a thumbhash from raw image bytes; returns base64 or null on error.
+  static Future<String?> _computeThumbhash(Uint8List imageBytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(imageBytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final w = image.width;
+      final h = image.height;
+      final byteData =
+          await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      image.dispose();
+      if (byteData == null) return null;
+      final hash = rgbaToThumbHash(w, h, byteData.buffer.asUint8List());
+      return base64Encode(hash);
+    } catch (_) {
+      return null;
+    }
   }
 }
