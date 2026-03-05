@@ -269,7 +269,11 @@ class _NotesScreenState extends State<NotesScreen> {
     _textController.clear();
     _inputFocusNode.unfocus();
     await NoteCache.instance.update(id, text);
-    if (mounted) setState(() => _sending = false);
+    if (mounted) {
+      setState(() => _sending = false);
+      final notes = NoteCache.instance.notifier.value;
+      if (notes.isNotEmpty && notes.last.id == id) _scrollToBottom();
+    }
   }
 
   void _showProfileSheet() {
