@@ -475,7 +475,28 @@ class NoteCache {
 
     final editedAt = DateTime.now();
     final editedAtSeconds = editedAt.millisecondsSinceEpoch ~/ 1000;
-    final localContent = await LocalCrypto.encrypt(_localKey!, newText);
+
+    NoteAttachment? updatedAttachment;
+    String localContent;
+
+    if (existing.kind == NoteKind.file && existing.attachment != null) {
+      final att = existing.attachment!;
+      updatedAttachment = NoteAttachment(
+        url: att.url,
+        data: att.data,
+        filename: att.filename,
+        mimeType: att.mimeType,
+        size: att.size,
+        sha256: att.sha256,
+        key: att.key,
+        thumbhash: att.thumbhash,
+        comment: newText.isEmpty ? null : newText,
+      );
+      localContent =
+          await LocalCrypto.encrypt(_localKey!, updatedAttachment.toJsonString());
+    } else {
+      localContent = await LocalCrypto.encrypt(_localKey!, newText);
+    }
 
     if (_db != null) {
       await _db!.updateForEdit(
@@ -488,14 +509,20 @@ class NoteCache {
     _map[id] = DecryptedNote(
       id: id,
       nostrId: existing.nostrId,
-      text: newText,
+      text: existing.kind == NoteKind.file ? '' : newText,
       createdAt: existing.createdAt,
       editedAt: editedAt,
       syncStatus: SyncStatus.pending,
+      kind: existing.kind,
+      attachment: updatedAttachment ?? existing.attachment,
     );
     _emit();
 
-    _publishToRelays(id, newText, editedAtSeconds);
+    if (existing.kind == NoteKind.file) {
+      _publishFileEvent(id, updatedAttachment!, editedAtSeconds);
+    } else {
+      _publishToRelays(id, newText, editedAtSeconds);
+    }
   }
 
   Future<void> _publishToRelays(

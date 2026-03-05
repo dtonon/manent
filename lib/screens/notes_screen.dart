@@ -53,6 +53,7 @@ class _NotesScreenState extends State<NotesScreen> {
   bool _sending = false;
   int _noteCount = 0;
   String? _editingNoteId;
+  DecryptedNote? _editingNote;
   // Pending file selected by user, cleared after send
   ({Uint8List bytes, String name, String mimeType})? _pendingFile;
 
@@ -242,10 +243,16 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   void _startEdit(DecryptedNote note) {
-    setState(() => _editingNoteId = note.id);
-    _textController.text = note.text;
+    setState(() {
+      _editingNoteId = note.id;
+      _editingNote = note;
+    });
+    final initialText = note.kind == NoteKind.file
+        ? (note.attachment?.comment ?? '')
+        : note.text;
+    _textController.text = initialText;
     _textController.selection =
-        TextSelection.collapsed(offset: note.text.length);
+        TextSelection.collapsed(offset: initialText.length);
     // Defer so the overlay is fully removed before requesting focus (opens keyboard on mobile)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _inputFocusNode.requestFocus();
@@ -253,7 +260,10 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   void _cancelEdit() {
-    setState(() => _editingNoteId = null);
+    setState(() {
+      _editingNoteId = null;
+      _editingNote = null;
+    });
     _textController.clear();
     _inputFocusNode.unfocus();
   }
@@ -261,9 +271,11 @@ class _NotesScreenState extends State<NotesScreen> {
   Future<void> _confirmEdit() async {
     final text = _textController.text.trim();
     final id = _editingNoteId;
-    if (text.isEmpty || id == null || _sending) return;
+    final isFileNote = _editingNote?.kind == NoteKind.file;
+    if ((!isFileNote && text.isEmpty) || id == null || _sending) return;
     setState(() {
       _editingNoteId = null;
+      _editingNote = null;
       _sending = true;
     });
     _textController.clear();
@@ -698,6 +710,8 @@ class _NotesScreenState extends State<NotesScreen> {
     final maxHeight = MediaQuery.of(context).size.height * 0.5;
     final isEditing = _editingNoteId != null;
     final hasPendingFile = _pendingFile != null;
+    final editingFileAttachment =
+        _editingNote?.kind == NoteKind.file ? _editingNote!.attachment : null;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -738,6 +752,25 @@ class _NotesScreenState extends State<NotesScreen> {
                             onTap: _cancelEdit,
                             child: const Icon(Icons.close,
                                 size: 18, color: Colors.grey),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (editingFileAttachment != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(32, 6, 35, 0),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.attach_file,
+                            size: 14, color: Colors.grey),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            editingFileAttachment.filename,
+                            style: const TextStyle(
+                                fontSize: 13, color: Colors.grey),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -812,7 +845,8 @@ class _NotesScreenState extends State<NotesScreen> {
                               keyboardType: TextInputType.multiline,
                               textInputAction: TextInputAction.newline,
                               decoration: InputDecoration(
-                                hintText: hasPendingFile
+                                hintText: hasPendingFile ||
+                                        editingFileAttachment != null
                                     ? 'Add a comment...'
                                     : 'Memo...',
                                 border: InputBorder.none,
@@ -833,7 +867,8 @@ class _NotesScreenState extends State<NotesScreen> {
                           valueListenable: _textController,
                           builder: (context, value, _) {
                             final hasText = value.text.trim().isNotEmpty;
-                            final canSend = hasPendingFile || hasText;
+                            final canSend = hasPendingFile || hasText ||
+                                editingFileAttachment != null;
                             if (canSend) {
                               return Semantics(
                                 label: isEditing ? 'Confirm edit' : 'Send',
@@ -1129,6 +1164,7 @@ class _NoteCardState extends State<_NoteCard> {
                   widget.note.nostrId == null),
           showSelectText: !_isDesktopOrWeb && !isFileNote,
           showEdit: widget.note.error == null && !isFileNote,
+          showEditComment: isFileNote && widget.note.error == null,
           showSave: isFileNote,
           showShare: isFileNote && !_isDesktopOrWeb,
           showCopyComment:
@@ -1156,7 +1192,7 @@ class _NoteCardState extends State<_NoteCard> {
     } else if (result == 'copy_comment') {
       await Clipboard.setData(
           ClipboardData(text: widget.note.attachment?.comment ?? ''));
-    } else if (result == 'edit') {
+    } else if (result == 'edit' || result == 'edit_comment') {
       widget.onEdit?.call();
     } else if (result == 'retry_sync') {
       NoteCache.instance.retrySync(widget.note.id);
@@ -1690,6 +1726,7 @@ class _NoteMenuOverlay extends StatelessWidget {
   final bool showRetrySync;
   final bool showSelectText;
   final bool showEdit;
+  final bool showEditComment;
   final DateTime? editedAt;
   final String copyLabel;
 
@@ -1706,6 +1743,7 @@ class _NoteMenuOverlay extends StatelessWidget {
     this.showRetrySync = false,
     this.showSelectText = false,
     this.showEdit = false,
+    this.showEditComment = false,
     this.showSave = false,
     this.showShare = false,
     this.showCopyComment = false,
@@ -1883,6 +1921,21 @@ class _NoteMenuOverlay extends StatelessWidget {
                                 horizontal: 16, vertical: 12),
                             child: Text(
                               'Edit',
+                              style: TextStyle(
+                                  fontSize: 14, color: Colors.black87),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (showEditComment) ...[
+                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                        InkWell(
+                          onTap: () => onSelect('edit_comment'),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Text(
+                              'Edit comment',
                               style: TextStyle(
                                   fontSize: 14, color: Colors.black87),
                             ),
