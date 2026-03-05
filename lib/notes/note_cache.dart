@@ -1127,11 +1127,28 @@ class NoteCache {
       final image = frame.image;
       final w = image.width;
       final h = image.height;
-      final byteData =
-          await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+
+      // rgbaToThumbHash requires both dimensions ≤ 100px
+      const maxSize = 100;
+      final scale = maxSize / max(w, h);
+      final tw = (w * scale).round().clamp(1, maxSize);
+      final th = (h * scale).round().clamp(1, maxSize);
+
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      canvas.drawImageRect(
+        image,
+        ui.Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+        ui.Rect.fromLTWH(0, 0, tw.toDouble(), th.toDouble()),
+        ui.Paint(),
+      );
       image.dispose();
+      final scaled = await recorder.endRecording().toImage(tw, th);
+      final byteData =
+          await scaled.toByteData(format: ui.ImageByteFormat.rawRgba);
+      scaled.dispose();
       if (byteData == null) return null;
-      final hash = rgbaToThumbHash(w, h, byteData.buffer.asUint8List());
+      final hash = rgbaToThumbHash(tw, th, byteData.buffer.asUint8List());
       return base64Encode(hash);
     } catch (_) {
       return null;
