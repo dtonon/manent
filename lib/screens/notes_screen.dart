@@ -193,7 +193,7 @@ class _NotesScreenState extends State<NotesScreen> {
         title: const Text('No Blossom servers'),
         content: const Text(
           'File uploads larger than 32KB require a Blossom server. '
-          "Your account has none configured — would you like to use blossom.primal.net? "
+          "Your account has none configured — would you like to use nostrcheck.me? "
           'You can see, and eventually remove it, in the profile page.',
         ),
         actions: [
@@ -209,7 +209,7 @@ class _NotesScreenState extends State<NotesScreen> {
       ),
     );
     if (accepted == true) {
-      await widget.onBlossomServersChanged(['https://blossom.primal.net']);
+      await widget.onBlossomServersChanged(['https://cdn.nostrcheck.me']);
       return true;
     }
     return false;
@@ -781,7 +781,8 @@ class _NotesScreenState extends State<NotesScreen> {
                     padding: const EdgeInsets.fromLTRB(32, 18, 35, 0),
                     child: Row(
                       children: [
-                        if (rasterImageMimeTypes.contains(_pendingFile!.mimeType)) ...[
+                        if (rasterImageMimeTypes
+                            .contains(_pendingFile!.mimeType)) ...[
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: Image.memory(
@@ -867,7 +868,8 @@ class _NotesScreenState extends State<NotesScreen> {
                           valueListenable: _textController,
                           builder: (context, value, _) {
                             final hasText = value.text.trim().isNotEmpty;
-                            final canSend = hasPendingFile || hasText ||
+                            final canSend = hasPendingFile ||
+                                hasText ||
                                 editingFileAttachment != null;
                             if (canSend) {
                               return Semantics(
