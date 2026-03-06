@@ -19,17 +19,22 @@ build_macos:
     flutter build macos --release
 
 build_android:
-    flutter build apk --release
+    flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols/android
+
+build_android_bundle:
+    flutter build appbundle --release --obfuscate --split-debug-info=build/symbols/android
 
 build_linux:
-    flutter build linux --release
+    dart pub global activate flutter_distributor
+    export PATH="$PATH":"$HOME/.pub-cache/bin"
+    flutter_distributor release --name linux --jobs release-linux-appimage
 
 build_web:
     flutter build web --release
 
 deploy_android: build_android
     @echo "\nDeploying application..."
-    adb install build/app/outputs/flutter-apk/app-release.apk
+    adb install build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 
 deploy_web target: build_web
     @echo "\nDeploying application..."
