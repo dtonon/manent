@@ -1317,8 +1317,10 @@ class _NoteCardState extends State<_NoteCard> {
             onTap = _showContextMenu;
           }
           if (_isDesktopOrWeb) {
-            // File notes: left-click saves the file directly
-            onTap = isFileNote
+            // File notes (non-image): left-click saves the file directly
+            final isFileNonImage =
+                isFileNote && widget.note.attachment?.isImage != true;
+            onTap = isFileNonImage
                 ? () => _saveFile()
                 : () {
                     _desktopSelectedContent = null;
