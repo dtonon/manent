@@ -8,5 +8,6 @@ const List<String> discoveryRelays = [
 
 const List<String> fallbackRelays = [
   'wss://nos.lol',
-  'wss://nostr.oxtr.dev',
+  'wss://nostr.mom',
+  'wss://bitcoiner.social',
 ];

@@ -122,7 +122,7 @@ class _NotesScreenState extends State<NotesScreen> {
         title: const Text('Add fallback relays'),
         content: const Text(
           "Your relays don't appear to support Manent events (kind 33301), "
-          'would you like to use nos.lol and nostr.oxtr.dev relays? '
+          'would you like to use nos.lol, nostr.mom and bitcoiner.social relays? '
           'They are only used locally (no NIP-65 update) and you can remove them anytime in the profile page.',
         ),
         actions: [
