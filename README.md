@@ -1,16 +1,27 @@
-# manent
+# Manent
 
-A new Flutter project.
+A private, encrypted space for your notes and files — built on [Nostr](https://njump.me).
 
-## Getting Started
+Think of it as your personal "Saved Messages": write notes, attach images and files, edit them anytime, and access everything across your devices. A simple and clear chronological order, zero fuss. No plaintext data at rest or in transit.
 
-This project is a starting point for a Flutter application.
+![](assets/screenshot.jpg)
 
-A few resources to get you started if this is your first Flutter project:
+## Features
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+- **Notes** — Write, edit, and delete text notes
+- **Images & files** — Attach and preview images; store any file type
+- **End-to-end encrypted** — Everything (notes, files, metadata) is encrypted with NIP-44 before leaving your device
+- **Synced via Nostr** — Your data lives on your own relays; files (larger than 32KB) are stored on Blossom servers
+- **Multi-platform** — Web, Android, Linux, macOS (iOS and Windows builds untested)
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Login methods
+
+- **Bunker (NIP-46)** — Connect via QR code or `bunker://` URL
+- **Android Signer (NIP-55)** — Delegate signing to Amber, your key never leaves the signer app
+- **nsec** — Paste your private key directly
+
+## Built with
+
+- [Flutter](https://flutter.dev) — cross-platform UI
+- [NDK](https://pub.dev/packages/ndk) — Dart Nostr Development Kit
+- NIP-44 encryption, NIP-46 remote signing, NIP-65 outbox relays, Blossom file storage
