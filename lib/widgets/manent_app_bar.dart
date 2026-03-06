@@ -7,6 +7,7 @@ AppBar manentAppBar({List<Widget>? actions}) {
     backgroundColor: accent,
     elevation: 0,
     automaticallyImplyLeading: false,
+    centerTitle: true,
     title: const Text(
       'MANENT',
       style: TextStyle(
