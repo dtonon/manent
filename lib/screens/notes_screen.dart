@@ -1539,24 +1539,25 @@ class _FileNoteContent extends StatelessWidget {
             },
           ),
           Positioned(
-            bottom: 8,
-            right: 8,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                buildSyncIcon(),
-                const SizedBox(width: 4),
-                Text(
-                  formatTime(note.createdAt),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.white,
-                    shadows: [
-                      Shadow(blurRadius: 4, color: Colors.black54),
-                    ],
+            bottom: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  buildSyncIcon(),
+                  const SizedBox(width: 4),
+                  Text(
+                    formatTime(note.createdAt),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
