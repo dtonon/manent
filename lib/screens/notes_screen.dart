@@ -1512,33 +1512,31 @@ class _FileNoteContent extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       child: Stack(
         children: [
-          // AspectRatio fixes the height before images load, preventing scroll jumps
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: FutureBuilder<Uint8List?>(
-              future: NoteCache.instance.getFileBytes(attachment),
-              builder: (ctx, snap) {
-                if (snap.hasData && snap.data != null) {
-                  return Image.memory(
-                    snap.data!,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                    semanticLabel: attachment.filename,
-                  );
-                }
-                // Thumbhash placeholder while loading
-                if (attachment.thumbhash != null) {
-                  return _ThumbhashImage(
-                    thumbhash: attachment.thumbhash!,
-                    filename: attachment.filename,
-                  );
-                }
-                return const Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
+          FutureBuilder<Uint8List?>(
+            future: NoteCache.instance.getFileBytes(attachment),
+            builder: (ctx, snap) {
+              if (snap.hasData && snap.data != null) {
+                return Image.memory(
+                  snap.data!,
+                  fit: BoxFit.fitWidth,
+                  width: double.infinity,
+                  semanticLabel: attachment.filename,
                 );
-              },
-            ),
+              }
+              // Thumbhash placeholder while loading
+              if (attachment.thumbhash != null) {
+                return _ThumbhashImage(
+                  thumbhash: attachment.thumbhash!,
+                  filename: attachment.filename,
+                );
+              }
+              return const AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              );
+            },
           ),
           Positioned(
             bottom: 8,
@@ -1705,16 +1703,21 @@ class _ThumbhashImageState extends State<_ThumbhashImage> {
   @override
   Widget build(BuildContext context) {
     if (_image == null) {
-      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+      return const AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
     }
     return Semantics(
       label: widget.filename,
       image: true,
-      child: RawImage(
-        image: _image,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
+      child: AspectRatio(
+        aspectRatio: _image!.width / _image!.height,
+        child: RawImage(
+          image: _image,
+          fit: BoxFit.fitWidth,
+          width: double.infinity,
+        ),
       ),
     );
   }
