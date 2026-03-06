@@ -1,5 +1,13 @@
 import 'dart:convert';
 
+const rasterImageMimeTypes = {
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+};
+
 class NoteAttachment {
   final String? url;
   final String? data; // base64 encrypted bytes, inline only
@@ -24,7 +32,7 @@ class NoteAttachment {
   });
 
   bool get isInline => data != null;
-  bool get isImage => mimeType.startsWith('image/');
+  bool get isImage => rasterImageMimeTypes.contains(mimeType);
 
   Map<String, dynamic> toJson() => {
         if (url != null) 'url': url,

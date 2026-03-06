@@ -195,7 +195,7 @@ class NoteCache {
 
     // Compute thumbhash for images
     String? thumbhash;
-    if (mimeType.startsWith('image/')) {
+    if (rasterImageMimeTypes.contains(mimeType)) {
       thumbhash = await _computeThumbhash(bytes);
     }
 

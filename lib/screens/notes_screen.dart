@@ -781,7 +781,7 @@ class _NotesScreenState extends State<NotesScreen> {
                     padding: const EdgeInsets.fromLTRB(32, 18, 35, 0),
                     child: Row(
                       children: [
-                        if (_pendingFile!.mimeType.startsWith('image/')) ...[
+                        if (rasterImageMimeTypes.contains(_pendingFile!.mimeType)) ...[
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: Image.memory(
