@@ -118,10 +118,11 @@ class NoteCache {
                   errorMsg = 'Failed to parse file metadata.';
                 }
               } else {
-                text = plain;
+                text = _extractText(plain);
               }
               if (errorMsg == null) {
-                final cached = await LocalCrypto.encrypt(_localKey!, plain);
+                final toCache = kind == NoteKind.file ? plain : text!;
+                final cached = await LocalCrypto.encrypt(_localKey!, toCache);
                 await _db!.updateLocalContent(id, cached);
               }
             } else {
@@ -540,7 +541,7 @@ class NoteCache {
     }
     try {
       final encrypted = await _signer!.encryptNip44(
-        plaintext: plaintext,
+        plaintext: jsonEncode({'text': plaintext}),
         recipientPubKey: _signer!.getPublicKey(),
       );
       if (encrypted == null) return;
@@ -764,7 +765,10 @@ class NoteCache {
       if (event.createdAt <= existingVersionTime) return;
 
       final result = await _decryptViaSigner(_signer!, event.content);
-      final plain = result.text;
+      final rawPlain = result.text;
+      final plain = (rawPlain != null && kind == NoteKind.text)
+          ? _extractText(rawPlain)
+          : rawPlain;
       NoteAttachment? attachment;
       String? errorMsg;
 
@@ -816,7 +820,10 @@ class NoteCache {
 
     try {
       final result = await _decryptViaSigner(_signer!, event.content);
-      final plain = result.text;
+      final rawPlain = result.text;
+      final plain = (rawPlain != null && kind == NoteKind.text)
+          ? _extractText(rawPlain)
+          : rawPlain;
       NoteAttachment? attachment;
       String? errorMsg;
 
@@ -890,7 +897,9 @@ class NoteCache {
 
       final result = await _decryptViaSigner(_signer!, ciphertext);
       if (result.text == null) continue;
-      final plain = result.text!;
+      final plain = kind == NoteKind.text
+          ? _extractText(result.text!)
+          : result.text!;
 
       NoteAttachment? attachment;
       if (kind == NoteKind.file) {
@@ -984,7 +993,9 @@ class NoteCache {
     final result = await _decryptViaSigner(_signer!, ciphertext);
     if (result.text == null) return false;
 
-    final plain = result.text!;
+    final plain = kind == NoteKind.text
+        ? _extractText(result.text!)
+        : result.text!;
     NoteAttachment? attachment;
     if (kind == NoteKind.file) {
       try {
@@ -1144,6 +1155,16 @@ class NoteCache {
       final f = File(p.join(dir, '$sha256.enc'));
       if (await f.exists()) await f.delete();
     } catch (_) {}
+  }
+
+  // Extracts text from JSON payload {"text": "..."}, falls back to raw string.
+  static String _extractText(String decrypted) {
+    try {
+      final json = jsonDecode(decrypted) as Map<String, dynamic>;
+      final t = json['text'];
+      if (t is String) return t;
+    } catch (_) {}
+    return decrypted;
   }
 
   // Computes a thumbhash from raw image bytes; returns base64 or null on error.
