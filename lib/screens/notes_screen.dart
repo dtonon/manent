@@ -193,7 +193,7 @@ class _NotesScreenState extends State<NotesScreen> {
         title: const Text('No Blossom servers'),
         content: const Text(
           'File uploads larger than 32KB require a Blossom server. '
-          "Your account has none configured — would you like to use nostrcheck.me? "
+          "Your account has none configured — would you like to use blossom.primal.net? "
           'You can see, and eventually remove it, in the profile page.',
         ),
         actions: [
@@ -209,7 +209,7 @@ class _NotesScreenState extends State<NotesScreen> {
       ),
     );
     if (accepted == true) {
-      await widget.onBlossomServersChanged(['https://cdn.nostrcheck.me']);
+      await widget.onBlossomServersChanged(['https://blossom.primal.net']);
       return true;
     }
     return false;
