@@ -47,8 +47,12 @@ class BlossomClient {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
         return json['url'] as String?;
       }
+      // ignore: avoid_print
+      print('[Blossom] upload to $server failed: HTTP ${response.statusCode} — ${response.body}');
       return null;
-    } catch (_) {
+    } catch (e) {
+      // ignore: avoid_print
+      print('[Blossom] upload to $server exception: $e');
       return null;
     }
   }

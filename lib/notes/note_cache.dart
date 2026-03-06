@@ -330,8 +330,14 @@ class NoteCache {
     Uint8List encryptedBytes,
     int createdAt,
   ) async {
-    if (_signer == null || _blossomServers.isEmpty) return;
+    if (_signer == null || _blossomServers.isEmpty) {
+      // ignore: avoid_print
+      print('[Blossom] upload skipped: signer=${_signer != null}, servers=$_blossomServers');
+      return;
+    }
 
+    // ignore: avoid_print
+    print('[Blossom] uploading ${attachment.sha256} to ${_blossomServers.length} server(s): $_blossomServers');
     String? url;
     for (final server in _blossomServers) {
       url = await BlossomClient.upload(
@@ -344,6 +350,8 @@ class NoteCache {
     }
 
     if (url == null) {
+      // ignore: avoid_print
+      print('[Blossom] all servers failed for ${attachment.sha256}');
       if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
       if (existing != null) {
