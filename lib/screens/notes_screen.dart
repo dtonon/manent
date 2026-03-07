@@ -1022,11 +1022,16 @@ class _NoteCardState extends State<_NoteCard> {
     super.dispose();
   }
 
-  static bool get _isDesktopOrWeb =>
-      kIsWeb ||
-      defaultTargetPlatform == TargetPlatform.macOS ||
-      defaultTargetPlatform == TargetPlatform.windows ||
-      defaultTargetPlatform == TargetPlatform.linux;
+  static bool get _isDesktopOrWeb {
+    if (kIsWeb) {
+      // Mobile browsers (iOS/Android) get mobile behavior
+      return defaultTargetPlatform != TargetPlatform.iOS &&
+          defaultTargetPlatform != TargetPlatform.android;
+    }
+    return defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux;
+  }
 
   String _formatTime(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
@@ -1105,12 +1110,16 @@ class _NoteCardState extends State<_NoteCard> {
     if (attachment == null) return;
     final bytes = await NoteCache.instance.getFileBytes(attachment);
     if (bytes == null || !mounted) return;
-    if (_isDesktopOrWeb) {
+    if (kIsWeb) {
+      await FilePicker.platform.saveFile(
+        fileName: attachment.filename,
+        bytes: bytes,
+      );
+    } else if (_isDesktopOrWeb) {
       final path = await FilePicker.platform.saveFile(
         fileName: attachment.filename,
-        bytes: kIsWeb ? bytes : null,
       );
-      if (path != null && !kIsWeb) {
+      if (path != null) {
         await File(path).writeAsBytes(bytes);
       }
     } else {
