@@ -13,6 +13,8 @@ import 'package:flutter/services.dart';
 import 'package:thumbhash/thumbhash.dart' hide Image;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../utils/web_download.dart';
+
 import 'package:ndk/ndk.dart';
 
 import '../auth/auth_state.dart';
@@ -1109,7 +1111,9 @@ class _NoteCardState extends State<_NoteCard> {
     if (attachment == null) return;
     final bytes = await NoteCache.instance.getFileBytes(attachment);
     if (bytes == null || !mounted) return;
-    if (_isDesktopOrWeb && !kIsWeb) {
+    if (kIsWeb) {
+      await downloadOnWeb(attachment.filename, bytes);
+    } else if (_isDesktopOrWeb) {
       // Desktop: get path from picker, write manually
       final path = await FilePicker.platform.saveFile(
         fileName: attachment.filename,
@@ -1118,7 +1122,7 @@ class _NoteCardState extends State<_NoteCard> {
         await File(path).writeAsBytes(bytes);
       }
     } else {
-      // Web + mobile: pass bytes so the platform handles the save location
+      // Mobile: native save dialog via ACTION_CREATE_DOCUMENT
       await FilePicker.platform.saveFile(
         fileName: attachment.filename,
         bytes: bytes,
