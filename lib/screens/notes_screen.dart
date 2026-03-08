@@ -5,7 +5,6 @@ import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:mime/mime.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -1110,12 +1109,8 @@ class _NoteCardState extends State<_NoteCard> {
     if (attachment == null) return;
     final bytes = await NoteCache.instance.getFileBytes(attachment);
     if (bytes == null || !mounted) return;
-    if (kIsWeb) {
-      await FilePicker.platform.saveFile(
-        fileName: attachment.filename,
-        bytes: bytes,
-      );
-    } else if (_isDesktopOrWeb) {
+    if (_isDesktopOrWeb && !kIsWeb) {
+      // Desktop: get path from picker, write manually
       final path = await FilePicker.platform.saveFile(
         fileName: attachment.filename,
       );
@@ -1123,14 +1118,11 @@ class _NoteCardState extends State<_NoteCard> {
         await File(path).writeAsBytes(bytes);
       }
     } else {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/${attachment.filename}');
-      await file.writeAsBytes(bytes);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved to ${file.path}')),
-        );
-      }
+      // Web + mobile: pass bytes so the platform handles the save location
+      await FilePicker.platform.saveFile(
+        fileName: attachment.filename,
+        bytes: bytes,
+      );
     }
   }
 
