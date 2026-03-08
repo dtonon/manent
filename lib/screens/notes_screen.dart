@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -231,6 +232,15 @@ class _NotesScreenState extends State<NotesScreen> {
     final mimeType = lookupMimeType(pf.name) ?? 'application/octet-stream';
     setState(
         () => _pendingFile = (bytes: bytes, name: pf.name, mimeType: mimeType));
+  }
+
+  Future<void> _takePhoto() async {
+    final xfile = await ImagePicker().pickImage(source: ImageSource.camera);
+    if (xfile == null) return;
+    final bytes = await xfile.readAsBytes();
+    final mimeType = lookupMimeType(xfile.name) ?? 'image/jpeg';
+    setState(() =>
+        _pendingFile = (bytes: bytes, name: xfile.name, mimeType: mimeType));
   }
 
   void _editLastNote() {
@@ -520,7 +530,8 @@ class _NotesScreenState extends State<NotesScreen> {
 
   Future<String> _readVersion() async {
     final yaml = await rootBundle.loadString('pubspec.yaml');
-    final match = RegExp(r'^version:\s+(\S+)', multiLine: true).firstMatch(yaml);
+    final match =
+        RegExp(r'^version:\s+(\S+)', multiLine: true).firstMatch(yaml);
     return match?.group(1) ?? '';
   }
 
@@ -978,17 +989,38 @@ class _NotesScreenState extends State<NotesScreen> {
                               );
                             }
                             if (!isEditing) {
-                              return Semantics(
-                                label: 'Attach file',
-                                button: true,
-                                child: GestureDetector(
-                                  onTap: _pickFile,
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(bottom: 2),
-                                    child: Icon(Icons.attach_file,
-                                        size: 22, color: Colors.grey[400]),
+                              return Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (!_NoteCardState._isDesktopOrWeb) ...[
+                                    Semantics(
+                                      label: 'Take photo',
+                                      button: true,
+                                      child: GestureDetector(
+                                        onTap: _takePhoto,
+                                        child: Padding(
+                                          padding:
+                                              const EdgeInsets.only(right: 20),
+                                          child: Icon(Icons.camera_alt,
+                                              size: 28,
+                                              color: Colors.grey[400]),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  Semantics(
+                                    label: 'Attach file',
+                                    button: true,
+                                    child: GestureDetector(
+                                      onTap: _pickFile,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(),
+                                        child: Icon(Icons.attachment,
+                                            size: 32, color: Colors.grey[400]),
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                ],
                               );
                             }
                             return const SizedBox.shrink();
