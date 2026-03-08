@@ -518,6 +518,84 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
+  Future<String> _readVersion() async {
+    final yaml = await rootBundle.loadString('pubspec.yaml');
+    final match = RegExp(r'^version:\s+(\S+)', multiLine: true).firstMatch(yaml);
+    return match?.group(1) ?? '';
+  }
+
+  void _showAbout() async {
+    final version = await _readVersion();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Manent',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'A private, encrypted space for your notes and files — built on Nostr',
+              style: TextStyle(height: 1.3),
+            ),
+            const SizedBox(height: 4),
+            if (version.isNotEmpty)
+              Text('v.$version', style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 16),
+            GestureDetector(
+              onTap: () => launchUrl(
+                Uri.parse('https://njump.me/dtonon.com'),
+                mode: LaunchMode.externalApplication,
+              ),
+              child: const Text.rich(
+                TextSpan(
+                  text: 'by ',
+                  children: [
+                    TextSpan(
+                      text: 'dtonon',
+                      style: TextStyle(
+                        color: Colors.blue,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Source code:'),
+            const SizedBox(height: 2),
+            GestureDetector(
+              onTap: () => launchUrl(
+                Uri.parse('https://github.com/dtonon/manent'),
+                mode: LaunchMode.externalApplication,
+              ),
+              child: const Text(
+                'https://github.com/dtonon/manent',
+                style: TextStyle(
+                  color: Colors.blue,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   AppBar _buildSelectionAppBar() {
     return AppBar(
       backgroundColor: accent,
@@ -567,6 +645,7 @@ class _NotesScreenState extends State<NotesScreen> {
             appBar: inSelection
                 ? _buildSelectionAppBar()
                 : manentAppBar(
+                    onTitleTap: _showAbout,
                     actions: [
                       Padding(
                         padding: const EdgeInsets.only(right: 20),
