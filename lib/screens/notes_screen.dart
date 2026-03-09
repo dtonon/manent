@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:mime/mime.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -53,6 +54,7 @@ class _NotesScreenState extends State<NotesScreen> {
   final FocusNode _inputFocusNode = FocusNode();
   bool _sending = false;
   int _noteCount = 0;
+  StreamSubscription? _sharingMediaSub;
   String? _editingNoteId;
   DecryptedNote? _editingNote;
   // Pending file selected by user, cleared after send
@@ -88,6 +90,11 @@ class _NotesScreenState extends State<NotesScreen> {
       HardwareKeyboard.instance.addHandler(_onHardwareKey);
     }
     if (kIsWeb) BrowserContextMenu.disableContextMenu();
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      _initSharingIntent();
+    }
   }
 
   bool _onHardwareKey(KeyEvent event) {
@@ -231,6 +238,45 @@ class _NotesScreenState extends State<NotesScreen> {
     final mimeType = lookupMimeType(pf.name) ?? 'application/octet-stream';
     setState(
         () => _pendingFile = (bytes: bytes, name: pf.name, mimeType: mimeType));
+  }
+
+  void _initSharingIntent() {
+    _sharingMediaSub = ReceiveSharingIntent.instance
+        .getMediaStream()
+        .listen(_handleSharedMedia);
+    ReceiveSharingIntent.instance.getInitialMedia().then((media) {
+      if (media.isNotEmpty) _handleSharedMedia(media);
+    });
+  }
+
+  Future<void> _handleSharedMedia(List<SharedMediaFile> media) async {
+    if (media.isEmpty || !mounted) return;
+    final item = media.first;
+    if (item.type == SharedMediaType.text || item.type == SharedMediaType.url) {
+      final text = item.path;
+      if (text.isEmpty) return;
+      setState(() {
+        _textController.text = text;
+        _textController.selection =
+            TextSelection.collapsed(offset: text.length);
+      });
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _inputFocusNode.requestFocus());
+      ReceiveSharingIntent.instance.reset();
+      return;
+    }
+    try {
+      final bytes = await File(item.path).readAsBytes();
+      final name = item.path.split('/').last;
+      final mimeType = item.mimeType ??
+          lookupMimeType(name) ??
+          'application/octet-stream';
+      if (mounted) {
+        setState(() =>
+            _pendingFile = (bytes: bytes, name: name, mimeType: mimeType));
+      }
+    } catch (_) {}
+    ReceiveSharingIntent.instance.reset();
   }
 
   void _editLastNote() {
@@ -1019,6 +1065,7 @@ class _NotesScreenState extends State<NotesScreen> {
     NoteCache.instance.promptFallbackRelays
         .removeListener(_onFallbackRelaysPrompt);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
+    _sharingMediaSub?.cancel();
     _textController.dispose();
     _scrollController.dispose();
     _inputFocusNode.dispose();
