@@ -55,6 +55,7 @@ class _NotesScreenState extends State<NotesScreen> {
   bool _sending = false;
   int _noteCount = 0;
   StreamSubscription? _sharingMediaSub;
+  static const _processTextChannel = MethodChannel('manent/process_text');
   String? _editingNoteId;
   DecryptedNote? _editingNote;
   // Pending file selected by user, cleared after send
@@ -94,6 +95,9 @@ class _NotesScreenState extends State<NotesScreen> {
         (defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS)) {
       _initSharingIntent();
+    }
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      _initProcessText();
     }
   }
 
@@ -240,6 +244,19 @@ class _NotesScreenState extends State<NotesScreen> {
         () => _pendingFile = (bytes: bytes, name: pf.name, mimeType: mimeType));
   }
 
+  void _initProcessText() {
+    _processTextChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onProcessText') {
+        final text = call.arguments as String?;
+        if (text != null && text.isNotEmpty) _handleSharedText(text);
+      }
+    });
+    // Retrieve any text that arrived before Dart was ready
+    _processTextChannel.invokeMethod<String>('getInitialProcessText').then((text) {
+      if (text != null && text.isNotEmpty) _handleSharedText(text);
+    });
+  }
+
   void _initSharingIntent() {
     _sharingMediaSub = ReceiveSharingIntent.instance
         .getMediaStream()
@@ -249,19 +266,21 @@ class _NotesScreenState extends State<NotesScreen> {
     });
   }
 
+  void _handleSharedText(String text) {
+    if (!mounted || text.isEmpty) return;
+    setState(() {
+      _textController.text = text;
+      _textController.selection = TextSelection.collapsed(offset: text.length);
+    });
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _inputFocusNode.requestFocus());
+  }
+
   Future<void> _handleSharedMedia(List<SharedMediaFile> media) async {
     if (media.isEmpty || !mounted) return;
     final item = media.first;
     if (item.type == SharedMediaType.text || item.type == SharedMediaType.url) {
-      final text = item.path;
-      if (text.isEmpty) return;
-      setState(() {
-        _textController.text = text;
-        _textController.selection =
-            TextSelection.collapsed(offset: text.length);
-      });
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _inputFocusNode.requestFocus());
+      _handleSharedText(item.path);
       ReceiveSharingIntent.instance.reset();
       return;
     }
