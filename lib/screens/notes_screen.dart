@@ -38,12 +38,6 @@ extension _ImageResizePresetExt on ImageResizePreset {
         ImageResizePreset.original => 'Original',
       };
 
-  int? get maxPixels => switch (this) {
-        ImageResizePreset.small => 800,
-        ImageResizePreset.medium => 1440,
-        ImageResizePreset.large => 2500,
-        ImageResizePreset.original => null,
-      };
 }
 
 class NotesScreen extends StatefulWidget {
@@ -80,9 +74,9 @@ class _NotesScreenState extends State<NotesScreen> {
   ({Uint8List bytes, String name, String mimeType})? _pendingFile;
   // Original image bytes before any resize (null for non-image files)
   Uint8List? _originalImageBytes;
-  int _originalImageWidth = 0;
-  int _originalImageHeight = 0;
   ImageResizePreset _currentPreset = ImageResizePreset.original;
+  // Encoded bytes per preset, computed in background after image pick
+  Map<ImageResizePreset, Uint8List>? _presetBytes;
 
   @override
   void initState() {
@@ -261,6 +255,7 @@ class _NotesScreenState extends State<NotesScreen> {
       setState(() {
         _pendingFile = (bytes: bytes, name: pf.name, mimeType: mimeType);
         _originalImageBytes = null;
+        _presetBytes = null;
       });
     }
   }
@@ -275,84 +270,110 @@ class _NotesScreenState extends State<NotesScreen> {
 
   Future<void> _handleImagePicked(
       Uint8List bytes, String name, String mimeType) async {
-    final dims = await compute(_getImageDimensions, bytes);
-    if (!mounted) return;
+    // Show the image immediately
     setState(() {
       _originalImageBytes = bytes;
-      _originalImageWidth = dims.$1;
-      _originalImageHeight = dims.$2;
+      _presetBytes = null;
       _currentPreset = ImageResizePreset.original;
       _pendingFile = (bytes: bytes, name: name, mimeType: mimeType);
     });
+
     final savedPreset = await AuthService.getImageResizePreset();
     if (!mounted) return;
+
+    final targetPreset = savedPreset == null
+        ? ImageResizePreset.medium
+        : ImageResizePreset.values.firstWhere(
+            (p) => p.name == savedPreset,
+            orElse: () => ImageResizePreset.original,
+          );
+
+    // Compute target preset first — clears the spinner as soon as possible
+    final targetBytes = await compute(_computePreset, (bytes, targetPreset));
+    if (!mounted) return;
+    setState(() {
+      _currentPreset = targetPreset;
+      _pendingFile = (bytes: targetBytes, name: name, mimeType: mimeType);
+      _presetBytes = {targetPreset: targetBytes};
+    });
+
+    // Then compute remaining presets (needed only for the size modal)
+    final allBytes = await compute(_computeAllPresets, bytes);
+    if (!mounted) return;
+    setState(() => _presetBytes = allBytes);
+
     if (savedPreset == null) {
       await _showImageSizeModal();
-    } else {
-      final preset = ImageResizePreset.values.firstWhere(
-        (p) => p.name == savedPreset,
-        orElse: () => ImageResizePreset.original,
-      );
-      await _applyResize(preset, save: false);
     }
   }
 
-  static (int, int) _getImageDimensions(Uint8List bytes) {
+  static Map<ImageResizePreset, Uint8List> _computeAllPresets(Uint8List bytes) {
     final decoded = img.decodeImage(bytes);
-    return (decoded?.width ?? 0, decoded?.height ?? 0);
+    if (decoded == null) {
+      return {for (final p in ImageResizePreset.values) p: bytes};
+    }
+    Uint8List resize(int maxDim) {
+      final maxOrig =
+          decoded.width > decoded.height ? decoded.width : decoded.height;
+      if (maxOrig <= maxDim) return bytes;
+      final scale = maxDim / maxOrig;
+      final resized = img.copyResize(
+        decoded,
+        width: (decoded.width * scale).round(),
+        height: (decoded.height * scale).round(),
+      );
+      return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
+    }
+
+    return {
+      ImageResizePreset.small: resize(800),
+      ImageResizePreset.medium: resize(1440),
+      ImageResizePreset.large: resize(2500),
+      ImageResizePreset.original: bytes,
+    };
   }
 
-  static Uint8List _doResize((Uint8List, int) args) {
-    final (bytes, maxDim) = args;
+  static Uint8List _computePreset((Uint8List, ImageResizePreset) args) {
+    final (bytes, preset) = args;
+    if (preset == ImageResizePreset.original) return bytes;
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return bytes;
+    final maxDim = switch (preset) {
+      ImageResizePreset.small => 800,
+      ImageResizePreset.medium => 1440,
+      ImageResizePreset.large => 2500,
+      ImageResizePreset.original => 0,
+    };
     final maxOrig =
         decoded.width > decoded.height ? decoded.width : decoded.height;
     if (maxOrig <= maxDim) return bytes;
     final scale = maxDim / maxOrig;
-    final result = img.copyResize(
+    final resized = img.copyResize(
       decoded,
       width: (decoded.width * scale).round(),
       height: (decoded.height * scale).round(),
     );
-    return Uint8List.fromList(img.encodeJpg(result, quality: 85));
+    return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
   }
 
-  Future<void> _applyResize(ImageResizePreset preset,
-      {bool save = true}) async {
-    final original = _originalImageBytes;
+  void _applyPreset(ImageResizePreset preset, {bool save = true}) {
+    final all = _presetBytes;
     final file = _pendingFile;
-    if (original == null || file == null) return;
-    Uint8List resized;
-    final maxDim = preset.maxPixels;
-    if (maxDim == null) {
-      resized = original;
-    } else {
-      resized = await compute(_doResize, (original, maxDim));
-    }
-    if (!mounted) return;
+    if (all == null || file == null) return;
     setState(() {
       _currentPreset = preset;
-      _pendingFile = (bytes: resized, name: file.name, mimeType: file.mimeType);
+      _pendingFile =
+          (bytes: all[preset]!, name: file.name, mimeType: file.mimeType);
     });
-    if (save) await AuthService.setImageResizePreset(preset.name);
+    if (save) AuthService.setImageResizePreset(preset.name);
   }
 
   Future<void> _showImageSizeModal() async {
     final original = _originalImageBytes;
     if (original == null || !mounted) return;
-    final origSize = original.length;
-    final w = _originalImageWidth;
-    final h = _originalImageHeight;
-
-    int estimateSize(ImageResizePreset preset) {
-      final maxDim = preset.maxPixels;
-      if (maxDim == null || w == 0 || h == 0) return origSize;
-      final maxOrig = w > h ? w : h;
-      if (maxOrig <= maxDim) return origSize;
-      final scale = maxDim / maxOrig;
-      return (origSize * scale * scale).round();
-    }
+    final all = _presetBytes;
+    if (all == null || all.length < ImageResizePreset.values.length) return;
+    final sizes = all.map((k, v) => MapEntry(k, v.length));
 
     var selected = _currentPreset;
     final confirmed = await showDialog<ImageResizePreset>(
@@ -390,7 +411,7 @@ class _NotesScreenState extends State<NotesScreen> {
                     return Expanded(
                       child: Semantics(
                         label:
-                            '${preset.label}, ~${_formatFileSize(estimateSize(preset))}',
+                            '${preset.label}, ${_formatFileSize(sizes[preset]!)}',
                         button: true,
                         selected: isSelected,
                         child: GestureDetector(
@@ -418,7 +439,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                         fontWeight: FontWeight.w500),
                                   ),
                                   Text(
-                                    '~ ${_formatFileSize(estimateSize(preset))}',
+                                    _formatFileSize(sizes[preset]!),
                                     style: TextStyle(
                                         fontSize: 12,
                                         color: Colors.grey[600]),
@@ -473,7 +494,7 @@ class _NotesScreenState extends State<NotesScreen> {
       ),
     );
     if (confirmed != null && mounted) {
-      await _applyResize(confirmed);
+      _applyPreset(confirmed);
     }
   }
 
@@ -1121,17 +1142,43 @@ class _NotesScreenState extends State<NotesScreen> {
                           const SizedBox(width: 10),
                         ],
                         Expanded(
-                          child: Text(
-                            rasterImageMimeTypes
-                                    .contains(_pendingFile!.mimeType)
-                                ? '${_currentPreset.label} — ${_formatFileSize(_pendingFile!.bytes.length)}'
-                                : '${_pendingFile!.name} — ${_formatFileSize(_pendingFile!.bytes.length)}',
-                            style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black87),
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          child: rasterImageMimeTypes
+                                  .contains(_pendingFile!.mimeType)
+                              ? Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        _presetBytes != null
+                                            ? '${_currentPreset.label} — ${_formatFileSize(_pendingFile!.bytes.length)}'
+                                            : '${_currentPreset.label} — ',
+                                        style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.black87),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (_presetBytes == null)
+                                      const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                  Colors.black45),
+                                        ),
+                                      ),
+                                  ],
+                                )
+                              : Text(
+                                  '${_pendingFile!.name} — ${_formatFileSize(_pendingFile!.bytes.length)}',
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                         ),
                         if (rasterImageMimeTypes
                             .contains(_pendingFile!.mimeType)) ...[
@@ -1154,6 +1201,7 @@ class _NotesScreenState extends State<NotesScreen> {
                             onTap: () => setState(() {
                               _pendingFile = null;
                               _originalImageBytes = null;
+                              _presetBytes = null;
                             }),
                             child: Icon(Icons.close,
                                 size: 24, color: Colors.grey[400]),
@@ -1852,7 +1900,7 @@ class _NoteCardState extends State<_NoteCard> {
 // Formats file size for display
 String _formatFileSize(int bytes) {
   if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).round()} KB';
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
 
