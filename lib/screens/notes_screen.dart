@@ -38,7 +38,6 @@ extension _ImageResizePresetExt on ImageResizePreset {
         ImageResizePreset.large => 'Large',
         ImageResizePreset.original => 'Original',
       };
-
 }
 
 class NotesScreen extends StatefulWidget {
@@ -304,7 +303,10 @@ class _NotesScreenState extends State<NotesScreen> {
     setState(() => _presetBytes = allBytes);
 
     if (savedPreset == null) {
-      await _showImageSizeModal();
+      final originalSize = allBytes[ImageResizePreset.original]!.length;
+      final hasSmaller = ImageResizePreset.values.any(
+          (p) => p != ImageResizePreset.original && allBytes[p]!.length < originalSize);
+      if (hasSmaller) await _showImageSizeModal();
     }
   }
 
@@ -383,17 +385,16 @@ class _NotesScreenState extends State<NotesScreen> {
     return compute(_computePreset, (bytes, preset));
   }
 
-  Future<Map<ImageResizePreset, Uint8List>> _resizeAll(
-      Uint8List bytes) async {
+  Future<Map<ImageResizePreset, Uint8List>> _resizeAll(Uint8List bytes) async {
     if (_useNativeResize) {
       // Native threads run in parallel on multi-core CPUs
       final results = await Future.wait([
-        FlutterImageCompress.compressWithList(
-            bytes, minWidth: 800, minHeight: 800, quality: 85),
-        FlutterImageCompress.compressWithList(
-            bytes, minWidth: 1440, minHeight: 1440, quality: 85),
-        FlutterImageCompress.compressWithList(
-            bytes, minWidth: 2500, minHeight: 2500, quality: 85),
+        FlutterImageCompress.compressWithList(bytes,
+            minWidth: 800, minHeight: 800, quality: 85),
+        FlutterImageCompress.compressWithList(bytes,
+            minWidth: 1440, minHeight: 1440, quality: 85),
+        FlutterImageCompress.compressWithList(bytes,
+            minWidth: 2500, minHeight: 2500, quality: 85),
       ]);
       return {
         ImageResizePreset.small: results[0],
@@ -424,7 +425,16 @@ class _NotesScreenState extends State<NotesScreen> {
     if (all == null || all.length < ImageResizePreset.values.length) return;
     final sizes = all.map((k, v) => MapEntry(k, v.length));
 
-    var selected = _currentPreset;
+    // Hide presets that are larger than or equal to the original file size
+    final originalSize = sizes[ImageResizePreset.original]!;
+    final visiblePresets = ImageResizePreset.values
+        .where((p) =>
+            p == ImageResizePreset.original || sizes[p]! < originalSize)
+        .toList();
+
+    var selected = visiblePresets.contains(_currentPreset)
+        ? _currentPreset
+        : visiblePresets.last;
     final confirmed = await showDialog<ImageResizePreset>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -464,8 +474,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         button: true,
                         selected: isSelected,
                         child: GestureDetector(
-                          onTap: () =>
-                              setDialogState(() => selected = preset),
+                          onTap: () => setDialogState(() => selected = preset),
                           child: Container(
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(8),
@@ -477,8 +486,7 @@ class _NotesScreenState extends State<NotesScreen> {
                               ),
                             ),
                             child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                               child: Column(
                                 children: [
                                   Text(
@@ -490,8 +498,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                   Text(
                                     _formatFileSize(sizes[preset]!),
                                     style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey[600]),
+                                        fontSize: 12, color: Colors.grey[600]),
                                   ),
                                 ],
                               ),
@@ -502,23 +509,19 @@ class _NotesScreenState extends State<NotesScreen> {
                     );
                   }
 
-                  return [
-                    Row(
-                      children: [
-                        presetTile(ImageResizePreset.small),
-                        const SizedBox(width: 12),
-                        presetTile(ImageResizePreset.medium),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        presetTile(ImageResizePreset.large),
-                        const SizedBox(width: 12),
-                        presetTile(ImageResizePreset.original),
-                      ],
-                    ),
-                  ];
+                  final rows = <Widget>[];
+                  for (int i = 0; i < visiblePresets.length; i += 2) {
+                    if (rows.isNotEmpty) rows.add(const SizedBox(height: 12));
+                    rows.add(Row(children: [
+                      presetTile(visiblePresets[i]),
+                      const SizedBox(width: 12),
+                      if (i + 1 < visiblePresets.length)
+                        presetTile(visiblePresets[i + 1])
+                      else
+                        const Expanded(child: SizedBox()),
+                    ]));
+                  }
+                  return rows;
                 }(),
                 const SizedBox(height: 20),
                 SizedBox(
@@ -1230,7 +1233,19 @@ class _NotesScreenState extends State<NotesScreen> {
                                 ),
                         ),
                         if (rasterImageMimeTypes
-                            .contains(_pendingFile!.mimeType)) ...[
+                                .contains(_pendingFile!.mimeType) &&
+                            () {
+                              final pb = _presetBytes;
+                              if (pb == null ||
+                                  pb.length < ImageResizePreset.values.length) {
+                                return false;
+                              }
+                              final origSize =
+                                  pb[ImageResizePreset.original]!.length;
+                              return ImageResizePreset.values.any((p) =>
+                                  p != ImageResizePreset.original &&
+                                  pb[p]!.length < origSize);
+                            }()) ...[
                           const SizedBox(width: 20),
                           Semantics(
                             label: 'Image size settings',
@@ -1364,7 +1379,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                     child: GestureDetector(
                                       onTap: _pickFile,
                                       child: Padding(
-                                        padding: const EdgeInsets.only(),
+                                        padding:
+                                            const EdgeInsets.only(right: 0),
                                         child: Icon(Icons.attachment,
                                             size: 32, color: Colors.grey[400]),
                                       ),
