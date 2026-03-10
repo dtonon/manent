@@ -51,6 +51,7 @@ dependencies:
   thumbhash: ^0.1.0
   mime: ^1.0.0
   share_plus: ^10.0.0
+  image: ^4.2.0
 
 dev_dependencies:
   flutter_test:

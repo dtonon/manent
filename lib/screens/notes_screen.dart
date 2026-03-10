@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:image/image.dart' as img;
+
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
@@ -25,6 +27,24 @@ import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
 import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
+
+enum ImageResizePreset { small, medium, large, original }
+
+extension _ImageResizePresetExt on ImageResizePreset {
+  String get label => switch (this) {
+        ImageResizePreset.small => 'Small',
+        ImageResizePreset.medium => 'Medium',
+        ImageResizePreset.large => 'Large',
+        ImageResizePreset.original => 'Original',
+      };
+
+  int? get maxPixels => switch (this) {
+        ImageResizePreset.small => 800,
+        ImageResizePreset.medium => 1440,
+        ImageResizePreset.large => 2500,
+        ImageResizePreset.original => null,
+      };
+}
 
 class NotesScreen extends StatefulWidget {
   final AuthUser user;
@@ -58,6 +78,11 @@ class _NotesScreenState extends State<NotesScreen> {
   DecryptedNote? _editingNote;
   // Pending file selected by user, cleared after send
   ({Uint8List bytes, String name, String mimeType})? _pendingFile;
+  // Original image bytes before any resize (null for non-image files)
+  Uint8List? _originalImageBytes;
+  int _originalImageWidth = 0;
+  int _originalImageHeight = 0;
+  ImageResizePreset _currentPreset = ImageResizePreset.original;
 
   @override
   void initState() {
@@ -230,8 +255,14 @@ class _NotesScreenState extends State<NotesScreen> {
       bytes = await File(pf.path!).readAsBytes();
     }
     final mimeType = lookupMimeType(pf.name) ?? 'application/octet-stream';
-    setState(
-        () => _pendingFile = (bytes: bytes, name: pf.name, mimeType: mimeType));
+    if (rasterImageMimeTypes.contains(mimeType)) {
+      await _handleImagePicked(bytes, pf.name, mimeType);
+    } else {
+      setState(() {
+        _pendingFile = (bytes: bytes, name: pf.name, mimeType: mimeType);
+        _originalImageBytes = null;
+      });
+    }
   }
 
   Future<void> _takePhoto() async {
@@ -239,8 +270,185 @@ class _NotesScreenState extends State<NotesScreen> {
     if (xfile == null) return;
     final bytes = await xfile.readAsBytes();
     final mimeType = lookupMimeType(xfile.name) ?? 'image/jpeg';
-    setState(() =>
-        _pendingFile = (bytes: bytes, name: xfile.name, mimeType: mimeType));
+    await _handleImagePicked(bytes, xfile.name, mimeType);
+  }
+
+  Future<void> _handleImagePicked(
+      Uint8List bytes, String name, String mimeType) async {
+    final dims = await compute(_getImageDimensions, bytes);
+    if (!mounted) return;
+    setState(() {
+      _originalImageBytes = bytes;
+      _originalImageWidth = dims.$1;
+      _originalImageHeight = dims.$2;
+      _currentPreset = ImageResizePreset.original;
+      _pendingFile = (bytes: bytes, name: name, mimeType: mimeType);
+    });
+    final savedPreset = await AuthService.getImageResizePreset();
+    if (!mounted) return;
+    if (savedPreset == null) {
+      await _showImageSizeModal();
+    } else {
+      final preset = ImageResizePreset.values.firstWhere(
+        (p) => p.name == savedPreset,
+        orElse: () => ImageResizePreset.original,
+      );
+      await _applyResize(preset, save: false);
+    }
+  }
+
+  static (int, int) _getImageDimensions(Uint8List bytes) {
+    final decoded = img.decodeImage(bytes);
+    return (decoded?.width ?? 0, decoded?.height ?? 0);
+  }
+
+  static Uint8List _doResize((Uint8List, int) args) {
+    final (bytes, maxDim) = args;
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return bytes;
+    final maxOrig = decoded.width > decoded.height ? decoded.width : decoded.height;
+    if (maxOrig <= maxDim) return bytes;
+    final scale = maxDim / maxOrig;
+    final result = img.copyResize(
+      decoded,
+      width: (decoded.width * scale).round(),
+      height: (decoded.height * scale).round(),
+    );
+    return Uint8List.fromList(img.encodeJpg(result, quality: 85));
+  }
+
+  Future<void> _applyResize(ImageResizePreset preset, {bool save = true}) async {
+    final original = _originalImageBytes;
+    final file = _pendingFile;
+    if (original == null || file == null) return;
+    Uint8List resized;
+    final maxDim = preset.maxPixels;
+    if (maxDim == null) {
+      resized = original;
+    } else {
+      resized = await compute(_doResize, (original, maxDim));
+    }
+    if (!mounted) return;
+    setState(() {
+      _currentPreset = preset;
+      _pendingFile = (bytes: resized, name: file.name, mimeType: file.mimeType);
+    });
+    if (save) await AuthService.setImageResizePreset(preset.name);
+  }
+
+  Future<void> _showImageSizeModal() async {
+    final original = _originalImageBytes;
+    if (original == null || !mounted) return;
+    final origSize = original.length;
+    final w = _originalImageWidth;
+    final h = _originalImageHeight;
+
+    int estimateSize(ImageResizePreset preset) {
+      final maxDim = preset.maxPixels;
+      if (maxDim == null || w == 0 || h == 0) return origSize;
+      final maxOrig = w > h ? w : h;
+      if (maxOrig <= maxDim) return origSize;
+      final scale = maxDim / maxOrig;
+      return (origSize * scale * scale).round();
+    }
+
+    var selected = _currentPreset;
+    final confirmed = await showDialog<ImageResizePreset>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => Dialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(
+                    original,
+                    height: 200,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    semanticLabel: 'Image preview',
+                  ),
+                ),
+                const SizedBox(height: 20),
+                GridView.count(
+                  crossAxisCount: 2,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 2.5,
+                  children: ImageResizePreset.values.map((preset) {
+                    final isSelected = selected == preset;
+                    return Semantics(
+                      label:
+                          '${preset.label}, ~${_formatFileSize(estimateSize(preset))}',
+                      button: true,
+                      selected: isSelected,
+                      child: GestureDetector(
+                        onTap: () =>
+                            setDialogState(() => selected = preset),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isSelected
+                                  ? accent
+                                  : const Color(0xFFE0E0E0),
+                              width: isSelected ? 2 : 1,
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                preset.label,
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500),
+                              ),
+                              Text(
+                                '~ ${_formatFileSize(estimateSize(preset))}',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey[600]),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, selected),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      elevation: 0,
+                    ),
+                    child:
+                        const Text('OK', style: TextStyle(fontSize: 16)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (confirmed != null && mounted) {
+      await _applyResize(confirmed);
+    }
   }
 
   void _editLastNote() {
@@ -888,7 +1096,10 @@ class _NotesScreenState extends State<NotesScreen> {
                         ],
                         Expanded(
                           child: Text(
-                            '${_pendingFile!.name} — ${_formatFileSize(_pendingFile!.bytes.length)}',
+                            rasterImageMimeTypes
+                                    .contains(_pendingFile!.mimeType)
+                                ? '${_currentPreset.label} — ${_formatFileSize(_pendingFile!.bytes.length)}'
+                                : '${_pendingFile!.name} — ${_formatFileSize(_pendingFile!.bytes.length)}',
                             style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.bold,
@@ -896,14 +1107,30 @@ class _NotesScreenState extends State<NotesScreen> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        if (rasterImageMimeTypes
+                            .contains(_pendingFile!.mimeType)) ...[
+                          const SizedBox(width: 20),
+                          Semantics(
+                            label: 'Image size settings',
+                            button: true,
+                            child: GestureDetector(
+                              onTap: _showImageSizeModal,
+                              child: Icon(Icons.tune,
+                                  size: 24, color: Colors.grey[400]),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(width: 20),
                         Semantics(
                           label: 'Remove attachment',
                           button: true,
                           child: GestureDetector(
-                            onTap: () => setState(() => _pendingFile = null),
-                            child: const Icon(Icons.close,
-                                size: 16, color: Colors.grey),
+                            onTap: () => setState(() {
+                              _pendingFile = null;
+                              _originalImageBytes = null;
+                            }),
+                            child: Icon(Icons.close,
+                                size: 24, color: Colors.grey[400]),
                           ),
                         ),
                       ],
@@ -1290,7 +1517,9 @@ class _NoteCardState extends State<_NoteCard> {
           showDebugJson: kDebugMode,
           editedAt: widget.note.editedAt,
           copyLabel: isFileNote
-              ? 'Copy filename'
+              ? (widget.note.attachment?.isImage == true
+                  ? null
+                  : 'Copy filename')
               : (hasSelection ? 'Copy selected text' : 'Copy text'),
         ),
       ),
@@ -1852,7 +2081,8 @@ class _NoteMenuOverlay extends StatelessWidget {
   final bool showEdit;
   final bool showEditComment;
   final DateTime? editedAt;
-  final String copyLabel;
+  // Null hides the copy action (e.g. image notes where filename copy is useless)
+  final String? copyLabel;
 
   final bool showSave;
   final bool showShare;
@@ -1994,18 +2224,20 @@ class _NoteMenuOverlay extends StatelessWidget {
                         ),
                         const Divider(height: 1, color: Color(0xFFE0E0E0)),
                       ],
-                      InkWell(
-                        onTap: () => onSelect('copy'),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          child: Text(
-                            copyLabel,
-                            style: const TextStyle(
-                                fontSize: 14, color: Colors.black87),
+                      if (copyLabel != null) ...[
+                        InkWell(
+                          onTap: () => onSelect('copy'),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Text(
+                              copyLabel!,
+                              style: const TextStyle(
+                                  fontSize: 14, color: Colors.black87),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                       if (showSelectText) ...[
                         const Divider(height: 1, color: Color(0xFFE0E0E0)),
                         InkWell(
