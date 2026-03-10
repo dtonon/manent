@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 
 import 'package:file_picker/file_picker.dart';
@@ -289,7 +290,7 @@ class _NotesScreenState extends State<NotesScreen> {
           );
 
     // Compute target preset first — clears the spinner as soon as possible
-    final targetBytes = await compute(_computePreset, (bytes, targetPreset));
+    final targetBytes = await _resizeOne(bytes, targetPreset);
     if (!mounted) return;
     setState(() {
       _currentPreset = targetPreset;
@@ -298,7 +299,7 @@ class _NotesScreenState extends State<NotesScreen> {
     });
 
     // Then compute remaining presets (needed only for the size modal)
-    final allBytes = await compute(_computeAllPresets, bytes);
+    final allBytes = await _resizeAll(bytes);
     if (!mounted) return;
     setState(() => _presetBytes = allBytes);
 
@@ -354,6 +355,54 @@ class _NotesScreenState extends State<NotesScreen> {
       height: (decoded.height * scale).round(),
     );
     return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
+  }
+
+  // True on platforms with hardware-accelerated image compression
+  bool get _useNativeResize =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS);
+
+  static int _presetMaxDim(ImageResizePreset preset) => switch (preset) {
+        ImageResizePreset.small => 800,
+        ImageResizePreset.medium => 1440,
+        ImageResizePreset.large => 2500,
+        ImageResizePreset.original => 0,
+      };
+
+  Future<Uint8List> _resizeOne(
+      Uint8List bytes, ImageResizePreset preset) async {
+    if (preset == ImageResizePreset.original) return bytes;
+    if (_useNativeResize) {
+      final maxDim = _presetMaxDim(preset);
+      return await FlutterImageCompress.compressWithList(
+        bytes,
+        minWidth: maxDim,
+        minHeight: maxDim,
+        quality: 85,
+      );
+    }
+    return compute(_computePreset, (bytes, preset));
+  }
+
+  Future<Map<ImageResizePreset, Uint8List>> _resizeAll(
+      Uint8List bytes) async {
+    if (_useNativeResize) {
+      // Native threads run in parallel on multi-core CPUs
+      final results = await Future.wait([
+        FlutterImageCompress.compressWithList(
+            bytes, minWidth: 800, minHeight: 800, quality: 85),
+        FlutterImageCompress.compressWithList(
+            bytes, minWidth: 1440, minHeight: 1440, quality: 85),
+        FlutterImageCompress.compressWithList(
+            bytes, minWidth: 2500, minHeight: 2500, quality: 85),
+      ]);
+      return {
+        ImageResizePreset.small: results[0],
+        ImageResizePreset.medium: results[1],
+        ImageResizePreset.large: results[2],
+        ImageResizePreset.original: bytes,
+      };
+    }
+    return compute(_computeAllPresets, bytes);
   }
 
   void _applyPreset(ImageResizePreset preset, {bool save = true}) {
