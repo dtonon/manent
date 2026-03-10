@@ -306,7 +306,8 @@ class _NotesScreenState extends State<NotesScreen> {
     final (bytes, maxDim) = args;
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return bytes;
-    final maxOrig = decoded.width > decoded.height ? decoded.width : decoded.height;
+    final maxOrig =
+        decoded.width > decoded.height ? decoded.width : decoded.height;
     if (maxOrig <= maxDim) return bytes;
     final scale = maxDim / maxOrig;
     final result = img.copyResize(
@@ -317,7 +318,8 @@ class _NotesScreenState extends State<NotesScreen> {
     return Uint8List.fromList(img.encodeJpg(result, quality: 85));
   }
 
-  Future<void> _applyResize(ImageResizePreset preset, {bool save = true}) async {
+  Future<void> _applyResize(ImageResizePreset preset,
+      {bool save = true}) async {
     final original = _originalImageBytes;
     final file = _pendingFile;
     if (original == null || file == null) return;
@@ -366,63 +368,88 @@ class _NotesScreenState extends State<NotesScreen> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(
-                    original,
-                    height: 200,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    semanticLabel: 'Image preview',
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.of(ctx).size.height * 0.35,
+                    ),
+                    child: Container(
+                      width: double.infinity,
+                      color: const Color(0xFFEEEEEE),
+                      child: Image.memory(
+                        original,
+                        fit: BoxFit.contain,
+                        semanticLabel: 'Image preview',
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
-                GridView.count(
-                  crossAxisCount: 2,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 2.5,
-                  children: ImageResizePreset.values.map((preset) {
+                ...() {
+                  Widget presetTile(ImageResizePreset preset) {
                     final isSelected = selected == preset;
-                    return Semantics(
-                      label:
-                          '${preset.label}, ~${_formatFileSize(estimateSize(preset))}',
-                      button: true,
-                      selected: isSelected,
-                      child: GestureDetector(
-                        onTap: () =>
-                            setDialogState(() => selected = preset),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isSelected
-                                  ? accent
-                                  : const Color(0xFFE0E0E0),
-                              width: isSelected ? 2 : 1,
+                    return Expanded(
+                      child: Semantics(
+                        label:
+                            '${preset.label}, ~${_formatFileSize(estimateSize(preset))}',
+                        button: true,
+                        selected: isSelected,
+                        child: GestureDetector(
+                          onTap: () =>
+                              setDialogState(() => selected = preset),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isSelected
+                                    ? accent
+                                    : const Color(0xFFE0E0E0),
+                                width: isSelected ? 2 : 1,
+                              ),
                             ),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                preset.label,
-                                style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500),
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    preset.label,
+                                    style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500),
+                                  ),
+                                  Text(
+                                    '~ ${_formatFileSize(estimateSize(preset))}',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600]),
+                                  ),
+                                ],
                               ),
-                              Text(
-                                '~ ${_formatFileSize(estimateSize(preset))}',
-                                style: TextStyle(
-                                    fontSize: 12, color: Colors.grey[600]),
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),
                     );
-                  }).toList(),
-                ),
+                  }
+
+                  return [
+                    Row(
+                      children: [
+                        presetTile(ImageResizePreset.small),
+                        const SizedBox(width: 12),
+                        presetTile(ImageResizePreset.medium),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        presetTile(ImageResizePreset.large),
+                        const SizedBox(width: 12),
+                        presetTile(ImageResizePreset.original),
+                      ],
+                    ),
+                  ];
+                }(),
                 const SizedBox(height: 20),
                 SizedBox(
                   width: double.infinity,
@@ -436,8 +463,7 @@ class _NotesScreenState extends State<NotesScreen> {
                           borderRadius: BorderRadius.circular(8)),
                       elevation: 0,
                     ),
-                    child:
-                        const Text('OK', style: TextStyle(fontSize: 16)),
+                    child: const Text('OK', style: TextStyle(fontSize: 16)),
                   ),
                 ),
               ],
