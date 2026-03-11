@@ -2602,10 +2602,63 @@ class _MenuPositionDelegate extends SingleChildLayoutDelegate {
       old.keyboardHeight != keyboardHeight;
 }
 
-class _MobileImageViewer extends StatelessWidget {
+class _MobileImageViewer extends StatefulWidget {
   final NoteAttachment attachment;
 
   const _MobileImageViewer({required this.attachment});
+
+  @override
+  State<_MobileImageViewer> createState() => _MobileImageViewerState();
+}
+
+class _MobileImageViewerState extends State<_MobileImageViewer>
+    with SingleTickerProviderStateMixin {
+  final _transformController = TransformationController();
+  late final AnimationController _animController;
+  Animation<Matrix4>? _animation;
+  Offset _doubleTapPosition = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    )..addListener(() {
+        if (_animation != null) {
+          _transformController.value = _animation!.value;
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _transformController.dispose();
+    _animController.dispose();
+    super.dispose();
+  }
+
+  void _onDoubleTap() {
+    final Matrix4 target;
+    if (_transformController.value.getMaxScaleOnAxis() > 1.1) {
+      target = Matrix4.identity();
+    } else {
+      final size = MediaQuery.of(context).size;
+      final tx = size.width / 2 - 2 * _doubleTapPosition.dx;
+      final ty = size.height / 2 - 2 * _doubleTapPosition.dy;
+      target = Matrix4.identity()
+        ..translateByDouble(tx, ty, 0, 1)
+        ..scaleByDouble(2.0, 2.0, 1.0, 1.0);
+    }
+    _animation = Matrix4Tween(
+      begin: _transformController.value,
+      end: target,
+    ).animate(
+        CurvedAnimation(parent: _animController, curve: Curves.easeInOut));
+    _animController
+      ..reset()
+      ..forward();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2624,17 +2677,23 @@ class _MobileImageViewer extends StatelessWidget {
         body: Stack(
         children: [
           FutureBuilder<Uint8List?>(
-            future: NoteCache.instance.getFileBytes(attachment),
+            future: NoteCache.instance.getFileBytes(widget.attachment),
             builder: (ctx, snap) {
               if (snap.hasData && snap.data != null) {
-                return InteractiveViewer(
-                  minScale: 0.5,
-                  maxScale: 10.0,
-                  child: Center(
-                    child: Image.memory(
-                      snap.data!,
-                      fit: BoxFit.contain,
-                      semanticLabel: attachment.filename,
+                return GestureDetector(
+                  onDoubleTapDown: (d) =>
+                      _doubleTapPosition = d.localPosition,
+                  onDoubleTap: _onDoubleTap,
+                  child: InteractiveViewer(
+                    transformationController: _transformController,
+                    minScale: 0.5,
+                    maxScale: 10.0,
+                    child: Center(
+                      child: Image.memory(
+                        snap.data!,
+                        fit: BoxFit.contain,
+                        semanticLabel: widget.attachment.filename,
+                      ),
                     ),
                   ),
                 );
