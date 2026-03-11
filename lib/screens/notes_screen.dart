@@ -239,6 +239,7 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   Future<void> _pickFile() async {
+    _inputFocusNode.unfocus();
     FilePickerResult? result;
     try {
       result = await FilePicker.platform.pickFiles(withData: kIsWeb);
@@ -274,6 +275,7 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   Future<void> _takePhoto() async {
+    _inputFocusNode.unfocus();
     final xfile = await ImagePicker().pickImage(source: ImageSource.camera);
     if (xfile == null) return;
     final bytes = await xfile.readAsBytes();
@@ -964,7 +966,10 @@ class _NotesScreenState extends State<NotesScreen> {
           button: true,
           child: IconButton(
             icon: const Icon(Icons.close, color: Colors.white),
-            onPressed: () => _NoteCardState._selectionModeId.value = null,
+            onPressed: () {
+              _NoteCardState._selectionModeId.value = null;
+              _inputFocusNode.unfocus();
+            },
           ),
         ),
       ],
@@ -985,6 +990,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 _cancelEdit();
               } else {
                 _NoteCardState._selectionModeId.value = null;
+                _inputFocusNode.unfocus();
               }
             }
           },
@@ -1026,7 +1032,10 @@ class _NotesScreenState extends State<NotesScreen> {
             body: GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: inSelection
-                  ? () => _NoteCardState._selectionModeId.value = null
+                  ? () {
+                      _NoteCardState._selectionModeId.value = null;
+                      _inputFocusNode.unfocus();
+                    }
                   : null,
               child: Column(
                 children: [
@@ -1758,6 +1767,7 @@ class _NoteCardState extends State<_NoteCard>
       _retry();
     } else if (result == 'delete') {
       if (!mounted) return;
+      FocusManager.instance.primaryFocus?.unfocus();
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => CallbackShortcuts(
@@ -1861,7 +1871,12 @@ class _NoteCardState extends State<_NoteCard>
           // All null — SelectableText handles everything
         } else if (selectionId != null) {
           // Non-active card: tap exits selection mode
-          if (!_isDesktopOrWeb) onTap = () => _selectionModeId.value = null;
+          if (!_isDesktopOrWeb) {
+            onTap = () {
+              _selectionModeId.value = null;
+              FocusManager.instance.primaryFocus?.unfocus();
+            };
+          }
         } else {
           // Normal mode
           if (!_isDesktopOrWeb) {
@@ -1967,6 +1982,7 @@ class _NoteCardState extends State<_NoteCard>
 
     // Mobile / web browser: in-app full-screen viewer
     if (!mounted) return;
+    FocusManager.instance.primaryFocus?.unfocus();
     Navigator.of(context).push(
       PageRouteBuilder<void>(
         opaque: false,
