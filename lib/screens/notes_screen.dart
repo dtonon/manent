@@ -1211,14 +1211,17 @@ class _NotesScreenState extends State<NotesScreen> {
                       children: [
                         if (rasterImageMimeTypes
                             .contains(_pendingFile!.mimeType)) ...[
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child: Image.memory(
-                              _pendingFile!.bytes,
-                              width: 36,
-                              height: 36,
-                              fit: BoxFit.cover,
-                              semanticLabel: _pendingFile!.name,
+                          GestureDetector(
+                            onTap: _presetBytes != null ? _showImageSizeModal : null,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: Image.memory(
+                                _pendingFile!.bytes,
+                                width: 36,
+                                height: 36,
+                                fit: BoxFit.cover,
+                                semanticLabel: _pendingFile!.name,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -1226,7 +1229,9 @@ class _NotesScreenState extends State<NotesScreen> {
                         Expanded(
                           child: rasterImageMimeTypes
                                   .contains(_pendingFile!.mimeType)
-                              ? Row(
+                              ? GestureDetector(
+                                  onTap: _presetBytes != null ? _showImageSizeModal : null,
+                                  child: Row(
                                   children: [
                                     Flexible(
                                       child: Text(
@@ -1252,7 +1257,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                         ),
                                       ),
                                   ],
-                                )
+                                ),
+                              )
                               : Text(
                                   '${_pendingFile!.name} — ${_formatFileSize(_pendingFile!.bytes.length)}',
                                   style: const TextStyle(
