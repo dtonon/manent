@@ -19,6 +19,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../utils/web_download.dart';
+import '../utils/web_image_resize.dart';
 
 import 'package:ndk/ndk.dart';
 
@@ -289,6 +290,8 @@ class _NotesScreenState extends State<NotesScreen> {
       _currentPreset = ImageResizePreset.original;
       _pendingFile = (bytes: bytes, name: name, mimeType: mimeType);
     });
+    // Yield to let the UI update (preview + spinner) before heavy work
+    await Future.delayed(Duration.zero);
 
     final savedPreset = await AuthService.getImageResizePreset();
     if (!mounted) return;
@@ -386,8 +389,9 @@ class _NotesScreenState extends State<NotesScreen> {
   Future<Uint8List> _resizeOne(
       Uint8List bytes, ImageResizePreset preset) async {
     if (preset == ImageResizePreset.original) return bytes;
+    final maxDim = _presetMaxDim(preset);
+    if (kIsWeb) return resizeImageForWeb(bytes, maxDim);
     if (_useNativeResize) {
-      final maxDim = _presetMaxDim(preset);
       return await FlutterImageCompress.compressWithList(
         bytes,
         minWidth: maxDim,
@@ -399,6 +403,19 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   Future<Map<ImageResizePreset, Uint8List>> _resizeAll(Uint8List bytes) async {
+    if (kIsWeb) {
+      final results = await Future.wait([
+        resizeImageForWeb(bytes, 800),
+        resizeImageForWeb(bytes, 1440),
+        resizeImageForWeb(bytes, 2500),
+      ]);
+      return {
+        ImageResizePreset.small: results[0],
+        ImageResizePreset.medium: results[1],
+        ImageResizePreset.large: results[2],
+        ImageResizePreset.original: bytes,
+      };
+    }
     if (_useNativeResize) {
       // Native threads run in parallel on multi-core CPUs
       final results = await Future.wait([
