@@ -1439,7 +1439,10 @@ class _NoteCard extends StatefulWidget {
   State<_NoteCard> createState() => _NoteCardState();
 }
 
-class _NoteCardState extends State<_NoteCard> {
+class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive =>
+      widget.note.kind == NoteKind.file && widget.note.attachment?.isImage == true;
   static final _activeMenuId = ValueNotifier<String?>(null);
   static final _selectionModeId = ValueNotifier<String?>(null);
 
@@ -1773,6 +1776,7 @@ class _NoteCardState extends State<_NoteCard> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final core = ListenableBuilder(
       listenable: Listenable.merge([_activeMenuId, _selectionModeId]),
       builder: (context, _) {
