@@ -15,6 +15,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:thumbhash/thumbhash.dart' hide Image;
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../utils/web_download.dart';
@@ -1445,6 +1446,9 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
       widget.note.kind == NoteKind.file && widget.note.attachment?.isImage == true;
   static final _activeMenuId = ValueNotifier<String?>(null);
   static final _selectionModeId = ValueNotifier<String?>(null);
+  // Reused across image-viewer opens to avoid cold-starting a new Flutter engine each time
+  static WindowController? _imageViewerWindow;
+  static StreamSubscription<void>? _windowsChangedSub;
 
   String? _desktopSelectedContent;
   // Captured in onSecondaryTapDown before SelectionArea word-selects on right-click
@@ -1870,16 +1874,40 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
     final attachment = widget.note.attachment;
     if (attachment == null) return;
 
-    // Native desktop: write decrypted bytes to a temp file and open in the OS
-    // default image viewer (Preview on macOS, Photos on Windows, xdg-open on Linux).
+    // Native desktop: write decrypted bytes to a temp file, open in a new window.
+    // The window is reused across clicks to avoid cold-starting a new Flutter engine.
     if (!kIsWeb && _isDesktopOrWeb) {
       final bytes = await NoteCache.instance.getFileBytes(attachment);
       if (bytes == null) return;
       final file = File(
           '${Directory.systemTemp.path}/manent_${attachment.filename}');
       await file.writeAsBytes(bytes);
-      await launchUrl(Uri.file(file.path),
-          mode: LaunchMode.platformDefault);
+      final args =
+          jsonEncode({'path': file.path, 'filename': attachment.filename});
+      final existing = _imageViewerWindow;
+      if (existing != null) {
+        try {
+          await existing.invokeMethod('loadImage', args);
+          return;
+        } catch (_) {
+          _imageViewerWindow = null;
+          _windowsChangedSub?.cancel();
+          _windowsChangedSub = null;
+        }
+      }
+      final controller = await WindowController.create(
+        WindowConfiguration(hiddenAtLaunch: true, arguments: args),
+      );
+      _imageViewerWindow = controller;
+      _windowsChangedSub = onWindowsChanged.listen((_) async {
+        final all = await WindowController.getAll();
+        if (_imageViewerWindow != null &&
+            !all.any((c) => c.windowId == _imageViewerWindow!.windowId)) {
+          _imageViewerWindow = null;
+          _windowsChangedSub?.cancel();
+          _windowsChangedSub = null;
+        }
+      });
       return;
     }
 
