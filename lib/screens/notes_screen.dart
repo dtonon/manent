@@ -244,11 +244,11 @@ class _NotesScreenState extends State<NotesScreen> {
       result = await FilePicker.platform.pickFiles(withData: kIsWeb);
     } catch (e) {
       if (!mounted) return;
-      final msg = e.toString().contains('zenity') || e.toString().contains('kdialog')
+      final msg = e.toString().contains('zenity') ||
+              e.toString().contains('kdialog')
           ? 'Install zenity (GNOME) or kdialog (KDE) to pick files on Linux.'
           : 'Could not open file picker: $e';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       return;
     }
     if (result == null || result.files.isEmpty) return;
@@ -1212,7 +1212,9 @@ class _NotesScreenState extends State<NotesScreen> {
                         if (rasterImageMimeTypes
                             .contains(_pendingFile!.mimeType)) ...[
                           GestureDetector(
-                            onTap: _presetBytes != null ? _showImageSizeModal : null,
+                            onTap: _presetBytes != null
+                                ? _showImageSizeModal
+                                : null,
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(4),
                               child: Image.memory(
@@ -1230,35 +1232,37 @@ class _NotesScreenState extends State<NotesScreen> {
                           child: rasterImageMimeTypes
                                   .contains(_pendingFile!.mimeType)
                               ? GestureDetector(
-                                  onTap: _presetBytes != null ? _showImageSizeModal : null,
+                                  onTap: _presetBytes != null
+                                      ? _showImageSizeModal
+                                      : null,
                                   child: Row(
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        _presetBytes != null
-                                            ? '${_currentPreset.label} — ${_formatFileSize(_pendingFile!.bytes.length)}'
-                                            : '${_currentPreset.label} — ',
-                                        style: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.black87),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    if (_presetBytes == null)
-                                      const SizedBox(
-                                        width: 14,
-                                        height: 14,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                  Colors.black45),
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          _presetBytes != null
+                                              ? '${_currentPreset.label} — ${_formatFileSize(_pendingFile!.bytes.length)}'
+                                              : '${_currentPreset.label} — ',
+                                          style: const TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.black87),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
-                                  ],
-                                ),
-                              )
+                                      if (_presetBytes == null)
+                                        const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                    Colors.black45),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                )
                               : Text(
                                   '${_pendingFile!.name} — ${_formatFileSize(_pendingFile!.bytes.length)}',
                                   style: const TextStyle(
@@ -1402,7 +1406,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                         child: Padding(
                                           padding:
                                               const EdgeInsets.only(right: 20),
-                                          child: Icon(Icons.camera_alt,
+                                          child: Icon(Icons.camera_alt_outlined,
                                               size: 24,
                                               color: Colors.grey[400]),
                                         ),
@@ -1418,8 +1422,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                         padding:
                                             const EdgeInsets.only(right: 0),
                                         child: Transform.rotate(
-                                          angle: -0.55,
-                                          child: Icon(Icons.attachment,
+                                          angle: 0.55,
+                                          child: Icon(Icons.attach_file,
                                               size: 24,
                                               color: Colors.grey[400]),
                                         ),
@@ -1474,10 +1478,12 @@ class _NoteCard extends StatefulWidget {
   State<_NoteCard> createState() => _NoteCardState();
 }
 
-class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin {
+class _NoteCardState extends State<_NoteCard>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive =>
-      widget.note.kind == NoteKind.file && widget.note.attachment?.isImage == true;
+      widget.note.kind == NoteKind.file &&
+      widget.note.attachment?.isImage == true;
   static final _activeMenuId = ValueNotifier<String?>(null);
   static final _selectionModeId = ValueNotifier<String?>(null);
   // Reused across image-viewer opens to avoid cold-starting a new Flutter engine each time
@@ -1848,7 +1854,8 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
 
         final isFileNote =
             widget.note.kind == NoteKind.file && widget.note.error == null;
-        final isFileImage = isFileNote && widget.note.attachment?.isImage == true;
+        final isFileImage =
+            isFileNote && widget.note.attachment?.isImage == true;
 
         if (isActiveSelection) {
           // All null — SelectableText handles everything
@@ -1926,8 +1933,8 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
     if (!kIsWeb && _isDesktopOrWeb) {
       final bytes = await NoteCache.instance.getFileBytes(attachment);
       if (bytes == null) return;
-      final file = File(
-          '${Directory.systemTemp.path}/manent_${attachment.filename}');
+      final file =
+          File('${Directory.systemTemp.path}/manent_${attachment.filename}');
       await file.writeAsBytes(bytes);
       final args =
           jsonEncode({'path': file.path, 'filename': attachment.filename});
@@ -1964,8 +1971,7 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
       PageRouteBuilder<void>(
         opaque: false,
         barrierColor: Colors.black,
-        pageBuilder: (ctx, _, __) =>
-            _MobileImageViewer(attachment: attachment),
+        pageBuilder: (ctx, _, __) => _MobileImageViewer(attachment: attachment),
         transitionDuration: const Duration(milliseconds: 200),
       ),
     );
@@ -2725,58 +2731,57 @@ class _MobileImageViewerState extends State<_MobileImageViewer>
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Stack(
-        children: [
-          FutureBuilder<Uint8List?>(
-            future: NoteCache.instance.getFileBytes(widget.attachment),
-            builder: (ctx, snap) {
-              if (snap.hasData && snap.data != null) {
-                return GestureDetector(
-                  onDoubleTapDown: (d) =>
-                      _doubleTapPosition = d.localPosition,
-                  onDoubleTap: _onDoubleTap,
-                  child: InteractiveViewer(
-                    transformationController: _transformController,
-                    minScale: 0.5,
-                    maxScale: 10.0,
-                    child: Center(
-                      child: Image.memory(
-                        snap.data!,
-                        fit: BoxFit.contain,
-                        semanticLabel: widget.attachment.filename,
+          children: [
+            FutureBuilder<Uint8List?>(
+              future: NoteCache.instance.getFileBytes(widget.attachment),
+              builder: (ctx, snap) {
+                if (snap.hasData && snap.data != null) {
+                  return GestureDetector(
+                    onDoubleTapDown: (d) =>
+                        _doubleTapPosition = d.localPosition,
+                    onDoubleTap: _onDoubleTap,
+                    child: InteractiveViewer(
+                      transformationController: _transformController,
+                      minScale: 0.5,
+                      maxScale: 10.0,
+                      child: Center(
+                        child: Image.memory(
+                          snap.data!,
+                          fit: BoxFit.contain,
+                          semanticLabel: widget.attachment.filename,
+                        ),
                       ),
                     ),
+                  );
+                }
+                return const Center(
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
                   ),
                 );
-              }
-              return const Center(
-                child: CircularProgressIndicator(
-                  valueColor:
-                      AlwaysStoppedAnimation<Color>(Colors.white54),
-                ),
-              );
-            },
-          ),
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            right: 16,
-            child: Semantics(
-              label: 'Close image viewer',
-              button: true,
-              child: GestureDetector(
-                onTap: () => Navigator.of(context).pop(),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.5),
-                    shape: BoxShape.circle,
+              },
+            ),
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              right: 16,
+              child: Semantics(
+                label: 'Close image viewer',
+                button: true,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(context).pop(),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      shape: BoxShape.circle,
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child:
+                        const Icon(Icons.close, color: Colors.white, size: 24),
                   ),
-                  padding: const EdgeInsets.all(8),
-                  child: const Icon(Icons.close,
-                      color: Colors.white, size: 24),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );
