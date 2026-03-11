@@ -44,6 +44,27 @@ class NoteCache {
   // In-memory decrypted file bytes keyed by sha256
   final _fileCache = <String, Uint8List>{};
 
+  // Limit concurrent Blossom downloads to avoid flooding on large feeds
+  static const _maxConcurrentDownloads = 3;
+  int _activeDownloads = 0;
+  final _downloadWaiters = <Completer<void>>[];
+
+  Future<void> _acquireDownloadSlot() async {
+    while (_activeDownloads >= _maxConcurrentDownloads) {
+      final c = Completer<void>();
+      _downloadWaiters.add(c);
+      await c.future;
+    }
+    _activeDownloads++;
+  }
+
+  void _releaseDownloadSlot() {
+    _activeDownloads--;
+    if (_downloadWaiters.isNotEmpty) {
+      _downloadWaiters.removeAt(0).complete();
+    }
+  }
+
   StreamSubscription<Nip01Event>? _relaySubscription;
   String? _relaySubId;
   Timer? _syncLoadingTimer;
@@ -293,9 +314,15 @@ class NoteCache {
       }
     }
 
-    // Download from Blossom
+    // Download from Blossom (rate-limited)
     if (attachment.url == null) return null;
-    final encBytes = await BlossomClient.download(attachment.url!);
+    await _acquireDownloadSlot();
+    final Uint8List? encBytes;
+    try {
+      encBytes = await BlossomClient.download(attachment.url!);
+    } finally {
+      _releaseDownloadSlot();
+    }
     if (encBytes == null) return null;
 
     // Save to disk cache

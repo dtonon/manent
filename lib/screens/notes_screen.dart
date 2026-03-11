@@ -1485,6 +1485,7 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
 
   bool _retrying = false;
   Offset _tapPosition = Offset.zero;
+  Future<Uint8List?>? _imageBytesFuture;
 
   // Converts a global position to the overlay's local coordinate space.
   // Needed on web where the app is in a centered max-width container,
@@ -1508,6 +1509,14 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
   void initState() {
     super.initState();
     _rebuildTextSpan();
+    _initImageFuture();
+  }
+
+  void _initImageFuture() {
+    final attachment = widget.note.attachment;
+    if (widget.note.kind == NoteKind.file && attachment?.isImage == true) {
+      _imageBytesFuture = NoteCache.instance.getFileBytes(attachment!);
+    }
   }
 
   @override
@@ -1516,6 +1525,10 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
     if (oldWidget.note.text != widget.note.text) {
       _disposeRecognizers();
       _rebuildTextSpan();
+    }
+    // Reset future if attachment identity changes (e.g. note replaced after sync)
+    if (oldWidget.note.attachment?.sha256 != widget.note.attachment?.sha256) {
+      _initImageFuture();
     }
   }
 
@@ -1972,6 +1985,7 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
     if (widget.note.kind == NoteKind.file && widget.note.error == null) {
       return _FileNoteContent(
         note: widget.note,
+        imageBytesFuture: _imageBytesFuture,
         formatTime: _formatTime,
         buildSyncIcon: _buildSyncIcon,
         isDesktopOrWeb: _isDesktopOrWeb,
@@ -2074,12 +2088,14 @@ String _formatFileSize(int bytes) {
 
 class _FileNoteContent extends StatelessWidget {
   final DecryptedNote note;
+  final Future<Uint8List?>? imageBytesFuture;
   final String Function(DateTime) formatTime;
   final Widget Function() buildSyncIcon;
   final bool isDesktopOrWeb;
 
   const _FileNoteContent({
     required this.note,
+    required this.imageBytesFuture,
     required this.formatTime,
     required this.buildSyncIcon,
     required this.isDesktopOrWeb,
@@ -2102,7 +2118,7 @@ class _FileNoteContent extends StatelessWidget {
       child: Stack(
         children: [
           FutureBuilder<Uint8List?>(
-            future: NoteCache.instance.getFileBytes(attachment),
+            future: imageBytesFuture,
             builder: (ctx, snap) {
               if (snap.hasData && snap.data != null) {
                 return Image.memory(
