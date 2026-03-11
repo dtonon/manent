@@ -2644,11 +2644,11 @@ class _MobileImageViewerState extends State<_MobileImageViewer>
       target = Matrix4.identity();
     } else {
       final size = MediaQuery.of(context).size;
-      final tx = size.width / 2 - 2 * _doubleTapPosition.dx;
-      final ty = size.height / 2 - 2 * _doubleTapPosition.dy;
+      final tx = size.width / 2 - 3 * _doubleTapPosition.dx;
+      final ty = size.height / 2 - 3 * _doubleTapPosition.dy;
       target = Matrix4.identity()
         ..translateByDouble(tx, ty, 0, 1)
-        ..scaleByDouble(2.0, 2.0, 1.0, 1.0);
+        ..scaleByDouble(3.0, 3.0, 1.0, 1.0);
     }
     _animation = Matrix4Tween(
       begin: _transformController.value,
