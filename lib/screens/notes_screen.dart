@@ -238,7 +238,18 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles(withData: kIsWeb);
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(withData: kIsWeb);
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e.toString().contains('zenity') || e.toString().contains('kdialog')
+          ? 'Install zenity (GNOME) or kdialog (KDE) to pick files on Linux.'
+          : 'Could not open file picker: $e';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(msg)));
+      return;
+    }
     if (result == null || result.files.isEmpty) return;
     final pf = result.files.first;
     Uint8List bytes;
