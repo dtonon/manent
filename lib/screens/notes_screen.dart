@@ -304,8 +304,9 @@ class _NotesScreenState extends State<NotesScreen> {
 
     if (savedPreset == null) {
       final originalSize = allBytes[ImageResizePreset.original]!.length;
-      final hasSmaller = ImageResizePreset.values.any(
-          (p) => p != ImageResizePreset.original && allBytes[p]!.length < originalSize);
+      final hasSmaller = ImageResizePreset.values.any((p) =>
+          p != ImageResizePreset.original &&
+          allBytes[p]!.length < originalSize);
       if (hasSmaller) await _showImageSizeModal();
     }
   }
@@ -428,8 +429,8 @@ class _NotesScreenState extends State<NotesScreen> {
     // Hide presets that are larger than or equal to the original file size
     final originalSize = sizes[ImageResizePreset.original]!;
     final visiblePresets = ImageResizePreset.values
-        .where((p) =>
-            p == ImageResizePreset.original || sizes[p]! < originalSize)
+        .where(
+            (p) => p == ImageResizePreset.original || sizes[p]! < originalSize)
         .toList();
 
     var selected = visiblePresets.contains(_currentPreset)
@@ -1367,7 +1368,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                           padding:
                                               const EdgeInsets.only(right: 20),
                                           child: Icon(Icons.camera_alt,
-                                              size: 28,
+                                              size: 24,
                                               color: Colors.grey[400]),
                                         ),
                                       ),
@@ -1381,8 +1382,12 @@ class _NotesScreenState extends State<NotesScreen> {
                                       child: Padding(
                                         padding:
                                             const EdgeInsets.only(right: 0),
-                                        child: Icon(Icons.attachment,
-                                            size: 32, color: Colors.grey[400]),
+                                        child: Transform.rotate(
+                                          angle: -0.55,
+                                          child: Icon(Icons.attachment,
+                                              size: 24,
+                                              color: Colors.grey[400]),
+                                        ),
                                       ),
                                     ),
                                   ),
