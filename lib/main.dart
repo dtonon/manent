@@ -334,7 +334,7 @@ class _ImageViewerAppState extends State<_ImageViewerApp> {
         onKeyEvent: (_, event) {
           if (event is KeyDownEvent &&
               event.logicalKey == LogicalKeyboardKey.escape) {
-            windowManager.close();
+            windowManager.hide();
             return KeyEventResult.handled;
           }
           return KeyEventResult.ignored;
