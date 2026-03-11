@@ -295,6 +295,7 @@ class _ImageViewerApp extends StatefulWidget {
 class _ImageViewerAppState extends State<_ImageViewerApp> {
   Uint8List? _bytes;
   late String _filename;
+  final _transformController = TransformationController();
 
   @override
   void initState() {
@@ -304,9 +305,18 @@ class _ImageViewerAppState extends State<_ImageViewerApp> {
     _setupMethodHandler();
   }
 
+  @override
+  void dispose() {
+    _transformController.dispose();
+    super.dispose();
+  }
+
   Future<void> _load(String path) async {
     final b = await File(path).readAsBytes();
-    if (mounted) setState(() => _bytes = b);
+    if (mounted) {
+      _transformController.value = Matrix4.identity();
+      setState(() => _bytes = b);
+    }
   }
 
   Future<void> _setupMethodHandler() async {
@@ -343,6 +353,7 @@ class _ImageViewerAppState extends State<_ImageViewerApp> {
           backgroundColor: Colors.black,
           body: _bytes != null
               ? InteractiveViewer(
+                  transformationController: _transformController,
                   minScale: 0.1,
                   maxScale: 10.0,
                   child: Center(
