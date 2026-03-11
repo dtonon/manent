@@ -1793,9 +1793,11 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
         void Function(TapDownDetails)? onTapDown;
         void Function()? onTap;
         void Function(TapDownDetails)? onSecondaryTapDown;
+        void Function(LongPressStartDetails)? onLongPressStart;
 
         final isFileNote =
             widget.note.kind == NoteKind.file && widget.note.error == null;
+        final isFileImage = isFileNote && widget.note.attachment?.isImage == true;
 
         if (isActiveSelection) {
           // All null — SelectableText handles everything
@@ -1807,20 +1809,29 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
           if (!_isDesktopOrWeb) {
             onTapDown = (d) =>
                 _tapPosition = _toOverlayLocal(context, d.globalPosition);
-            onTap = _showContextMenu;
+            if (isFileImage) {
+              onTap = () => _openImageViewer(context);
+              onLongPressStart = (d) {
+                _tapPosition = _toOverlayLocal(context, d.globalPosition);
+                _showContextMenu();
+              };
+            } else {
+              onTap = _showContextMenu;
+            }
           }
           if (_isDesktopOrWeb) {
             // File notes (non-image): left-click saves the file directly
-            final isFileNonImage =
-                isFileNote && widget.note.attachment?.isImage != true;
+            final isFileNonImage = isFileNote && !isFileImage;
             onTap = isFileNonImage
                 ? () => _saveFile()
-                : () {
-                    _desktopSelectedContent = null;
-                    _capturedSelectionOnRightClick = null;
-                    _selectionAreaKey.currentState?.selectableRegion
-                        .clearSelection();
-                  };
+                : isFileImage
+                    ? () => _openImageViewer(context)
+                    : () {
+                        _desktopSelectedContent = null;
+                        _capturedSelectionOnRightClick = null;
+                        _selectionAreaKey.currentState?.selectableRegion
+                            .clearSelection();
+                      };
             onSecondaryTapDown = (d) {
               _tapPosition = _toOverlayLocal(context, d.globalPosition);
               // Capture before SelectionArea word-selects on right-click
@@ -1830,10 +1841,6 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
           }
         }
 
-        final isFileImage = widget.note.kind == NoteKind.file &&
-            widget.note.attachment?.isImage == true &&
-            widget.note.error == null;
-
         return GestureDetector(
           behavior: isActiveSelection
               ? HitTestBehavior.translucent
@@ -1841,6 +1848,7 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
           onTapDown: onTapDown,
           onTap: onTap,
           onSecondaryTapDown: onSecondaryTapDown,
+          onLongPressStart: onLongPressStart,
           child: Container(
             // Image file notes use zero padding — the image fills the card
             padding: isFileImage ? EdgeInsets.zero : const EdgeInsets.all(16),
@@ -1856,6 +1864,36 @@ class _NoteCardState extends State<_NoteCard> with AutomaticKeepAliveClientMixin
     );
 
     return core;
+  }
+
+  Future<void> _openImageViewer(BuildContext context) async {
+    final attachment = widget.note.attachment;
+    if (attachment == null) return;
+
+    // Native desktop: write decrypted bytes to a temp file and open in the OS
+    // default image viewer (Preview on macOS, Photos on Windows, xdg-open on Linux).
+    if (!kIsWeb && _isDesktopOrWeb) {
+      final bytes = await NoteCache.instance.getFileBytes(attachment);
+      if (bytes == null) return;
+      final file = File(
+          '${Directory.systemTemp.path}/manent_${attachment.filename}');
+      await file.writeAsBytes(bytes);
+      await launchUrl(Uri.file(file.path),
+          mode: LaunchMode.platformDefault);
+      return;
+    }
+
+    // Mobile / web browser: in-app full-screen viewer
+    if (!mounted) return;
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierColor: Colors.black,
+        pageBuilder: (ctx, _, __) =>
+            _MobileImageViewer(attachment: attachment),
+        transitionDuration: const Duration(milliseconds: 200),
+      ),
+    );
   }
 
   Widget _buildSpinner() {
@@ -2534,4 +2572,76 @@ class _MenuPositionDelegate extends SingleChildLayoutDelegate {
       old.tapPosition != tapPosition ||
       old.isDesktopOrWeb != isDesktopOrWeb ||
       old.keyboardHeight != keyboardHeight;
+}
+
+class _MobileImageViewer extends StatelessWidget {
+  final NoteAttachment attachment;
+
+  const _MobileImageViewer({required this.attachment});
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.escape) {
+          Navigator.of(context).pop();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+        children: [
+          FutureBuilder<Uint8List?>(
+            future: NoteCache.instance.getFileBytes(attachment),
+            builder: (ctx, snap) {
+              if (snap.hasData && snap.data != null) {
+                return InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 10.0,
+                  child: Center(
+                    child: Image.memory(
+                      snap.data!,
+                      fit: BoxFit.contain,
+                      semanticLabel: attachment.filename,
+                    ),
+                  ),
+                );
+              }
+              return const Center(
+                child: CircularProgressIndicator(
+                  valueColor:
+                      AlwaysStoppedAnimation<Color>(Colors.white54),
+                ),
+              );
+            },
+          ),
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            right: 16,
+            child: Semantics(
+              label: 'Close image viewer',
+              button: true,
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).pop(),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(8),
+                  child: const Icon(Icons.close,
+                      color: Colors.white, size: 24),
+                ),
+              ),
+            ),
+          ),
+        ],
+        ),
+      ),
+    );
+  }
 }
