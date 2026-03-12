@@ -268,9 +268,12 @@ class _NotesScreenState extends State<NotesScreen> {
 
   void _handleSharedText(String text) {
     if (!mounted || text.isEmpty) return;
+    final current = _textController.text;
+    final newText = current.isEmpty ? text : '$current\n\n$text';
     setState(() {
-      _textController.text = text;
-      _textController.selection = TextSelection.collapsed(offset: text.length);
+      _textController.text = newText;
+      _textController.selection =
+          TextSelection.collapsed(offset: newText.length);
     });
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _inputFocusNode.requestFocus());
