@@ -278,8 +278,10 @@ class _NotesScreenState extends State<NotesScreen> {
       _textController.selection =
           TextSelection.collapsed(offset: newText.length);
     });
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _inputFocusNode.requestFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _inputFocusNode.requestFocus();
+      SystemChannels.textInput.invokeMethod('TextInput.show');
+    });
   }
 
   Future<void> _handleSharedMedia(List<SharedMediaFile> media) async {
