@@ -252,7 +252,9 @@ class _NotesScreenState extends State<NotesScreen> {
       }
     });
     // Retrieve any text that arrived before Dart was ready
-    _processTextChannel.invokeMethod<String>('getInitialProcessText').then((text) {
+    _processTextChannel
+        .invokeMethod<String>('getInitialProcessText')
+        .then((text) {
       if (text != null && text.isNotEmpty) _handleSharedText(text);
     });
   }
@@ -269,7 +271,8 @@ class _NotesScreenState extends State<NotesScreen> {
   void _handleSharedText(String text) {
     if (!mounted || text.isEmpty) return;
     final current = _textController.text;
-    final newText = current.isEmpty ? text : '$current\n\n$text';
+    final normalized = text.endsWith('\n') ? text : '$text\n';
+    final newText = current.isEmpty ? normalized : '$current\n$normalized';
     setState(() {
       _textController.text = newText;
       _textController.selection =
@@ -290,9 +293,8 @@ class _NotesScreenState extends State<NotesScreen> {
     try {
       final bytes = await File(item.path).readAsBytes();
       final name = item.path.split('/').last;
-      final mimeType = item.mimeType ??
-          lookupMimeType(name) ??
-          'application/octet-stream';
+      final mimeType =
+          item.mimeType ?? lookupMimeType(name) ?? 'application/octet-stream';
       if (mounted) {
         setState(() =>
             _pendingFile = (bytes: bytes, name: name, mimeType: mimeType));
@@ -588,7 +590,8 @@ class _NotesScreenState extends State<NotesScreen> {
 
   Future<String> _readVersion() async {
     final yaml = await rootBundle.loadString('pubspec.yaml');
-    final match = RegExp(r'^version:\s+(\S+)', multiLine: true).firstMatch(yaml);
+    final match =
+        RegExp(r'^version:\s+(\S+)', multiLine: true).firstMatch(yaml);
     return match?.group(1) ?? '';
   }
 
