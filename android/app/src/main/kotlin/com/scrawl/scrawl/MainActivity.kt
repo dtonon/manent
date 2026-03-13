@@ -36,7 +36,8 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun handleIntent(intent: Intent) {
-        if (intent.action != Intent.ACTION_PROCESS_TEXT) return
+        val action = intent.action
+        if (action != Intent.ACTION_PROCESS_TEXT && action != "manent.ACTION_PROCESS_TEXT") return
         val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString() ?: return
         val ch = methodChannel
         if (ch != null) {
