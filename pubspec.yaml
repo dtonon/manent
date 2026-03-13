@@ -75,3 +75,4 @@ flutter:
   assets:
     - assets/
     - pubspec.yaml
+    - assets/icon.png
