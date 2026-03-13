@@ -20,8 +20,8 @@ flutter_launcher_icons:
 
   web:
     generate: true
-    image_path: "assets/icon.png"
-    adaptive_icon_foreground: "assets/icon.png"
+    image_path: "assets/icon_web.png"
+    adaptive_icon_foreground: "assets/icon_web.png"
     background_color: "#ffffff"
     theme_color: "#e32a6d"
 
