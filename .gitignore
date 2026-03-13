@@ -48,3 +48,4 @@ app.*.map.json
 /local
 /dist
 .env
+zapstore.yaml
