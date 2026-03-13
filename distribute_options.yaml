@@ -7,5 +7,5 @@ releases:
         package:
           platform: linux
           target: appimage
-          build_args:
-            build-name: 1.0.0
+          options:
+            icon: assets/icon.png
