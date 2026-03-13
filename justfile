@@ -17,9 +17,11 @@ dev_web:
 
 build_macos:
     flutter build macos --release
+    cp -R build/macos/Build/Products/Release/Manent.app dist/
 
 build_android:
     flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols/android
+    cp -R build/app/outputs/flutter-apk/* dist/
 
 build_android_bundle:
     flutter build appbundle --release --obfuscate --split-debug-info=build/symbols/android
