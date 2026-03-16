@@ -823,6 +823,9 @@ class NoteCache {
         attachment: attachment,
       );
       _emit();
+      if (errorMsg != null) {
+        Future.delayed(const Duration(seconds: 5), _retryPendingDecryptions);
+      }
       return;
     }
 
@@ -883,11 +886,15 @@ class NoteCache {
         attachment: attachment,
       );
       _emit();
+      if (errorMsg != null) {
+        Future.delayed(const Duration(seconds: 5), _retryPendingDecryptions);
+      }
     } catch (_) {}
   }
 
   Future<void> _retryPendingDecryptions() async {
     if (_db == null || _signer == null || _localKey == null) return;
+    await NostrClient().ndk.connectivity.tryReconnect();
 
     final rows = await _db!.getAll();
     int retried = 0;
