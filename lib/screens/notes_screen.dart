@@ -1234,8 +1234,8 @@ class _NoteCardState extends State<_NoteCard> {
 
   Future<void> _retry() async {
     setState(() => _retrying = true);
-    final success = await NoteCache.instance.retryDecrypt(widget.note.id);
-    if (mounted && !success) setState(() => _retrying = false);
+    await NoteCache.instance.retryDecrypt(widget.note.id);
+    if (mounted) setState(() => _retrying = false);
   }
 
   void _showJsonModal(DecryptedNote note) {
