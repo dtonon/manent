@@ -427,6 +427,28 @@ class _NotesScreenState extends State<NotesScreen> {
                 ),
                 textAlign: TextAlign.center,
               ),
+              const SizedBox(height: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  "Connected by ${switch (widget.user.signingMethod) {
+                    SigningMethod.bunker => 'Bunker',
+                    SigningMethod.browserExtension => 'Extension',
+                    SigningMethod.androidSigner => 'Local signer',
+                    SigningMethod.nsec => 'Nsec',
+                  }}",
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
               if (widget.user.writeRelays.isNotEmpty) ...[
                 const SizedBox(height: 20),
                 Text(
