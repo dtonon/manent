@@ -183,7 +183,7 @@ class NoteCache {
   }
 
   Future<void> addFile(Uint8List bytes, String filename,
-      {String? comment}) async {
+      {String? caption}) async {
     if (_localKey == null) return;
 
     filename = p.basename(filename);
@@ -211,7 +211,7 @@ class NoteCache {
         sha256: sha256,
         key: keyHex,
         thumbhash: thumbhash,
-        comment: comment,
+        caption: caption,
       );
     } else {
       // Save encrypted file to disk cache for later display
@@ -227,7 +227,7 @@ class NoteCache {
         sha256: sha256,
         key: keyHex,
         thumbhash: thumbhash,
-        comment: comment,
+        caption: caption,
       );
     }
 
@@ -499,7 +499,7 @@ class NoteCache {
         sha256: att.sha256,
         key: att.key,
         thumbhash: att.thumbhash,
-        comment: newText.isEmpty ? null : newText,
+        caption: newText.isEmpty ? null : newText,
       );
       localContent =
           await LocalCrypto.encrypt(_localKey!, updatedAttachment.toJsonString());

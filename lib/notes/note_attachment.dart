@@ -17,7 +17,7 @@ class NoteAttachment {
   final String sha256; // of encrypted bytes
   final String key; // hex 32-byte AES key
   final String? thumbhash; // base64, images only
-  final String? comment; // optional user comment
+  final String? caption;
 
   const NoteAttachment({
     this.url,
@@ -28,7 +28,7 @@ class NoteAttachment {
     required this.sha256,
     required this.key,
     this.thumbhash,
-    this.comment,
+    this.caption,
   });
 
   bool get isInline => data != null;
@@ -38,24 +38,29 @@ class NoteAttachment {
         if (url != null) 'url': url,
         if (data != null) 'data': data,
         'filename': filename,
-        'mime_type': mimeType,
+        'file-type': mimeType,
+        'encryption-algorithm': 'aes-gcm',
         'size': size,
-        'sha256': sha256,
-        'key': key,
+        'x': sha256,
+        'decryption-key': key,
         if (thumbhash != null) 'thumbhash': thumbhash,
-        if (comment != null) 'comment': comment,
+        if (caption != null) 'caption': caption,
       };
 
   factory NoteAttachment.fromJson(Map<String, dynamic> j) => NoteAttachment(
         url: j['url'] as String?,
         data: j['data'] as String?,
         filename: j['filename'] as String,
-        mimeType: j['mime_type'] as String,
+        mimeType: (j['file-type'] ?? j['mime_type'])
+            as String, // TODO: 'mime_type' is deprecated, remove it after some time
         size: j['size'] as int,
-        sha256: j['sha256'] as String,
-        key: j['key'] as String,
+        sha256: (j['x'] ?? j['sha256'])
+            as String, // TODO: 'sha256' is deprecated, remove it after some time
+        key: (j['decryption-key'] ?? j['key'])
+            as String, // TODO: 'key' is deprecated, remove it after some time
         thumbhash: j['thumbhash'] as String?,
-        comment: j['comment'] as String?,
+        caption: (j['caption'] ?? j['comment'])
+            as String?, // TODO: 'comment' is deprecated, remove it after some time
       );
 
   String toJsonString() => jsonEncode(toJson());
@@ -69,6 +74,6 @@ class NoteAttachment {
         sha256: sha256,
         key: key,
         thumbhash: thumbhash,
-        comment: comment,
+        caption: caption,
       );
 }

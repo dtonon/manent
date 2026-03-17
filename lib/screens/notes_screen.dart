@@ -176,7 +176,7 @@ class _NotesScreenState extends State<NotesScreen> {
         final added = await _showFallbackBlossomDialog();
         if (!added) return;
       }
-      final comment = _textController.text.trim();
+      final caption = _textController.text.trim();
       setState(() {
         _sending = true;
         _pendingFile = null;
@@ -185,7 +185,7 @@ class _NotesScreenState extends State<NotesScreen> {
       await NoteCache.instance.addFile(
         file.bytes,
         file.name,
-        comment: comment.isEmpty ? null : comment,
+        caption: caption.isEmpty ? null : caption,
       );
       if (mounted) setState(() => _sending = false);
       return;
@@ -321,7 +321,7 @@ class _NotesScreenState extends State<NotesScreen> {
       _editingNote = note;
     });
     final initialText = note.kind == NoteKind.file
-        ? (note.attachment?.comment ?? '')
+        ? (note.attachment?.caption ?? '')
         : note.text;
     _textController.text = initialText;
     _textController.selection =
@@ -1023,7 +1023,7 @@ class _NotesScreenState extends State<NotesScreen> {
                               decoration: InputDecoration(
                                 hintText: hasPendingFile ||
                                         editingFileAttachment != null
-                                    ? 'Add a comment...'
+                                    ? 'Add a caption...'
                                     : 'Memo...',
                                 border: InputBorder.none,
                                 isDense: true,
@@ -1349,8 +1349,8 @@ class _NoteCardState extends State<_NoteCard> {
           showEditComment: isFileNote && widget.note.error == null,
           showSave: isFileNote,
           showShare: isFileNote && !_isDesktopOrWeb,
-          showCopyComment:
-              isFileNote && widget.note.attachment?.comment != null,
+          showCopyCaption:
+              isFileNote && widget.note.attachment?.caption != null,
           showDebugJson: kDebugMode,
           editedAt: widget.note.editedAt,
           copyLabel: isFileNote
@@ -1371,10 +1371,10 @@ class _NoteCardState extends State<_NoteCard> {
       _saveFile();
     } else if (result == 'share') {
       _shareFile();
-    } else if (result == 'copy_comment') {
+    } else if (result == 'copy_caption') {
       await Clipboard.setData(
-          ClipboardData(text: widget.note.attachment?.comment ?? ''));
-    } else if (result == 'edit' || result == 'edit_comment') {
+          ClipboardData(text: widget.note.attachment?.caption ?? ''));
+    } else if (result == 'edit' || result == 'edit_caption') {
       widget.onEdit?.call();
     } else if (result == 'retry_sync') {
       NoteCache.instance.retrySync(widget.note.id);
@@ -1746,9 +1746,9 @@ class _FileNoteContent extends StatelessWidget {
       ),
     );
 
-    if (attachment.comment == null) return image;
-    final commentText = Text(
-      attachment.comment!,
+    if (attachment.caption == null) return image;
+    final captionText = Text(
+      attachment.caption!,
       style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
     );
     return Column(
@@ -1762,10 +1762,10 @@ class _FileNoteContent extends StatelessWidget {
                   selectionColor: textSelectionColor,
                   child: SelectionArea(
                     contextMenuBuilder: (_, __) => const SizedBox.shrink(),
-                    child: commentText,
+                    child: captionText,
                   ),
                 )
-              : commentText,
+              : captionText,
         ),
       ],
     );
@@ -1817,11 +1817,11 @@ class _FileNoteContent extends StatelessWidget {
             ),
           ],
         ),
-        if (attachment.comment != null) ...[
+        if (attachment.caption != null) ...[
           const SizedBox(height: 8),
           Builder(builder: (ctx) {
             final t = Text(
-              attachment.comment!,
+              attachment.caption!,
               style: const TextStyle(
                   fontSize: 14, height: 1.3, color: Colors.black87),
             );
@@ -1920,7 +1920,7 @@ class _NoteMenuOverlay extends StatelessWidget {
 
   final bool showSave;
   final bool showShare;
-  final bool showCopyComment;
+  final bool showCopyCaption;
   final bool showDebugJson;
 
   const _NoteMenuOverlay({
@@ -1934,7 +1934,7 @@ class _NoteMenuOverlay extends StatelessWidget {
     this.showEditComment = false,
     this.showSave = false,
     this.showShare = false,
-    this.showCopyComment = false,
+    this.showCopyCaption = false,
     this.showDebugJson = false,
     this.editedAt,
     this.copyLabel = 'Copy text',
@@ -2043,14 +2043,14 @@ class _NoteMenuOverlay extends StatelessWidget {
                         ),
                         const Divider(height: 1, color: Color(0xFFE0E0E0)),
                       ],
-                      if (showCopyComment) ...[
+                      if (showCopyCaption) ...[
                         InkWell(
-                          onTap: () => onSelect('copy_comment'),
+                          onTap: () => onSelect('copy_caption'),
                           child: const Padding(
                             padding: EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 12),
                             child: Text(
-                              'Copy comment',
+                              'Copy caption',
                               style: TextStyle(
                                   fontSize: 14, color: Colors.black87),
                             ),
@@ -2118,12 +2118,12 @@ class _NoteMenuOverlay extends StatelessWidget {
                       if (showEditComment) ...[
                         const Divider(height: 1, color: Color(0xFFE0E0E0)),
                         InkWell(
-                          onTap: () => onSelect('edit_comment'),
+                          onTap: () => onSelect('edit_caption'),
                           child: const Padding(
                             padding: EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 12),
                             child: Text(
-                              'Edit comment',
+                              'Edit caption',
                               style: TextStyle(
                                   fontSize: 14, color: Colors.black87),
                             ),
