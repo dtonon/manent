@@ -25,7 +25,7 @@ class AppDatabase {
 
     _db = await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE notes (
@@ -36,7 +36,8 @@ class AppDatabase {
             local_content TEXT,
             synced_to_relay INTEGER NOT NULL DEFAULT 0,
             edited_at INTEGER,
-            kind INTEGER NOT NULL DEFAULT 33301
+            kind INTEGER NOT NULL DEFAULT 33301,
+            sensitive INTEGER NOT NULL DEFAULT 0
           )
         ''');
       },
@@ -58,6 +59,10 @@ class AppDatabase {
                 'ALTER TABLE notes ADD COLUMN kind INTEGER NOT NULL DEFAULT 33301');
           }
         }
+        if (oldVersion < 6) {
+          await db.execute(
+              'ALTER TABLE notes ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0');
+        }
       },
     );
     return _db!;
@@ -73,6 +78,7 @@ class AppDatabase {
     required int createdAt,
     required String localContent,
     int kind = 33301,
+    bool sensitive = false,
   }) async {
     final db = await _getDb();
     await db.insert('notes', {
@@ -82,6 +88,7 @@ class AppDatabase {
       'local_content': localContent,
       'synced_to_relay': 0,
       'kind': kind,
+      'sensitive': sensitive ? 1 : 0,
     });
   }
 
@@ -110,6 +117,7 @@ class AppDatabase {
     String? localContent,
     int? editedAt,
     int kind = 33301,
+    bool sensitive = false,
   }) async {
     final db = await _getDb();
     await db.insert('notes', {
@@ -121,6 +129,7 @@ class AppDatabase {
       'edited_at': editedAt,
       'synced_to_relay': 1,
       'kind': kind,
+      'sensitive': sensitive ? 1 : 0,
     });
   }
 
@@ -209,6 +218,7 @@ class AppDatabase {
     required String encryptedContent,
     String? localContent,
     required int editedAt,
+    bool sensitive = false,
   }) async {
     final db = await _getDb();
     await db.update(
@@ -219,6 +229,29 @@ class AppDatabase {
         'local_content': localContent,
         'edited_at': editedAt,
         'synced_to_relay': 1,
+        'sensitive': sensitive ? 1 : 0,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Updates the sensitive flag, edited_at, and resets sync to pending.
+  // Pass localContent to also update it (needed for file notes).
+  Future<void> updateSensitive({
+    required String id,
+    required bool sensitive,
+    required int editedAt,
+    String? localContent,
+  }) async {
+    final db = await _getDb();
+    await db.update(
+      'notes',
+      {
+        'sensitive': sensitive ? 1 : 0,
+        'edited_at': editedAt,
+        'synced_to_relay': 0,
+        if (localContent != null) 'local_content': localContent,
       },
       where: 'id = ?',
       whereArgs: [id],
