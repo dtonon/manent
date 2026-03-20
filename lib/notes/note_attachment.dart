@@ -18,6 +18,7 @@ class NoteAttachment {
   final String key; // hex 32-byte AES key
   final String? thumbhash; // base64, images only
   final String? caption;
+  final String? dim; // "<width>x<height>", images only
 
   const NoteAttachment({
     this.url,
@@ -29,6 +30,7 @@ class NoteAttachment {
     required this.key,
     this.thumbhash,
     this.caption,
+    this.dim,
   });
 
   bool get isInline => data != null;
@@ -45,6 +47,7 @@ class NoteAttachment {
         'decryption-key': key,
         if (thumbhash != null) 'thumbhash': thumbhash,
         if (caption != null) 'caption': caption,
+        if (dim != null) 'dim': dim,
       };
 
   factory NoteAttachment.fromJson(Map<String, dynamic> j) => NoteAttachment(
@@ -61,6 +64,7 @@ class NoteAttachment {
         thumbhash: j['thumbhash'] as String?,
         caption: (j['caption'] ?? j['comment'])
             as String?, // TODO: 'comment' is deprecated, remove it after some time
+        dim: j['dim'] as String?,
       );
 
   String toJsonString() => jsonEncode(toJson());
@@ -75,5 +79,6 @@ class NoteAttachment {
         key: key,
         thumbhash: thumbhash,
         caption: caption,
+        dim: dim,
       );
 }
