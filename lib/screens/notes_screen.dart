@@ -489,19 +489,44 @@ class _NotesScreenState extends State<NotesScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(ctx).size.height * 0.35,
-                    ),
-                    child: Container(
-                      width: double.infinity,
-                      color: const Color(0xFFEEEEEE),
-                      child: Image.memory(
-                        original,
-                        fit: BoxFit.contain,
-                        semanticLabel: 'Image preview',
+                Semantics(
+                  label: 'Image preview, tap to view full screen',
+                  button: true,
+                  child: GestureDetector(
+                    onTap: () {
+                      if (!kIsWeb && _NoteCardState._isDesktopOrWeb) {
+                        _openImageInDesktopViewer(
+                            all[selected]!, _pendingFile!.name);
+                      } else {
+                        Navigator.of(ctx, rootNavigator: true).push(
+                          PageRouteBuilder<void>(
+                            opaque: false,
+                            barrierColor: Colors.black,
+                            pageBuilder: (_, __, ___) => _MobileImageViewer(
+                              imageBytesFuture: Future.value(all[selected]!),
+                              semanticLabel: 'Image preview',
+                            ),
+                            transitionDuration:
+                                const Duration(milliseconds: 200),
+                          ),
+                        );
+                      }
+                    },
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.of(ctx).size.height * 0.35,
+                        ),
+                        child: Container(
+                          width: double.infinity,
+                          color: const Color(0xFFEEEEEE),
+                          child: Image.memory(
+                            original,
+                            fit: BoxFit.contain,
+                            semanticLabel: 'Image preview',
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -2082,7 +2107,10 @@ class _NoteCardState extends State<_NoteCard>
       PageRouteBuilder<void>(
         opaque: false,
         barrierColor: Colors.black,
-        pageBuilder: (ctx, _, __) => _MobileImageViewer(attachment: attachment),
+        pageBuilder: (ctx, _, __) => _MobileImageViewer(
+          imageBytesFuture: NoteCache.instance.getFileBytes(attachment),
+          semanticLabel: attachment.filename,
+        ),
         transitionDuration: const Duration(milliseconds: 200),
       ),
     );
@@ -2207,6 +2235,17 @@ String _formatFileSize(int bytes) {
   if (bytes < 1024) return '$bytes B';
   if (bytes < 1024 * 1024) return '${(bytes / 1024).round()} KB';
   return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+}
+
+// Opens image bytes in a native desktop viewer window (no reuse/tracking).
+Future<void> _openImageInDesktopViewer(
+    Uint8List bytes, String filename) async {
+  final file = File('${Directory.systemTemp.path}/manent_$filename');
+  await file.writeAsBytes(bytes);
+  final args = jsonEncode({'path': file.path, 'filename': filename});
+  await WindowController.create(
+    WindowConfiguration(hiddenAtLaunch: true, arguments: args),
+  );
 }
 
 class _FileNoteContent extends StatelessWidget {
@@ -2770,9 +2809,13 @@ class _MenuPositionDelegate extends SingleChildLayoutDelegate {
 }
 
 class _MobileImageViewer extends StatefulWidget {
-  final NoteAttachment attachment;
+  final Future<Uint8List?> imageBytesFuture;
+  final String semanticLabel;
 
-  const _MobileImageViewer({required this.attachment});
+  const _MobileImageViewer({
+    required this.imageBytesFuture,
+    required this.semanticLabel,
+  });
 
   @override
   State<_MobileImageViewer> createState() => _MobileImageViewerState();
@@ -2844,7 +2887,7 @@ class _MobileImageViewerState extends State<_MobileImageViewer>
         body: Stack(
           children: [
             FutureBuilder<Uint8List?>(
-              future: NoteCache.instance.getFileBytes(widget.attachment),
+              future: widget.imageBytesFuture,
               builder: (ctx, snap) {
                 if (snap.hasData && snap.data != null) {
                   return GestureDetector(
@@ -2859,7 +2902,7 @@ class _MobileImageViewerState extends State<_MobileImageViewer>
                         child: Image.memory(
                           snap.data!,
                           fit: BoxFit.contain,
-                          semanticLabel: widget.attachment.filename,
+                          semanticLabel: widget.semanticLabel,
                         ),
                       ),
                     ),
