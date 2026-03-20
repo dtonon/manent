@@ -1660,7 +1660,14 @@ class _NoteCardState extends State<_NoteCard> {
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(20)),
                           ),
-                          child: const Text('Show'),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.visibility_outlined, size: 16),
+                              SizedBox(width: 6),
+                              Text('Show'),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -1733,9 +1740,18 @@ class _NoteCardState extends State<_NoteCard> {
                       color: const Color(0xFFEEEEEE),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(
-                      'Hide',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.visibility_off_outlined,
+                            size: 12, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Hide',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -1865,7 +1881,14 @@ class _FileNoteContent extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: onReveal,
                   style: _showButtonStyle,
-                  child: const Text('Show'),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.visibility_outlined, size: 16),
+                      SizedBox(width: 6),
+                      Text('Show'),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1927,7 +1950,14 @@ class _FileNoteContent extends StatelessWidget {
                       child: ElevatedButton(
                         onPressed: onReveal,
                         style: _showButtonStyle,
-                        child: const Text('Show'),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.visibility_outlined, size: 16),
+                            SizedBox(width: 6),
+                            Text('Show'),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -2024,9 +2054,18 @@ class _FileNoteContent extends StatelessWidget {
                       color: Colors.white.withValues(alpha: 0.9),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(
-                      'Hide',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.visibility_off_outlined,
+                            size: 12, color: Colors.grey[500]),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Hide',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[500]),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -2133,9 +2172,18 @@ class _FileNoteContent extends StatelessWidget {
                       color: const Color(0xFFEEEEEE),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(
-                      'Hide',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.visibility_off_outlined,
+                            size: 12, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Hide',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ],
                     ),
                   ),
                 ),
