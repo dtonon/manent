@@ -70,6 +70,7 @@ class NoteCache {
   Timer? _syncLoadingTimer;
   final _pendingDeletions = <String>{};
   final _verifier = Bip340EventVerifier();
+  bool _isRetrying = false;
 
   List<DecryptedNote> get _sorted =>
       _map.values.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
@@ -933,8 +934,9 @@ class NoteCache {
   }
 
   Future<void> _retryPendingDecryptions() async {
+    if (_isRetrying) return;
     if (_db == null || _signer == null || _localKey == null) return;
-    await NostrClient().ndk.connectivity.tryReconnect();
+    _isRetrying = true;
 
     final rows = await _db!.getAll();
     int retried = 0;
@@ -985,6 +987,7 @@ class NoteCache {
       retried++;
     }
 
+    _isRetrying = false;
     if (retried > 0) _emit();
   }
 
@@ -1129,6 +1132,7 @@ class NoteCache {
 
   Future<void> clear() async {
     await _cancelRelaySubscription();
+    _isRetrying = false;
     await _db?.deleteAll();
     _db = null;
     _signer = null;
