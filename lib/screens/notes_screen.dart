@@ -1849,6 +1849,8 @@ class _NoteCardState extends State<_NoteCard>
               isFileNote && widget.note.attachment?.caption != null,
           showDebugJson: kDebugMode,
           editedAt: widget.note.editedAt,
+          fileSize: widget.note.attachment?.size,
+          dim: widget.note.attachment?.dim,
           copyLabel: isFileNote
               ? (widget.note.attachment?.isImage == true
                   ? null
@@ -2508,6 +2510,8 @@ class _NoteMenuOverlay extends StatelessWidget {
   final bool showShare;
   final bool showCopyCaption;
   final bool showDebugJson;
+  final int? fileSize;
+  final String? dim;
 
   const _NoteMenuOverlay({
     required this.tapPosition,
@@ -2524,6 +2528,8 @@ class _NoteMenuOverlay extends StatelessWidget {
     this.showDebugJson = false,
     this.editedAt,
     this.copyLabel = 'Copy text',
+    this.fileSize,
+    this.dim,
   });
 
   String _formatEditedAt(DateTime dt) {
@@ -2745,15 +2751,36 @@ class _NoteMenuOverlay extends StatelessWidget {
                           ),
                         ),
                       ],
-                      if (editedAt != null) ...[
+                      if (fileSize != null || editedAt != null) ...[
                         const Divider(height: 1, color: Color(0xFFE0E0E0)),
                         Padding(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 10),
-                          child: Text(
-                            _formatEditedAt(editedAt!),
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.grey[500]),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (fileSize != null)
+                                Text(
+                                  'Size: ${_formatFileSize(fileSize!)}',
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey[500]),
+                                ),
+                              if (dim != null)
+                                Text(
+                                  'Dimensions: $dim',
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey[500]),
+                                ),
+                              if ((fileSize != null || dim != null) &&
+                                  editedAt != null)
+                                const SizedBox(height: 6),
+                              if (editedAt != null)
+                                Text(
+                                  _formatEditedAt(editedAt!),
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey[500]),
+                                ),
+                            ],
                           ),
                         ),
                       ],
