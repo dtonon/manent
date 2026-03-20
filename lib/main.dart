@@ -1,6 +1,12 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:ndk/ndk.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:ndk/shared/nips/nip01/bip340.dart';
 import 'package:ndk/data_layer/repositories/signers/nip46_event_signer.dart';
 
@@ -20,8 +26,29 @@ import 'screens/login_screen.dart';
 import 'screens/notes_screen.dart';
 import 'theme.dart';
 
-void main() async {
+void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (args.firstOrNull == 'multi_window') {
+    await windowManager.ensureInitialized();
+    final controller = await WindowController.fromCurrentEngine();
+    final argument = jsonDecode(controller.arguments) as Map<String, dynamic>;
+    final filePath = argument['path'] as String;
+    final filename = argument['filename'] as String;
+    const options = WindowOptions(
+      size: Size(900, 700),
+      center: true,
+      backgroundColor: Colors.black,
+    );
+    windowManager.waitUntilReadyToShow(options, () async {
+      await windowManager.setTitle(filename);
+      await windowManager.show();
+      await windowManager.focus();
+    });
+    runApp(_ImageViewerApp(filePath: filePath, filename: filename));
+    return;
+  }
+
   NostrClient().init();
   AuthUser? user = await AuthService.loadUser();
   if (user != null) {
@@ -251,6 +278,95 @@ class _ManentAppState extends State<ManentApp> {
               onBlossomServersChanged: _onBlossomServersChanged,
               onLogout: _onLogout,
             ),
+    );
+  }
+}
+
+class _ImageViewerApp extends StatefulWidget {
+  final String filePath;
+  final String filename;
+
+  const _ImageViewerApp({required this.filePath, required this.filename});
+
+  @override
+  State<_ImageViewerApp> createState() => _ImageViewerAppState();
+}
+
+class _ImageViewerAppState extends State<_ImageViewerApp> {
+  Uint8List? _bytes;
+  late String _filename;
+  final _transformController = TransformationController();
+
+  @override
+  void initState() {
+    super.initState();
+    _filename = widget.filename;
+    _load(widget.filePath);
+    _setupMethodHandler();
+  }
+
+  @override
+  void dispose() {
+    _transformController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load(String path) async {
+    final b = await File(path).readAsBytes();
+    if (mounted) {
+      _transformController.value = Matrix4.identity();
+      setState(() => _bytes = b);
+    }
+  }
+
+  Future<void> _setupMethodHandler() async {
+    final controller = await WindowController.fromCurrentEngine();
+    await controller.setWindowMethodHandler((call) async {
+      if (call.method == 'loadImage') {
+        final data =
+            jsonDecode(call.arguments as String) as Map<String, dynamic>;
+        if (mounted) setState(() => _filename = data['filename'] as String);
+        await windowManager.setTitle(data['filename'] as String);
+        await windowManager.show();
+        await windowManager.focus();
+        _load(data['path'] as String);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark(),
+      home: Focus(
+        autofocus: true,
+        onKeyEvent: (_, event) {
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.escape) {
+            windowManager.hide();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: _bytes != null
+              ? InteractiveViewer(
+                  transformationController: _transformController,
+                  minScale: 0.1,
+                  maxScale: 10.0,
+                  child: Center(
+                    child: Image.memory(
+                      _bytes!,
+                      fit: BoxFit.contain,
+                      semanticLabel: _filename,
+                    ),
+                  ),
+                )
+              : const Center(child: CircularProgressIndicator()),
+        ),
+      ),
     );
   }
 }
