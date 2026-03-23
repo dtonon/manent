@@ -43,13 +43,22 @@ class AppDatabase {
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
-          await db.execute('ALTER TABLE notes ADD COLUMN nostr_id TEXT');
+          final cols2 = await db.rawQuery('PRAGMA table_info(notes)');
+          if (!cols2.any((r) => r['name'] == 'nostr_id')) {
+            await db.execute('ALTER TABLE notes ADD COLUMN nostr_id TEXT');
+          }
         }
         if (oldVersion < 3) {
-          await db.execute('ALTER TABLE notes ADD COLUMN local_content TEXT');
+          final cols3 = await db.rawQuery('PRAGMA table_info(notes)');
+          if (!cols3.any((r) => r['name'] == 'local_content')) {
+            await db.execute('ALTER TABLE notes ADD COLUMN local_content TEXT');
+          }
         }
         if (oldVersion < 4) {
-          await db.execute('ALTER TABLE notes ADD COLUMN edited_at INTEGER');
+          final cols4 = await db.rawQuery('PRAGMA table_info(notes)');
+          if (!cols4.any((r) => r['name'] == 'edited_at')) {
+            await db.execute('ALTER TABLE notes ADD COLUMN edited_at INTEGER');
+          }
         }
         if (oldVersion < 5) {
           final cols = await db.rawQuery('PRAGMA table_info(notes)');
@@ -60,8 +69,11 @@ class AppDatabase {
           }
         }
         if (oldVersion < 6) {
-          await db.execute(
-              'ALTER TABLE notes ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0');
+          final cols = await db.rawQuery('PRAGMA table_info(notes)');
+          if (!cols.any((r) => r['name'] == 'sensitive')) {
+            await db.execute(
+                'ALTER TABLE notes ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0');
+          }
         }
       },
     );
