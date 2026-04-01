@@ -25,3 +25,20 @@ Think of it as your personal "Saved Messages": write notes, attach images and fi
 - [Flutter](https://flutter.dev) — cross-platform UI
 - [NDK](https://pub.dev/packages/ndk) — Dart Nostr Development Kit
 - NIP-44 encryption, NIP-46 remote signing, NIP-65 outbox relays, Blossom file storage
+
+## Known issues
+
+### macOS build fails on Xcode 26 (`conflicting deployment targets`)
+
+Xcode 26's clang errors when the deployment target is inferred from multiple sources simultaneously. Fix: patch Flutter's `DebugMacOSFramework` to pass an explicit `-mmacosx-version-min` flag.
+
+In `$(flutter sdk-path)/packages/flutter_tools/lib/src/build_system/targets/macos.dart`, inside `DebugMacOSFramework.build()`, add before the `clang(...)` call:
+
+```dart
+final String deploymentTarget =
+    environment.defines['MACOSX_DEPLOYMENT_TARGET'] ?? '10.15';
+```
+
+Then add `'-mmacosx-version-min=$deploymentTarget'` to the clang args list, and delete `$(flutter sdk-path)/bin/cache/flutter_tools.snapshot` to force a rebuild of the Flutter tools.
+
+This patch is overwritten by `flutter upgrade` and must be reapplied until Flutter adds native Xcode 26 support.

@@ -3,6 +3,7 @@ import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/nips/nip01/bip340.dart';
 
 import '../auth/auth_state.dart';
+import '../auth/nostr_client.dart';
 import '../auth/profile_fetcher.dart';
 import '../auth/signer_session.dart';
 import '../auth/signer_store.dart';
@@ -40,7 +41,9 @@ class _NsecScreenState extends State<NsecScreen> {
       if (privkey.isEmpty) throw 'decode failed';
       final pubkey = Bip340.getPublicKey(privkey);
       await SignerStore.saveNsecPrivkey(privkey);
-      SignerSession.set(Bip340EventSigner(privateKey: privkey, publicKey: pubkey));
+      final signer = Bip340EventSigner(privateKey: privkey, publicKey: pubkey);
+      SignerSession.set(signer);
+      NostrClient().ndk.accounts.loginExternalSigner(signer: signer);
       final profile = await ProfileFetcher.fetch(pubkey);
       final user = AuthUser(
         pubkey: pubkey,

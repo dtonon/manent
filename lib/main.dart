@@ -63,18 +63,20 @@ void main(List<String> args) async {
 }
 
 Future<void> _restoreSession(AuthUser user) async {
+  final ndk = NostrClient().ndk;
   switch (user.signingMethod) {
     case SigningMethod.nsec:
       final privkey = await SignerStore.loadNsecPrivkey();
       if (privkey != null) {
         final pubkey = Bip340.getPublicKey(privkey);
-        SignerSession.set(Bip340EventSigner(privateKey: privkey, publicKey: pubkey));
+        final signer = Bip340EventSigner(privateKey: privkey, publicKey: pubkey);
+        SignerSession.set(signer);
+        ndk.accounts.loginExternalSigner(signer: signer);
       }
     case SigningMethod.bunker:
       final json = await SignerStore.loadBunkerConnection();
       if (json != null) {
         final connection = BunkerConnection.fromJson(json);
-        final ndk = NostrClient().ndk;
         // Reconstruct signer with cached pubkey — avoids a network round-trip on startup
         final signer = Nip46EventSigner(
           connection: connection,
@@ -83,11 +85,18 @@ Future<void> _restoreSession(AuthUser user) async {
           cachedPublicKey: user.pubkey,
         );
         SignerSession.set(signer);
+        ndk.accounts.loginExternalSigner(signer: signer);
       }
     case SigningMethod.androidSigner:
-      SignerSession.set(AmberEventSigner(pubkey: user.pubkey));
+      final signer = AmberEventSigner(pubkey: user.pubkey);
+      SignerSession.set(signer);
+      ndk.accounts.loginExternalSigner(signer: signer);
     case SigningMethod.browserExtension:
-      if (kIsWeb) SignerSession.set(Nip07EventSigner(pubkey: user.pubkey));
+      if (kIsWeb) {
+        final signer = Nip07EventSigner(pubkey: user.pubkey);
+        SignerSession.set(signer);
+        ndk.accounts.loginExternalSigner(signer: signer);
+      }
   }
 }
 
@@ -218,6 +227,7 @@ class _ManentAppState extends State<ManentApp> {
   Future<void> _onLogout() async {
     await NoteCache.instance.clear();
     SignerSession.clear();
+    NostrClient().ndk.accounts.logout();
     setState(() {
       _user = null;
       _additionalRelays = [];
