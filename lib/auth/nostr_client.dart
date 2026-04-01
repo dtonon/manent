@@ -8,7 +8,7 @@ class _ManentEventVerifier implements EventVerifier {
 
   @override
   Future<bool> verify(Nip01Event event) {
-    if (event.kind == 33301 || event.kind == 5) return Future.value(true);
+    if (event.kind == 33301 || event.kind == 5 || event.kind == 22242) return Future.value(true);
     return _delegate.verify(event);
   }
 }

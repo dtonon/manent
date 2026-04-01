@@ -19,6 +19,7 @@ class NoteAttachment {
   final String? thumbhash; // base64, images only
   final String? caption;
   final bool sensitive;
+  final String? dim; // "<width>x<height>", images only
 
   const NoteAttachment({
     this.url,
@@ -31,6 +32,7 @@ class NoteAttachment {
     this.thumbhash,
     this.caption,
     this.sensitive = false,
+    this.dim,
   });
 
   bool get isInline => data != null;
@@ -48,6 +50,7 @@ class NoteAttachment {
         if (thumbhash != null) 'thumbhash': thumbhash,
         if (caption != null) 'caption': caption,
         if (sensitive) 'sensitive': true,
+        if (dim != null) 'dim': dim,
       };
 
   factory NoteAttachment.fromJson(Map<String, dynamic> j) => NoteAttachment(
@@ -65,6 +68,7 @@ class NoteAttachment {
         caption: (j['caption'] ?? j['comment'])
             as String?, // TODO: 'comment' is deprecated, remove it after some time
         sensitive: j['sensitive'] == true,
+        dim: j['dim'] as String?,
       );
 
   String toJsonString() => jsonEncode(toJson());
@@ -81,5 +85,6 @@ class NoteAttachment {
         thumbhash: thumbhash,
         caption: caption,
         sensitive: sensitive ?? this.sensitive,
+        dim: dim,
       );
 }

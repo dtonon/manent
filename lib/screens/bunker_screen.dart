@@ -244,6 +244,7 @@ class _BunkerScreenState extends State<BunkerScreen> {
       final pubkey = await signer.getPublicKeyAsync();
       await SignerStore.saveBunkerConnection(connection.toJson());
       SignerSession.set(signer);
+      NostrClient().ndk.accounts.loginExternalSigner(signer: signer);
       final profile = await ProfileFetcher.fetch(pubkey);
       final user = AuthUser(
         pubkey: pubkey,

@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../auth/amber_event_signer.dart';
 import '../auth/auth_state.dart';
 import '../auth/nip07_event_signer.dart';
+import '../auth/nostr_client.dart';
 import '../auth/profile_fetcher.dart';
 import '../auth/signer_session.dart';
 import '../theme.dart';
@@ -44,7 +45,9 @@ class LoginScreen extends StatelessWidget {
     try {
       final pubkey = await nip07GetPublicKey();
       if (!context.mounted) return;
-      SignerSession.set(Nip07EventSigner(pubkey: pubkey));
+      final signer = Nip07EventSigner(pubkey: pubkey);
+      SignerSession.set(signer);
+      NostrClient().ndk.accounts.loginExternalSigner(signer: signer);
       final profile = await ProfileFetcher.fetch(pubkey);
       await onLogin(AuthUser(
         pubkey: pubkey,
@@ -78,7 +81,9 @@ class LoginScreen extends StatelessWidget {
     final npub = result['signature'] as String? ?? '';
     if (npub.isEmpty || !context.mounted) return;
     final pubkey = Nip19.decode(npub);
-    SignerSession.set(AmberEventSigner(pubkey: pubkey));
+    final signer = AmberEventSigner(pubkey: pubkey);
+    SignerSession.set(signer);
+    NostrClient().ndk.accounts.loginExternalSigner(signer: signer);
     final profile = await ProfileFetcher.fetch(pubkey);
     await onLogin(AuthUser(
       pubkey: pubkey,

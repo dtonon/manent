@@ -44,11 +44,33 @@ class NoteCache {
   // In-memory decrypted file bytes keyed by sha256
   final _fileCache = <String, Uint8List>{};
 
+  // Limit concurrent Blossom downloads to avoid flooding on large feeds
+  static const _maxConcurrentDownloads = 3;
+  int _activeDownloads = 0;
+  final _downloadWaiters = <Completer<void>>[];
+
+  Future<void> _acquireDownloadSlot() async {
+    while (_activeDownloads >= _maxConcurrentDownloads) {
+      final c = Completer<void>();
+      _downloadWaiters.add(c);
+      await c.future;
+    }
+    _activeDownloads++;
+  }
+
+  void _releaseDownloadSlot() {
+    _activeDownloads--;
+    if (_downloadWaiters.isNotEmpty) {
+      _downloadWaiters.removeAt(0).complete();
+    }
+  }
+
   StreamSubscription<Nip01Event>? _relaySubscription;
   String? _relaySubId;
   Timer? _syncLoadingTimer;
   final _pendingDeletions = <String>{};
   final _verifier = Bip340EventVerifier();
+  bool _isRetrying = false;
 
   List<DecryptedNote> get _sorted =>
       _map.values.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
@@ -93,8 +115,8 @@ class NoteCache {
             errorMsg = 'The local decryption failed.';
           } else if (kind == NoteKind.file) {
             try {
-              attachment =
-                  NoteAttachment.fromJson(jsonDecode(decoded) as Map<String, dynamic>);
+              attachment = NoteAttachment.fromJson(
+                  jsonDecode(decoded) as Map<String, dynamic>);
               text = '';
             } catch (_) {
               errorMsg = 'Failed to parse file metadata.';
@@ -122,7 +144,11 @@ class NoteCache {
                 text = payload.text;
                 // Also update the sensitive column from relay payload
                 if (payload.sensitive && _db != null) {
-                  await _db!.updateSensitive(id: id, sensitive: true, editedAt: (row['edited_at'] as int?) ?? (row['created_at'] as int));
+                  await _db!.updateSensitive(
+                      id: id,
+                      sensitive: true,
+                      editedAt: (row['edited_at'] as int?) ??
+                          (row['created_at'] as int));
                 }
               }
               if (errorMsg == null) {
@@ -202,10 +228,13 @@ class NoteCache {
     final sha256 = await FileCrypto.sha256Hex(encryptedBytes);
     final keyHex = FileCrypto.keyToHex(key);
 
-    // Compute thumbhash for images
+    // Compute thumbhash and dimensions for images
     String? thumbhash;
+    String? dim;
     if (rasterImageMimeTypes.contains(mimeType)) {
-      thumbhash = await _computeThumbhash(bytes);
+      final info = await _computeImageInfo(bytes);
+      thumbhash = info.thumbhash;
+      dim = info.dim;
     }
 
     final isInline = encryptedBytes.length < 32 * 1024;
@@ -221,6 +250,7 @@ class NoteCache {
         key: keyHex,
         thumbhash: thumbhash,
         caption: caption,
+        dim: dim,
       );
     } else {
       // Save encrypted file to disk cache for later display
@@ -237,6 +267,7 @@ class NoteCache {
         key: keyHex,
         thumbhash: thumbhash,
         caption: caption,
+        dim: dim,
       );
     }
 
@@ -270,7 +301,8 @@ class NoteCache {
     if (isInline) {
       _publishFileEvent(id, attachment, now.millisecondsSinceEpoch ~/ 1000);
     } else {
-      _uploadFileAndPublish(id, attachment, encryptedBytes, now.millisecondsSinceEpoch ~/ 1000);
+      _uploadFileAndPublish(
+          id, attachment, encryptedBytes, now.millisecondsSinceEpoch ~/ 1000);
     }
   }
 
@@ -302,9 +334,15 @@ class NoteCache {
       }
     }
 
-    // Download from Blossom
+    // Download from Blossom (rate-limited)
     if (attachment.url == null) return null;
-    final encBytes = await BlossomClient.download(attachment.url!);
+    await _acquireDownloadSlot();
+    final Uint8List? encBytes;
+    try {
+      encBytes = await BlossomClient.download(attachment.url!);
+    } finally {
+      _releaseDownloadSlot();
+    }
     if (encBytes == null) return null;
 
     // Save to disk cache
@@ -329,7 +367,8 @@ class NoteCache {
       final file = File(p.join(dir.path, 'files', '${attachment.sha256}.enc'));
       if (!await file.exists()) return;
       final encryptedBytes = await file.readAsBytes();
-      await _uploadFileAndPublish(localId, attachment, encryptedBytes, createdAt);
+      await _uploadFileAndPublish(
+          localId, attachment, encryptedBytes, createdAt);
     } catch (_) {}
   }
 
@@ -341,12 +380,14 @@ class NoteCache {
   ) async {
     if (_signer == null || _blossomServers.isEmpty) {
       // ignore: avoid_print
-      print('[Blossom] upload skipped: signer=${_signer != null}, servers=$_blossomServers');
+      print(
+          '[Blossom] upload skipped: signer=${_signer != null}, servers=$_blossomServers');
       return;
     }
 
     // ignore: avoid_print
-    print('[Blossom] uploading ${attachment.sha256} to ${_blossomServers.length} server(s): $_blossomServers');
+    print(
+        '[Blossom] uploading ${attachment.sha256} to ${_blossomServers.length} server(s): $_blossomServers');
     String? url;
     for (final server in _blossomServers) {
       url = await BlossomClient.upload(
@@ -361,7 +402,8 @@ class NoteCache {
     if (url == null) {
       // ignore: avoid_print
       print('[Blossom] all servers failed for ${attachment.sha256}');
-      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      if (_db != null)
+        await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
       if (existing != null) {
         _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
@@ -407,7 +449,8 @@ class NoteCache {
     if (!attachment.isInline && attachment.url == null) return;
     if (_writeRelays.isEmpty) {
       promptFallbackRelays.value = true;
-      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      if (_db != null)
+        await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
       if (existing != null) {
         _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
@@ -479,7 +522,8 @@ class NoteCache {
 
       _retryPendingDecryptions();
     } catch (_) {
-      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      if (_db != null)
+        await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
       if (existing != null) {
         _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
@@ -512,8 +556,8 @@ class NoteCache {
         thumbhash: att.thumbhash,
         caption: newText.isEmpty ? null : newText,
       );
-      localContent =
-          await LocalCrypto.encrypt(_localKey!, updatedAttachment.toJsonString());
+      localContent = await LocalCrypto.encrypt(
+          _localKey!, updatedAttachment.toJsonString());
     } else {
       localContent = await LocalCrypto.encrypt(_localKey!, newText);
     }
@@ -542,17 +586,18 @@ class NoteCache {
     if (existing.kind == NoteKind.file) {
       _publishFileEvent(id, updatedAttachment!, editedAtSeconds);
     } else {
-      _publishToRelays(id, newText, editedAtSeconds, sensitive: existing.sensitive);
+      _publishToRelays(id, newText, editedAtSeconds,
+          sensitive: existing.sensitive);
     }
   }
 
-  Future<void> _publishToRelays(
-      String localId, String plaintext, int createdAt,
+  Future<void> _publishToRelays(String localId, String plaintext, int createdAt,
       {bool sensitive = false}) async {
     if (_signer == null) return;
     if (_writeRelays.isEmpty) {
       promptFallbackRelays.value = true;
-      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      if (_db != null)
+        await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
       if (existing != null) {
         _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
@@ -625,7 +670,8 @@ class NoteCache {
 
       _retryPendingDecryptions();
     } catch (_) {
-      if (_db != null) await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+      if (_db != null)
+        await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
       if (existing != null) {
         _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
@@ -657,7 +703,8 @@ class NoteCache {
       final eventTime =
           (existing.editedAt ?? existing.createdAt).millisecondsSinceEpoch ~/
               1000;
-      _publishToRelays(id, existing.text, eventTime, sensitive: existing.sensitive);
+      _publishToRelays(id, existing.text, eventTime,
+          sensitive: existing.sensitive);
     }
   }
 
@@ -685,13 +732,13 @@ class NoteCache {
     }
 
     final response = NostrClient().ndk.requests.subscription(
-      filter: Filter(
-        kinds: [33301, 33302, 5],
-        authors: [_signer!.getPublicKey()],
-        since: since,
-      ),
-      explicitRelays: _writeRelays,
-    );
+          filter: Filter(
+            kinds: [33301, 33302, 5],
+            authors: [_signer!.getPublicKey()],
+            since: since,
+          ),
+          explicitRelays: _writeRelays,
+        );
 
     _relaySubId = response.requestId;
     _relaySubscription = response.stream.listen((event) async {
@@ -729,8 +776,7 @@ class NoteCache {
         .where((t) => t.length >= 2 && t[0] == 'a')
         .map((t) => t[1].split(':'))
         .where((parts) =>
-            parts.length == 3 &&
-            (parts[0] == '33301' || parts[0] == '33302'))
+            parts.length == 3 && (parts[0] == '33301' || parts[0] == '33302'))
         .map((parts) => parts[2])
         .toSet();
 
@@ -773,9 +819,8 @@ class NoteCache {
     }
 
     final kind = NoteKind.fromEventKind(event.kind);
-    final dTag = event.tags
-        .where((t) => t.length >= 2 && t[0] == 'd')
-        .firstOrNull;
+    final dTag =
+        event.tags.where((t) => t.length >= 2 && t[0] == 'd').firstOrNull;
     final localId = dTag?[1] ?? _generateId();
 
     final existingRow = _db != null ? await _db!.getById(localId) : null;
@@ -814,7 +859,8 @@ class NoteCache {
           }
         }
       } else {
-        errorMsg = 'The remote decryption failed with the error "${result.error}".';
+        errorMsg =
+            'The remote decryption failed with the error "${result.error}".';
       }
 
       final localContent =
@@ -928,8 +974,9 @@ class NoteCache {
   }
 
   Future<void> _retryPendingDecryptions() async {
+    if (_isRetrying) return;
     if (_db == null || _signer == null || _localKey == null) return;
-    await NostrClient().ndk.connectivity.tryReconnect();
+    _isRetrying = true;
 
     final rows = await _db!.getAll();
     int retried = 0;
@@ -961,8 +1008,8 @@ class NoteCache {
       NoteAttachment? attachment;
       if (kind == NoteKind.file) {
         try {
-          attachment =
-              NoteAttachment.fromJson(jsonDecode(plain) as Map<String, dynamic>);
+          attachment = NoteAttachment.fromJson(
+              jsonDecode(plain) as Map<String, dynamic>);
           sensitive = attachment.sensitive;
         } catch (_) {
           continue;
@@ -994,6 +1041,7 @@ class NoteCache {
       retried++;
     }
 
+    _isRetrying = false;
     if (retried > 0) _emit();
   }
 
@@ -1027,8 +1075,8 @@ class NoteCache {
         bool sensitive = rowSensitive;
         if (kind == NoteKind.file) {
           try {
-            attachment =
-                NoteAttachment.fromJson(jsonDecode(plain) as Map<String, dynamic>);
+            attachment = NoteAttachment.fromJson(
+                jsonDecode(plain) as Map<String, dynamic>);
             sensitive = attachment.sensitive;
           } catch (_) {
             return false;
@@ -1111,7 +1159,8 @@ class NoteCache {
     final nowSeconds = now.millisecondsSinceEpoch ~/ 1000;
 
     if (existing.kind == NoteKind.file && existing.attachment != null) {
-      final updatedAttachment = existing.attachment!.copyWith(sensitive: sensitive);
+      final updatedAttachment =
+          existing.attachment!.copyWith(sensitive: sensitive);
       _map[id] = DecryptedNote(
         id: id,
         nostrId: existing.nostrId,
@@ -1124,8 +1173,8 @@ class NoteCache {
         sensitive: sensitive,
       );
       _emit();
-      final localContent =
-          await LocalCrypto.encrypt(_localKey!, updatedAttachment.toJsonString());
+      final localContent = await LocalCrypto.encrypt(
+          _localKey!, updatedAttachment.toJsonString());
       if (_db != null) {
         await _db!.updateSensitive(
           id: id,
@@ -1167,7 +1216,8 @@ class NoteCache {
     if (_db != null) await _db!.delete(id);
     _map.remove(id);
     _emit();
-    if (nostrId != null) _broadcastDeletion(id, nostrId, note?.kind ?? NoteKind.text);
+    if (nostrId != null)
+      _broadcastDeletion(id, nostrId, note?.kind ?? NoteKind.text);
   }
 
   void retryAllFailed() {
@@ -1180,7 +1230,8 @@ class NoteCache {
     }
   }
 
-  Future<void> _broadcastDeletion(String localId, String nostrId, NoteKind kind) async {
+  Future<void> _broadcastDeletion(
+      String localId, String nostrId, NoteKind kind) async {
     if (_writeRelays.isEmpty || _signer == null) return;
     try {
       final pubkey = _signer!.getPublicKey();
@@ -1206,6 +1257,7 @@ class NoteCache {
 
   Future<void> clear() async {
     await _cancelRelaySubscription();
+    _isRetrying = false;
     await _db?.deleteAll();
     _db = null;
     _signer = null;
@@ -1304,13 +1356,16 @@ class NoteCache {
   }
 
   // Computes a thumbhash from raw image bytes; returns base64 or null on error.
-  static Future<String?> _computeThumbhash(Uint8List imageBytes) async {
+  // Returns thumbhash (base64) and dim ("WxH") for an image in one decode pass.
+  static Future<({String? thumbhash, String? dim})> _computeImageInfo(
+      Uint8List imageBytes) async {
     try {
       final codec = await ui.instantiateImageCodec(imageBytes);
       final frame = await codec.getNextFrame();
       final image = frame.image;
       final w = image.width;
       final h = image.height;
+      final dim = '${w}x$h';
 
       // rgbaToThumbHash requires both dimensions ≤ 100px
       const maxSize = 100;
@@ -1331,11 +1386,11 @@ class NoteCache {
       final byteData =
           await scaled.toByteData(format: ui.ImageByteFormat.rawRgba);
       scaled.dispose();
-      if (byteData == null) return null;
+      if (byteData == null) return (thumbhash: null, dim: dim);
       final hash = rgbaToThumbHash(tw, th, byteData.buffer.asUint8List());
-      return base64Encode(hash);
+      return (thumbhash: base64Encode(hash), dim: dim);
     } catch (_) {
-      return null;
+      return (thumbhash: null, dim: null);
     }
   }
 }
