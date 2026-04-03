@@ -71,6 +71,7 @@ class _NotesScreenState extends State<NotesScreen> {
   final FocusNode _inputFocusNode = FocusNode();
   bool _sending = false;
   int _noteCount = 0;
+  Timer? _scrollDebounce;
   StreamSubscription? _sharingMediaSub;
   static const _processTextChannel = MethodChannel('manent/process_text');
   String? _editingNoteId;
@@ -134,7 +135,11 @@ class _NotesScreenState extends State<NotesScreen> {
 
   void _onNotesChanged() {
     final notes = NoteCache.instance.notifier.value;
-    if (notes.length > _noteCount) _scrollToBottom();
+    if (notes.length > _noteCount) {
+      _scrollDebounce?.cancel();
+      _scrollDebounce =
+          Timer(const Duration(milliseconds: 100), _scrollToBottom);
+    }
     _noteCount = notes.length;
   }
 
@@ -177,15 +182,9 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
   }
 
   Future<void> _sendNote() async {
@@ -1191,6 +1190,7 @@ class _NotesScreenState extends State<NotesScreen> {
                             }
                             return ListView(
                               controller: _scrollController,
+                              reverse: true,
                               padding: const EdgeInsets.all(16),
                               children: _buildNoteItems(notes),
                             );
@@ -1210,19 +1210,31 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   List<Widget> _buildNoteItems(List<DecryptedNote> notes) {
+    if (notes.isEmpty) return [];
+    // Build in reverse order for reverse:true ListView.
+    // items[0] = visual bottom (newest note), items[last] = visual top.
     final items = <Widget>[];
-    DateTime? lastDate;
+    DateTime? currentDate;
 
-    for (final note in notes) {
+    for (int i = notes.length - 1; i >= 0; i--) {
+      final note = notes[i];
       final noteDate = DateUtils.dateOnly(note.createdAt);
-      if (lastDate == null || noteDate != lastDate) {
-        if (items.isNotEmpty) items.add(const SizedBox(height: 12));
-        items.add(_buildDateSeparator(_formatDate(note.createdAt)));
-        lastDate = noteDate;
+
+      if (items.isNotEmpty) items.add(const SizedBox(height: 12));
+
+      // Date boundary: emit separator for the group we just finished
+      if (currentDate != null && noteDate != currentDate) {
+        items.add(_buildDateSeparator(_formatDate(notes[i + 1].createdAt)));
+        items.add(const SizedBox(height: 12));
       }
-      items.add(const SizedBox(height: 12));
+
       items.add(_NoteCard(note: note, onEdit: () => _startEdit(note)));
+      currentDate = noteDate;
     }
+
+    // Separator for the oldest date group
+    items.add(const SizedBox(height: 12));
+    items.add(_buildDateSeparator(_formatDate(notes.first.createdAt)));
 
     return items;
   }
@@ -1593,6 +1605,7 @@ class _NotesScreenState extends State<NotesScreen> {
     NoteCache.instance.promptFallbackRelays
         .removeListener(_onFallbackRelaysPrompt);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
+    _scrollDebounce?.cancel();
     _sharingMediaSub?.cancel();
     _textController.dispose();
     _scrollController.dispose();
