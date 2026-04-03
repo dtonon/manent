@@ -140,7 +140,16 @@ class NoteCache {
                   errorMsg = 'Failed to parse file metadata.';
                 }
               } else {
-                text = _extractText(plain);
+                final payload = _extractPayload(plain);
+                text = payload.text;
+                // Also update the sensitive column from relay payload
+                if (payload.sensitive && _db != null) {
+                  await _db!.updateSensitive(
+                      id: id,
+                      sensitive: true,
+                      editedAt: (row['edited_at'] as int?) ??
+                          (row['created_at'] as int));
+                }
               }
               if (errorMsg == null) {
                 final toCache = kind == NoteKind.file ? plain : text!;
@@ -156,6 +165,9 @@ class NoteCache {
 
         if (text == null && attachment == null && errorMsg == null) continue;
         final editedAtRaw = row['edited_at'] as int?;
+        final sensitive = kind == NoteKind.file
+            ? (attachment?.sensitive ?? false)
+            : (row['sensitive'] as int? ?? 0) == 1;
         _map[id] = DecryptedNote(
           id: id,
           nostrId: row['nostr_id'] as String?,
@@ -169,6 +181,7 @@ class NoteCache {
           syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
           kind: kind,
           attachment: attachment,
+          sensitive: sensitive,
         );
       }
       _emit();
@@ -419,6 +432,7 @@ class NoteCache {
         syncStatus: SyncStatus.pending,
         kind: NoteKind.file,
         attachment: updated,
+        sensitive: updated.sensitive,
       );
     }
 
@@ -481,6 +495,7 @@ class NoteCache {
           syncStatus: SyncStatus.pending,
           kind: NoteKind.file,
           attachment: existing.attachment,
+          sensitive: attachment.sensitive,
         );
       }
 
@@ -564,18 +579,20 @@ class NoteCache {
       syncStatus: SyncStatus.pending,
       kind: existing.kind,
       attachment: updatedAttachment ?? existing.attachment,
+      sensitive: existing.sensitive,
     );
     _emit();
 
     if (existing.kind == NoteKind.file) {
       _publishFileEvent(id, updatedAttachment!, editedAtSeconds);
     } else {
-      _publishToRelays(id, newText, editedAtSeconds);
+      _publishToRelays(id, newText, editedAtSeconds,
+          sensitive: existing.sensitive);
     }
   }
 
-  Future<void> _publishToRelays(
-      String localId, String plaintext, int createdAt) async {
+  Future<void> _publishToRelays(String localId, String plaintext, int createdAt,
+      {bool sensitive = false}) async {
     if (_signer == null) return;
     if (_writeRelays.isEmpty) {
       promptFallbackRelays.value = true;
@@ -590,7 +607,10 @@ class NoteCache {
     }
     try {
       final encrypted = await _signer!.encryptNip44(
-        plaintext: jsonEncode({'text': plaintext}),
+        plaintext: jsonEncode({
+          'text': plaintext,
+          if (sensitive) 'sensitive': true,
+        }),
         recipientPubKey: _signer!.getPublicKey(),
       );
       if (encrypted == null) return;
@@ -623,6 +643,7 @@ class NoteCache {
           createdAt: existing.createdAt,
           editedAt: existing.editedAt,
           syncStatus: SyncStatus.pending,
+          sensitive: existing.sensitive,
         );
       }
 
@@ -682,7 +703,8 @@ class NoteCache {
       final eventTime =
           (existing.editedAt ?? existing.createdAt).millisecondsSinceEpoch ~/
               1000;
-      _publishToRelays(id, existing.text, eventTime);
+      _publishToRelays(id, existing.text, eventTime,
+          sensitive: existing.sensitive);
     }
   }
 
@@ -814,9 +836,15 @@ class NoteCache {
 
       final result = await _decryptViaSigner(_signer!, event.content);
       final rawPlain = result.text;
-      final plain = (rawPlain != null && kind == NoteKind.text)
-          ? _extractText(rawPlain)
-          : rawPlain;
+      bool sensitive = false;
+      final String? plain;
+      if (rawPlain != null && kind == NoteKind.text) {
+        final payload = _extractPayload(rawPlain);
+        plain = payload.text;
+        sensitive = payload.sensitive;
+      } else {
+        plain = rawPlain;
+      }
       NoteAttachment? attachment;
       String? errorMsg;
 
@@ -825,6 +853,7 @@ class NoteCache {
           try {
             attachment = NoteAttachment.fromJson(
                 jsonDecode(plain) as Map<String, dynamic>);
+            sensitive = attachment.sensitive;
           } catch (_) {
             errorMsg = 'Failed to parse file metadata.';
           }
@@ -844,6 +873,7 @@ class NoteCache {
           encryptedContent: event.content,
           localContent: localContent,
           editedAt: event.createdAt,
+          sensitive: sensitive,
         );
       }
 
@@ -862,6 +892,7 @@ class NoteCache {
         syncStatus: SyncStatus.synced,
         kind: kind,
         attachment: attachment,
+        sensitive: sensitive,
       );
       _emit();
       if (errorMsg != null) {
@@ -873,9 +904,15 @@ class NoteCache {
     try {
       final result = await _decryptViaSigner(_signer!, event.content);
       final rawPlain = result.text;
-      final plain = (rawPlain != null && kind == NoteKind.text)
-          ? _extractText(rawPlain)
-          : rawPlain;
+      bool sensitive = false;
+      final String? plain;
+      if (rawPlain != null && kind == NoteKind.text) {
+        final payload = _extractPayload(rawPlain);
+        plain = payload.text;
+        sensitive = payload.sensitive;
+      } else {
+        plain = rawPlain;
+      }
       NoteAttachment? attachment;
       String? errorMsg;
 
@@ -884,6 +921,7 @@ class NoteCache {
           try {
             attachment = NoteAttachment.fromJson(
                 jsonDecode(plain) as Map<String, dynamic>);
+            sensitive = attachment.sensitive;
           } catch (_) {
             errorMsg = 'Failed to parse file metadata.';
           }
@@ -912,6 +950,7 @@ class NoteCache {
           localContent: localContent,
           editedAt: editedAt != null ? event.createdAt : null,
           kind: event.kind,
+          sensitive: sensitive,
         );
       }
 
@@ -925,6 +964,7 @@ class NoteCache {
         syncStatus: SyncStatus.synced,
         kind: kind,
         attachment: attachment,
+        sensitive: sensitive,
       );
       _emit();
       if (errorMsg != null) {
@@ -954,14 +994,23 @@ class NoteCache {
 
       final result = await _decryptViaSigner(_signer!, ciphertext);
       if (result.text == null) continue;
-      final plain =
-          kind == NoteKind.text ? _extractText(result.text!) : result.text!;
+
+      bool sensitive = false;
+      final String plain;
+      if (kind == NoteKind.text) {
+        final payload = _extractPayload(result.text!);
+        plain = payload.text;
+        sensitive = payload.sensitive;
+      } else {
+        plain = result.text!;
+      }
 
       NoteAttachment? attachment;
       if (kind == NoteKind.file) {
         try {
           attachment = NoteAttachment.fromJson(
               jsonDecode(plain) as Map<String, dynamic>);
+          sensitive = attachment.sensitive;
         } catch (_) {
           continue;
         }
@@ -969,6 +1018,10 @@ class NoteCache {
 
       final localContent = await LocalCrypto.encrypt(_localKey!, plain);
       await _db!.updateLocalContent(id, localContent);
+      if (sensitive) {
+        final ts = (row['edited_at'] as int?) ?? (row['created_at'] as int);
+        await _db!.updateSensitive(id: id, sensitive: true, editedAt: ts);
+      }
 
       final editedAtRaw = row['edited_at'] as int?;
       _map[id] = DecryptedNote(
@@ -983,6 +1036,7 @@ class NoteCache {
         syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
         kind: kind,
         attachment: attachment,
+        sensitive: sensitive,
       );
       retried++;
     }
@@ -1011,15 +1065,19 @@ class NoteCache {
     final rowKind = (row['kind'] as int?) ?? 33301;
     final kind = NoteKind.fromEventKind(rowKind);
 
+    final rowSensitive = (row['sensitive'] as int? ?? 0) == 1;
+
     final localEncoded = row['local_content'] as String?;
     if (localEncoded != null) {
       final plain = await LocalCrypto.decrypt(_localKey!, localEncoded);
       if (plain != null) {
         NoteAttachment? attachment;
+        bool sensitive = rowSensitive;
         if (kind == NoteKind.file) {
           try {
             attachment = NoteAttachment.fromJson(
                 jsonDecode(plain) as Map<String, dynamic>);
+            sensitive = attachment.sensitive;
           } catch (_) {
             return false;
           }
@@ -1037,6 +1095,7 @@ class NoteCache {
           syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
           kind: kind,
           attachment: attachment,
+          sensitive: sensitive,
         );
         _emit();
         return true;
@@ -1050,13 +1109,21 @@ class NoteCache {
     final result = await _decryptViaSigner(_signer!, ciphertext);
     if (result.text == null) return false;
 
-    final plain =
-        kind == NoteKind.text ? _extractText(result.text!) : result.text!;
+    bool sensitive = rowSensitive;
+    final String plain;
+    if (kind == NoteKind.text) {
+      final payload = _extractPayload(result.text!);
+      plain = payload.text;
+      sensitive = payload.sensitive;
+    } else {
+      plain = result.text!;
+    }
     NoteAttachment? attachment;
     if (kind == NoteKind.file) {
       try {
         attachment =
             NoteAttachment.fromJson(jsonDecode(plain) as Map<String, dynamic>);
+        sensitive = attachment.sensitive;
       } catch (_) {
         return false;
       }
@@ -1077,9 +1144,67 @@ class NoteCache {
       syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
       kind: kind,
       attachment: attachment,
+      sensitive: sensitive,
     );
     _emit();
     return true;
+  }
+
+  Future<void> setSensitive(String id, bool sensitive) async {
+    if (_localKey == null) return;
+    final existing = _map[id];
+    if (existing == null || existing.error != null) return;
+
+    final now = DateTime.now();
+    final nowSeconds = now.millisecondsSinceEpoch ~/ 1000;
+
+    if (existing.kind == NoteKind.file && existing.attachment != null) {
+      final updatedAttachment =
+          existing.attachment!.copyWith(sensitive: sensitive);
+      _map[id] = DecryptedNote(
+        id: id,
+        nostrId: existing.nostrId,
+        text: '',
+        createdAt: existing.createdAt,
+        editedAt: now,
+        syncStatus: SyncStatus.pending,
+        kind: NoteKind.file,
+        attachment: updatedAttachment,
+        sensitive: sensitive,
+      );
+      _emit();
+      final localContent = await LocalCrypto.encrypt(
+          _localKey!, updatedAttachment.toJsonString());
+      if (_db != null) {
+        await _db!.updateSensitive(
+          id: id,
+          sensitive: sensitive,
+          editedAt: nowSeconds,
+          localContent: localContent,
+        );
+      }
+      _publishFileEvent(id, updatedAttachment, nowSeconds);
+    } else {
+      _map[id] = DecryptedNote(
+        id: id,
+        nostrId: existing.nostrId,
+        text: existing.text,
+        createdAt: existing.createdAt,
+        editedAt: now,
+        syncStatus: SyncStatus.pending,
+        kind: existing.kind,
+        sensitive: sensitive,
+      );
+      _emit();
+      if (_db != null) {
+        await _db!.updateSensitive(
+          id: id,
+          sensitive: sensitive,
+          editedAt: nowSeconds,
+        );
+      }
+      _publishToRelays(id, existing.text, nowSeconds, sensitive: sensitive);
+    }
   }
 
   Future<void> delete(String id, {String? nostrId}) async {
@@ -1187,6 +1312,7 @@ class NoteCache {
         syncStatus: s,
         kind: n.kind,
         attachment: n.attachment,
+        sensitive: n.sensitive,
       );
 
   Future<String> _filesCacheDir() async {
@@ -1216,14 +1342,17 @@ class NoteCache {
     } catch (_) {}
   }
 
-  // Extracts text from JSON payload {"text": "..."}, falls back to raw string.
-  static String _extractText(String decrypted) {
+  // Extracts text and sensitive flag from JSON payload {"text": "...", "sensitive": true}.
+  // Falls back to raw string with sensitive=false for legacy plain-text payloads.
+  static ({String text, bool sensitive}) _extractPayload(String decrypted) {
     try {
       final json = jsonDecode(decrypted) as Map<String, dynamic>;
       final t = json['text'];
-      if (t is String) return t;
+      if (t is String) {
+        return (text: t, sensitive: json['sensitive'] == true);
+      }
     } catch (_) {}
-    return decrypted;
+    return (text: decrypted, sensitive: false);
   }
 
   // Computes a thumbhash from raw image bytes; returns base64 or null on error.

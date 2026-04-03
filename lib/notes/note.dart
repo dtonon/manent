@@ -43,6 +43,7 @@ class DecryptedNote {
   final SyncStatus syncStatus;
   final NoteKind kind;
   final NoteAttachment? attachment;
+  final bool sensitive;
 
   const DecryptedNote({
     required this.id,
@@ -54,6 +55,7 @@ class DecryptedNote {
     required this.syncStatus,
     this.kind = NoteKind.text,
     this.attachment,
+    this.sensitive = false,
   });
 
   String toDebugJson() {

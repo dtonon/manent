@@ -18,6 +18,7 @@ class NoteAttachment {
   final String key; // hex 32-byte AES key
   final String? thumbhash; // base64, images only
   final String? caption;
+  final bool sensitive;
   final String? dim; // "<width>x<height>", images only
 
   const NoteAttachment({
@@ -30,6 +31,7 @@ class NoteAttachment {
     required this.key,
     this.thumbhash,
     this.caption,
+    this.sensitive = false,
     this.dim,
   });
 
@@ -47,6 +49,7 @@ class NoteAttachment {
         'decryption-key': key,
         if (thumbhash != null) 'thumbhash': thumbhash,
         if (caption != null) 'caption': caption,
+        if (sensitive) 'sensitive': true,
         if (dim != null) 'dim': dim,
       };
 
@@ -64,12 +67,14 @@ class NoteAttachment {
         thumbhash: j['thumbhash'] as String?,
         caption: (j['caption'] ?? j['comment'])
             as String?, // TODO: 'comment' is deprecated, remove it after some time
+        sensitive: j['sensitive'] == true,
         dim: j['dim'] as String?,
       );
 
   String toJsonString() => jsonEncode(toJson());
 
-  NoteAttachment copyWith({String? url, String? data}) => NoteAttachment(
+  NoteAttachment copyWith({String? url, String? data, bool? sensitive}) =>
+      NoteAttachment(
         url: url ?? this.url,
         data: data ?? this.data,
         filename: filename,
@@ -79,6 +84,7 @@ class NoteAttachment {
         key: key,
         thumbhash: thumbhash,
         caption: caption,
+        sensitive: sensitive ?? this.sensitive,
         dim: dim,
       );
 }

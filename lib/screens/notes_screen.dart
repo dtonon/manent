@@ -1625,6 +1625,7 @@ class _NoteCardState extends State<_NoteCard>
   final _selectionAreaKey = GlobalKey<SelectionAreaState>();
 
   bool _retrying = false;
+  bool _isRevealed = false;
   Offset _tapPosition = Offset.zero;
   Future<Uint8List?>? _imageBytesFuture;
 
@@ -1847,6 +1848,8 @@ class _NoteCardState extends State<_NoteCard>
           showShare: isFileNote && !_isDesktopOrWeb,
           showCopyCaption:
               isFileNote && widget.note.attachment?.caption != null,
+          showSensitive: widget.note.error == null,
+          isSensitive: widget.note.sensitive,
           showDebugJson: kDebugMode,
           editedAt: widget.note.editedAt,
           fileSize: widget.note.attachment?.size,
@@ -1865,7 +1868,9 @@ class _NoteCardState extends State<_NoteCard>
 
     _activeMenuId.value = null;
 
-    if (result == 'show_json') {
+    if (result == 'set_sensitive') {
+      NoteCache.instance.setSensitive(widget.note.id, !widget.note.sensitive);
+    } else if (result == 'show_json') {
       if (mounted) _showJsonModal(widget.note);
     } else if (result == 'save') {
       _saveFile();
@@ -2046,7 +2051,9 @@ class _NoteCardState extends State<_NoteCard>
           onLongPressStart: onLongPressStart,
           child: Container(
             // Image file notes use zero padding — the image fills the card
-            padding: isFileImage ? EdgeInsets.zero : const EdgeInsets.all(16),
+            padding: isFileImage
+                ? EdgeInsets.zero
+                : const EdgeInsets.fromLTRB(16, 16, 16, 8),
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(8),
@@ -2142,6 +2149,9 @@ class _NoteCardState extends State<_NoteCard>
         formatTime: _formatTime,
         buildSyncIcon: _buildSyncIcon,
         isDesktopOrWeb: _isDesktopOrWeb,
+        isRevealed: _isRevealed,
+        onReveal: () => setState(() => _isRevealed = true),
+        onHide: () => setState(() => _isRevealed = false),
       );
     }
 
@@ -2186,6 +2196,79 @@ class _NoteCardState extends State<_NoteCard>
       );
     }
 
+    // Sensitive overlay for text notes
+    if (widget.note.sensitive && !_isRevealed) {
+      final preview = widget.note.text.length > 200
+          ? widget.note.text.substring(0, 200)
+          : widget.note.text;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 36),
+              child: Stack(
+                children: [
+                  ImageFiltered(
+                    imageFilter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Text(
+                      preview,
+                      style: const TextStyle(
+                          fontSize: 14, height: 1.3, color: Colors.black87),
+                    ),
+                  ),
+                  Positioned.fill(
+                    child: Center(
+                      child: Semantics(
+                        label: 'Show sensitive content',
+                        button: true,
+                        child: ElevatedButton(
+                          onPressed: () => setState(() => _isRevealed = true),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black87,
+                            elevation: 2,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 8),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.visibility_outlined, size: 16),
+                              SizedBox(width: 6),
+                              Text('Show'),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SizedBox(height: widget.note.sensitive && _isRevealed ? 12 : 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildSyncIcon(),
+                const SizedBox(width: 4),
+                Text(
+                  _formatTime(widget.note.createdAt),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
     final textSpan = _textSpan;
 
     return Column(
@@ -2213,19 +2296,54 @@ class _NoteCardState extends State<_NoteCard>
           )
         else
           Text.rich(textSpan),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildSyncIcon(),
-              const SizedBox(width: 4),
-              Text(
-                _formatTime(widget.note.createdAt),
-                style: TextStyle(fontSize: 12, color: Colors.grey[400]),
-              ),
-            ],
-          ),
+        SizedBox(height: widget.note.sensitive && _isRevealed ? 12 : 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            if (widget.note.sensitive && _isRevealed)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _isRevealed = false),
+                child: Semantics(
+                  label: 'Hide sensitive content',
+                  button: true,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEEEEE),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.visibility_off_outlined,
+                            size: 12, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Hide',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else
+              const SizedBox.shrink(),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildSyncIcon(),
+                const SizedBox(width: 4),
+                Text(
+                  _formatTime(widget.note.createdAt),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                ),
+              ],
+            ),
+          ],
         ),
       ],
     );
@@ -2256,6 +2374,9 @@ class _FileNoteContent extends StatelessWidget {
   final String Function(DateTime) formatTime;
   final Widget Function() buildSyncIcon;
   final bool isDesktopOrWeb;
+  final bool isRevealed;
+  final VoidCallback onReveal;
+  final VoidCallback onHide;
 
   const _FileNoteContent({
     required this.note,
@@ -2263,6 +2384,9 @@ class _FileNoteContent extends StatelessWidget {
     required this.formatTime,
     required this.buildSyncIcon,
     required this.isDesktopOrWeb,
+    required this.isRevealed,
+    required this.onReveal,
+    required this.onHide,
   });
 
   @override
@@ -2270,10 +2394,181 @@ class _FileNoteContent extends StatelessWidget {
     final attachment = note.attachment;
     if (attachment == null) return const SizedBox.shrink();
 
+    if (note.sensitive && !isRevealed) {
+      return _buildSensitivePlaceholder(attachment);
+    }
+
     if (attachment.isImage) {
       return _buildImageContent(attachment);
     }
     return _buildFileContent(attachment);
+  }
+
+  static final _showButtonStyle = ElevatedButton.styleFrom(
+    backgroundColor: Colors.white,
+    foregroundColor: Colors.black87,
+    elevation: 2,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+  );
+
+  Widget _buildSensitivePlaceholder(NoteAttachment attachment) {
+    if (attachment.isImage) {
+      return _buildImageSensitivePlaceholder(attachment);
+    }
+    return _buildFileSensitivePlaceholder(attachment);
+  }
+
+  Widget _buildImageSensitivePlaceholder(NoteAttachment attachment) {
+    final Widget bg;
+    if (attachment.thumbhash != null) {
+      bg = _ThumbhashImage(
+        thumbhash: attachment.thumbhash!,
+        filename: attachment.filename,
+      );
+    } else {
+      bg = const AspectRatio(
+        aspectRatio: 16 / 9,
+        child: ColoredBox(color: Color(0xFFEEEEEE)),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Stack(
+        children: [
+          bg,
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  buildSyncIcon(),
+                  const SizedBox(width: 4),
+                  Text(
+                    formatTime(note.createdAt),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: Center(
+              child: Semantics(
+                label: 'Show sensitive content',
+                button: true,
+                child: ElevatedButton(
+                  onPressed: onReveal,
+                  style: _showButtonStyle,
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.visibility_outlined, size: 16),
+                      SizedBox(width: 6),
+                      Text('Show'),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFileSensitivePlaceholder(NoteAttachment attachment) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 60),
+            child: Stack(
+              children: [
+                IgnorePointer(
+                  child: ImageFiltered(
+                    imageFilter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: const Color(0xFF333333),
+                          child: const Icon(Icons.insert_drive_file,
+                              color: Colors.white, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                attachment.filename,
+                                style: const TextStyle(
+                                    fontSize: 14, fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                _formatFileSize(attachment.size),
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey[500]),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: Center(
+                    child: Semantics(
+                      label: 'Show sensitive content',
+                      button: true,
+                      child: ElevatedButton(
+                        onPressed: onReveal,
+                        style: _showButtonStyle,
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.visibility_outlined, size: 16),
+                            SizedBox(width: 6),
+                            Text('Show'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              buildSyncIcon(),
+              const SizedBox(width: 4),
+              Text(
+                formatTime(note.createdAt),
+                style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildImageContent(NoteAttachment attachment) {
@@ -2329,6 +2624,40 @@ class _FileNoteContent extends StatelessWidget {
               ),
             ),
           ),
+          if (note.sensitive)
+            Positioned(
+              bottom: 16,
+              left: 16,
+              child: Semantics(
+                label: 'Hide sensitive content',
+                button: true,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onHide,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.visibility_off_outlined,
+                            size: 12, color: Colors.grey[500]),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Hide',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[500]),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -2391,17 +2720,6 @@ class _FileNoteContent extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                buildSyncIcon(),
-                Text(
-                  formatTime(note.createdAt),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
-                ),
-              ],
-            ),
           ],
         ),
         if (attachment.caption != null) ...[
@@ -2423,6 +2741,55 @@ class _FileNoteContent extends StatelessWidget {
                 : t;
           }),
         ],
+        SizedBox(height: note.sensitive ? 12 : 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            if (note.sensitive)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onHide,
+                child: Semantics(
+                  label: 'Hide sensitive content',
+                  button: true,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEEEEE),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.visibility_off_outlined,
+                            size: 12, color: Colors.grey[600]),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Hide',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.grey[600]),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else
+              const SizedBox.shrink(),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                buildSyncIcon(),
+                const SizedBox(width: 4),
+                Text(
+                  formatTime(note.createdAt),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                ),
+              ],
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -2509,6 +2876,8 @@ class _NoteMenuOverlay extends StatelessWidget {
   final bool showSave;
   final bool showShare;
   final bool showCopyCaption;
+  final bool showSensitive;
+  final bool isSensitive;
   final bool showDebugJson;
   final int? fileSize;
   final String? dim;
@@ -2525,6 +2894,8 @@ class _NoteMenuOverlay extends StatelessWidget {
     this.showSave = false,
     this.showShare = false,
     this.showCopyCaption = false,
+    this.showSensitive = false,
+    this.isSensitive = false,
     this.showDebugJson = false,
     this.editedAt,
     this.copyLabel = 'Copy text',
@@ -2719,6 +3090,23 @@ class _NoteMenuOverlay extends StatelessWidget {
                             child: Text(
                               'Edit caption',
                               style: TextStyle(
+                                  fontSize: 14, color: Colors.black87),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (showSensitive) ...[
+                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                        InkWell(
+                          onTap: () => onSelect('set_sensitive'),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Text(
+                              isSensitive
+                                  ? 'Unset as sensitive'
+                                  : 'Set as sensitive',
+                              style: const TextStyle(
                                   fontSize: 14, color: Colors.black87),
                             ),
                           ),
