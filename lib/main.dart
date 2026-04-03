@@ -109,7 +109,7 @@ class ManentApp extends StatefulWidget {
   State<ManentApp> createState() => _ManentAppState();
 }
 
-class _ManentAppState extends State<ManentApp> {
+class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
   AuthUser? _user;
   List<String> _additionalRelays = [];
   List<String> _blossomServers = [];
@@ -117,11 +117,25 @@ class _ManentAppState extends State<ManentApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _user = widget.initialUser;
     if (_user != null) {
       _refreshProfile();
       _refreshRelays();
       _initNotes();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _user != null) {
+      NoteCache.instance.sync();
     }
   }
 
