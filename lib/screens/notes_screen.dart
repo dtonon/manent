@@ -672,8 +672,12 @@ class _NotesScreenState extends State<NotesScreen> {
       final mimeType =
           item.mimeType ?? lookupMimeType(name) ?? 'application/octet-stream';
       if (mounted) {
-        setState(() =>
-            _pendingFile = (bytes: bytes, name: name, mimeType: mimeType));
+        if (rasterImageMimeTypes.contains(mimeType)) {
+          await _handleImagePicked(bytes, name, mimeType);
+        } else {
+          setState(() =>
+              _pendingFile = (bytes: bytes, name: name, mimeType: mimeType));
+        }
       }
     } catch (_) {}
     ReceiveSharingIntent.instance.reset();
