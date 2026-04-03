@@ -48,5 +48,5 @@ purge-web-cache:
     @curl -s -X POST "https://api.cloudflare.com/client/v4/zones/{{CF_ZONE_ID}}/purge_cache" \
         -H "Authorization: Bearer {{CF_API_TOKEN}}" \
         -H "Content-Type: application/json" \
-        --data '{"hosts": ["{{CF_HOST}}"]}' \
+        --data '{"purge_everything": true}' \
         | jq -r 'if .success then "✅ Cache purged successfully" else "‼️ Error: " + (.errors[0].message // "Unknown error") end'
