@@ -1485,6 +1485,17 @@ class _NotesScreenState extends State<NotesScreen> {
                               maxLines: null,
                               keyboardType: TextInputType.multiline,
                               textInputAction: TextInputAction.newline,
+                              onTap: () {
+                                // Android creates word selections on single tap
+                                // in a focused field; collapse back to cursor
+                                if (!_textController.selection.isCollapsed) {
+                                  _textController.selection =
+                                      TextSelection.collapsed(
+                                    offset: _textController
+                                        .selection.extentOffset,
+                                  );
+                                }
+                              },
                               decoration: InputDecoration(
                                 hintText: hasPendingFile ||
                                         editingFileAttachment != null
