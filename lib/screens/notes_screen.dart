@@ -14,6 +14,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SelectedContent;
 import 'package:flutter/services.dart';
 import 'package:thumbhash/thumbhash.dart' hide Image;
 import 'package:desktop_multi_window/desktop_multi_window.dart';
@@ -1625,6 +1626,137 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 }
 
+class LinkedText extends StatefulWidget {
+  final String text;
+  final TextStyle style;
+  final bool selectionMode;
+  final GlobalKey<SelectionAreaState>? selectionAreaKey;
+  final ValueChanged<SelectedContent?>? onSelectionChanged;
+
+  const LinkedText({
+    super.key,
+    required this.text,
+    this.style = const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
+    this.selectionMode = false,
+    this.selectionAreaKey,
+    this.onSelectionChanged,
+  });
+
+  @override
+  State<LinkedText> createState() => _LinkedTextState();
+}
+
+class _LinkedTextState extends State<LinkedText> {
+  static final _urlRegex = RegExp(
+    r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9\-]*\.[a-zA-Z]{2,}(?:/[^\s]*)?',
+    caseSensitive: false,
+  );
+
+  late TextSpan _textSpan;
+  final List<TapGestureRecognizer> _recognizers = [];
+
+  static bool get _isDesktopOrWeb {
+    if (kIsWeb) {
+      return defaultTargetPlatform != TargetPlatform.iOS &&
+          defaultTargetPlatform != TargetPlatform.android;
+    }
+    return defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _rebuild();
+  }
+
+  @override
+  void didUpdateWidget(LinkedText old) {
+    super.didUpdateWidget(old);
+    if (old.text != widget.text || old.style != widget.style) {
+      _disposeRecognizers();
+      _rebuild();
+    }
+  }
+
+  void _rebuild() {
+    _textSpan = TextSpan(children: _buildSpans(widget.text, widget.style));
+  }
+
+  void _disposeRecognizers() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+  }
+
+  @override
+  void dispose() {
+    _disposeRecognizers();
+    super.dispose();
+  }
+
+  List<InlineSpan> _buildSpans(String text, TextStyle baseStyle) {
+    final spans = <InlineSpan>[];
+    int lastEnd = 0;
+
+    for (final match in _urlRegex.allMatches(text)) {
+      if (match.start > lastEnd) {
+        spans.add(
+            TextSpan(text: text.substring(lastEnd, match.start), style: baseStyle));
+      }
+
+      String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
+      final fullUrl = url.startsWith('http') ? url : 'https://$url';
+
+      final recognizer = TapGestureRecognizer()
+        ..onTap = () =>
+            launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault);
+      _recognizers.add(recognizer);
+      spans.add(TextSpan(
+        text: url,
+        style: baseStyle.copyWith(
+          color: accent,
+          decoration: TextDecoration.underline,
+          decorationColor: accent,
+        ),
+        recognizer: recognizer,
+      ));
+      lastEnd = match.start + url.length;
+    }
+
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(text: text.substring(lastEnd), style: baseStyle));
+    }
+
+    return spans;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final span = _textSpan;
+    if (_isDesktopOrWeb) {
+      return DefaultSelectionStyle(
+        selectionColor: textSelectionColor,
+        child: SelectionArea(
+          key: widget.selectionAreaKey,
+          onSelectionChanged: widget.onSelectionChanged,
+          contextMenuBuilder: (_, __) => const SizedBox.shrink(),
+          child: Text.rich(span),
+        ),
+      );
+    }
+    if (widget.selectionMode) {
+      return DefaultSelectionStyle(
+        selectionColor: textSelectionColor,
+        child: SelectableText.rich(span),
+      );
+    }
+    return Text.rich(span);
+  }
+}
+
 class _NoteCard extends StatefulWidget {
   final DecryptedNote note;
   final VoidCallback? onEdit;
@@ -1665,20 +1797,9 @@ class _NoteCardState extends State<_NoteCard>
     return box.globalToLocal(globalPosition);
   }
 
-  // Cached to keep the same TextSpan instance across rebuilds so SelectableText
-  // doesn't reset its selection when _activeMenuId / _selectionModeId change.
-  late TextSpan _textSpan;
-  final List<TapGestureRecognizer> _urlRecognizers = [];
-
-  static final _urlRegex = RegExp(
-    r'https?://[^\s]+|[a-zA-Z0-9][a-zA-Z0-9\-]*\.[a-zA-Z]{2,}(?:/[^\s]*)?',
-    caseSensitive: false,
-  );
-
   @override
   void initState() {
     super.initState();
-    _rebuildTextSpan();
     _initImageFuture();
   }
 
@@ -1692,35 +1813,10 @@ class _NoteCardState extends State<_NoteCard>
   @override
   void didUpdateWidget(_NoteCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.note.text != widget.note.text) {
-      _disposeRecognizers();
-      _rebuildTextSpan();
-    }
     // Reset future if attachment identity changes (e.g. note replaced after sync)
     if (oldWidget.note.attachment?.sha256 != widget.note.attachment?.sha256) {
       _initImageFuture();
     }
-  }
-
-  void _rebuildTextSpan() {
-    const baseStyle =
-        TextStyle(fontSize: 14, height: 1.3, color: Colors.black87);
-    _textSpan = TextSpan(
-      children: _buildTextSpans(widget.note.text, baseStyle),
-    );
-  }
-
-  void _disposeRecognizers() {
-    for (final r in _urlRecognizers) {
-      r.dispose();
-    }
-    _urlRecognizers.clear();
-  }
-
-  @override
-  void dispose() {
-    _disposeRecognizers();
-    super.dispose();
   }
 
   static bool get _isDesktopOrWeb {
@@ -1958,42 +2054,6 @@ class _NoteCardState extends State<_NoteCard>
             .delete(widget.note.id, nostrId: widget.note.nostrId);
       }
     }
-  }
-
-  List<InlineSpan> _buildTextSpans(String text, TextStyle baseStyle) {
-    final spans = <InlineSpan>[];
-    int lastEnd = 0;
-
-    for (final match in _urlRegex.allMatches(text)) {
-      if (match.start > lastEnd) {
-        spans.add(TextSpan(
-            text: text.substring(lastEnd, match.start), style: baseStyle));
-      }
-
-      String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
-      final fullUrl = url.startsWith('http') ? url : 'https://$url';
-
-      final recognizer = TapGestureRecognizer()
-        ..onTap = () =>
-            launchUrl(Uri.parse(fullUrl), mode: LaunchMode.platformDefault);
-      _urlRecognizers.add(recognizer);
-      spans.add(TextSpan(
-        text: url,
-        style: baseStyle.copyWith(
-          color: accent,
-          decoration: TextDecoration.underline,
-          decorationColor: accent,
-        ),
-        recognizer: recognizer,
-      ));
-      lastEnd = match.start + url.length;
-    }
-
-    if (lastEnd < text.length) {
-      spans.add(TextSpan(text: text.substring(lastEnd), style: baseStyle));
-    }
-
-    return spans;
   }
 
   @override
@@ -2297,33 +2357,19 @@ class _NoteCardState extends State<_NoteCard>
       );
     }
 
-    final textSpan = _textSpan;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_isDesktopOrWeb)
-          DefaultSelectionStyle(
-            selectionColor: textSelectionColor,
-            child: SelectionArea(
-              key: _selectionAreaKey,
-              onSelectionChanged: (content) {
-                final raw = content?.plainText.trim();
-                _desktopSelectedContent =
-                    (raw != null && raw.isNotEmpty) ? raw : null;
-              },
-              contextMenuBuilder: (_, __) => const SizedBox.shrink(),
-              child: Text.rich(textSpan),
-            ),
-          )
-        else if (inSelectionMode)
-          // Default context menu — shows the native OS toolbar (copy, select all…)
-          DefaultSelectionStyle(
-            selectionColor: textSelectionColor,
-            child: SelectableText.rich(textSpan),
-          )
-        else
-          Text.rich(textSpan),
+        LinkedText(
+          text: widget.note.text,
+          selectionMode: inSelectionMode,
+          selectionAreaKey: _selectionAreaKey,
+          onSelectionChanged: (content) {
+            final raw = content?.plainText.trim();
+            _desktopSelectedContent =
+                (raw != null && raw.isNotEmpty) ? raw : null;
+          },
+        ),
         SizedBox(height: widget.note.sensitive && _isRevealed ? 12 : 6),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2691,25 +2737,13 @@ class _FileNoteContent extends StatelessWidget {
     );
 
     if (attachment.caption == null) return image;
-    final captionText = Text(
-      attachment.caption!,
-      style: const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
-    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         image,
         Padding(
           padding: const EdgeInsets.all(16),
-          child: isDesktopOrWeb
-              ? DefaultSelectionStyle(
-                  selectionColor: textSelectionColor,
-                  child: SelectionArea(
-                    contextMenuBuilder: (_, __) => const SizedBox.shrink(),
-                    child: captionText,
-                  ),
-                )
-              : captionText,
+          child: LinkedText(text: attachment.caption!),
         ),
       ],
     );
@@ -2752,22 +2786,7 @@ class _FileNoteContent extends StatelessWidget {
         ),
         if (attachment.caption != null) ...[
           const SizedBox(height: 8),
-          Builder(builder: (ctx) {
-            final t = Text(
-              attachment.caption!,
-              style: const TextStyle(
-                  fontSize: 14, height: 1.3, color: Colors.black87),
-            );
-            return isDesktopOrWeb
-                ? DefaultSelectionStyle(
-                    selectionColor: textSelectionColor,
-                    child: SelectionArea(
-                      contextMenuBuilder: (_, __) => const SizedBox.shrink(),
-                      child: t,
-                    ),
-                  )
-                : t;
-          }),
+          LinkedText(text: attachment.caption!),
         ],
         SizedBox(height: note.sensitive ? 12 : 6),
         Row(
