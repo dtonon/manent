@@ -1177,23 +1177,29 @@ class _NotesScreenState extends State<NotesScreen> {
                             ),
                           );
                         }
-                        return ValueListenableBuilder<List<DecryptedNote>>(
-                          valueListenable: NoteCache.instance.notifier,
-                          builder: (context, notes, _) {
-                            if (notes.isEmpty) {
-                              return const Center(
-                                child: Text(
-                                  'No notes yet',
-                                  style: TextStyle(
-                                      color: Colors.grey, fontSize: 14),
-                                ),
-                              );
-                            }
-                            return ListView(
-                              controller: _scrollController,
-                              reverse: true,
-                              padding: const EdgeInsets.all(16),
-                              children: _buildNoteItems(notes),
+                        return ValueListenableBuilder<bool>(
+                          valueListenable: NoteCache.instance.loadingOlder,
+                          builder: (context, isLoadingOlder, _) {
+                            return ValueListenableBuilder<List<DecryptedNote>>(
+                              valueListenable: NoteCache.instance.notifier,
+                              builder: (context, notes, _) {
+                                if (notes.isEmpty) {
+                                  return const Center(
+                                    child: Text(
+                                      'No notes yet',
+                                      style: TextStyle(
+                                          color: Colors.grey, fontSize: 14),
+                                    ),
+                                  );
+                                }
+                                return ListView(
+                                  controller: _scrollController,
+                                  reverse: true,
+                                  padding: const EdgeInsets.all(16),
+                                  children: _buildNoteItems(notes,
+                                      loadingOlder: isLoadingOlder),
+                                );
+                              },
                             );
                           },
                         );
@@ -1210,7 +1216,8 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
-  List<Widget> _buildNoteItems(List<DecryptedNote> notes) {
+  List<Widget> _buildNoteItems(List<DecryptedNote> notes,
+      {bool loadingOlder = false}) {
     if (notes.isEmpty) return [];
     // Build in reverse order for reverse:true ListView.
     // items[0] = visual bottom (newest note), items[last] = visual top.
@@ -1236,6 +1243,28 @@ class _NotesScreenState extends State<NotesScreen> {
     // Separator for the oldest date group
     items.add(const SizedBox(height: 12));
     items.add(_buildDateSeparator(_formatDate(notes.first.createdAt)));
+
+    if (loadingOlder) {
+      items.add(const SizedBox(height: 12));
+      items.add(
+        Semantics(
+          label: 'Loading older notes',
+          child: const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(accent),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return items;
   }

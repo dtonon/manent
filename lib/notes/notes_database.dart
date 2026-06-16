@@ -110,6 +110,12 @@ class AppDatabase {
     return rows.first['ts'] as int?;
   }
 
+  Future<int?> getOldestCreatedAt() async {
+    final db = await _getDb();
+    final rows = await db.rawQuery('SELECT MIN(created_at) AS ts FROM notes');
+    return rows.first['ts'] as int?;
+  }
+
   Future<bool> existsByNostrId(String nostrId) async {
     final db = await _getDb();
     final rows = await db.query(

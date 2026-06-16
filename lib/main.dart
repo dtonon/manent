@@ -157,6 +157,7 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
     final db = kIsWeb ? null : AppDatabase.instance;
     await NoteCache.instance.loadAll(db, signer, _mergedRelays());
     NoteCache.instance.sync(showLoading: true);
+    NoteCache.instance.syncOlderHistory();
   }
 
   Future<void> _onAdditionalRelaysChanged(List<String> relays) async {

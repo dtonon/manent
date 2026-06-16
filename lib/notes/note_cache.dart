@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ndk/data_layer/repositories/verifiers/bip340_event_verifier.dart';
 import 'package:ndk/domain_layer/entities/filter.dart';
 import 'package:ndk/domain_layer/entities/nip_01_event.dart';
@@ -30,8 +31,12 @@ class NoteCache {
   final _map = <String, DecryptedNote>{};
   final notifier = ValueNotifier<List<DecryptedNote>>([]);
   final loading = ValueNotifier<bool>(true);
+  final loadingOlder = ValueNotifier<bool>(false);
   // Fires true when a publish attempt finds zero accepting relays
   final promptFallbackRelays = ValueNotifier<bool>(false);
+
+  static const _olderHistoryCompleteKey = 'older_history_complete';
+  static const _olderHistoryBatchSize = 250;
 
   AppDatabase? _db;
   EventSigner? _signer;
@@ -719,16 +724,15 @@ class NoteCache {
     if (showLoading && _map.isEmpty) loading.value = true;
     await _cancelRelaySubscription();
 
-    final thirtyDaysAgo = DateTime.now()
-            .subtract(const Duration(days: 30))
-            .millisecondsSinceEpoch ~/
-        1000;
     final int? since;
-    if (_db != null) {
-      final latest = await _db!.getLatestCreatedAt();
-      since = latest != null ? min(latest, thirtyDaysAgo) : thirtyDaysAgo;
+    final int? limit;
+    final latest = _db != null ? await _db!.getLatestCreatedAt() : null;
+    if (latest != null) {
+      since = latest;
+      limit = null;
     } else {
-      since = thirtyDaysAgo;
+      since = null;
+      limit = 250;
     }
 
     final response = NostrClient().ndk.requests.subscription(
@@ -736,6 +740,7 @@ class NoteCache {
             kinds: [33301, 33302, 5],
             authors: [_signer!.getPublicKey()],
             since: since,
+            limit: limit,
           ),
           explicitRelays: _writeRelays,
         );
@@ -1255,6 +1260,61 @@ class NoteCache {
     } catch (_) {}
   }
 
+  Future<void> syncOlderHistory() async {
+    if (_writeRelays.isEmpty || _signer == null || _db == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_olderHistoryCompleteKey) == true) return;
+
+    final oldestLocal = await _db!.getOldestCreatedAt();
+    final thirtyDaysAgo =
+        DateTime.now().subtract(const Duration(days: 30)).millisecondsSinceEpoch ~/
+            1000;
+    int until =
+        oldestLocal != null ? oldestLocal - 1 : thirtyDaysAgo - 1;
+
+    loadingOlder.value = true;
+    try {
+      while (_signer != null && _writeRelays.isNotEmpty) {
+        List<Nip01Event> events;
+        try {
+          final response = NostrClient().ndk.requests.query(
+                filter: Filter(
+                  kinds: [33301, 33302, 5],
+                  authors: [_signer!.getPublicKey()],
+                  limit: _olderHistoryBatchSize,
+                  until: until,
+                ),
+                explicitRelays: _writeRelays,
+              );
+          events = await response.future.timeout(const Duration(seconds: 20));
+        } on TimeoutException {
+          break;
+        } catch (_) {
+          break;
+        }
+
+        for (final event in events) {
+          if (event.kind == 5) {
+            await _onDeletionEvent(event);
+          } else {
+            await _onRelayEvent(event);
+          }
+        }
+
+        if (events.length < _olderHistoryBatchSize) {
+          await prefs.setBool(_olderHistoryCompleteKey, true);
+          break;
+        }
+
+        final oldestTs = events.map((e) => e.createdAt).reduce(min);
+        until = oldestTs - 1;
+      }
+    } finally {
+      loadingOlder.value = false;
+    }
+  }
+
   Future<void> clear() async {
     await _cancelRelaySubscription();
     _isRetrying = false;
@@ -1268,7 +1328,10 @@ class NoteCache {
     _pendingDeletions.clear();
     notifier.value = [];
     loading.value = false;
+    loadingOlder.value = false;
     promptFallbackRelays.value = false;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_olderHistoryCompleteKey);
   }
 
   Future<({String? text, String? error})> _decryptViaSigner(
