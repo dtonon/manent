@@ -33,6 +33,7 @@ import '../notes/note_cache.dart';
 import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
 
+
 enum ImageResizePreset { small, medium, large, original }
 
 extension _ImageResizePresetExt on ImageResizePreset {
@@ -72,6 +73,8 @@ class _NotesScreenState extends State<NotesScreen> {
   final FocusNode _inputFocusNode = FocusNode();
   bool _sending = false;
   int _noteCount = 0;
+  String? _newestNoteId;
+  DateTime _lastInteractionTime = DateTime.now();
   Timer? _scrollDebounce;
   StreamSubscription? _sharingMediaSub;
   static const _processTextChannel = MethodChannel('manent/process_text');
@@ -89,13 +92,17 @@ class _NotesScreenState extends State<NotesScreen> {
   void initState() {
     super.initState();
     NoteCache.instance.notifier.addListener(_onNotesChanged);
+    _textController.addListener(
+        () => _lastInteractionTime = DateTime.now());
     NoteCache.instance.promptFallbackRelays
         .addListener(_onFallbackRelaysPrompt);
     if (NoteCache.instance.promptFallbackRelays.value) {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _onFallbackRelaysPrompt());
     }
-    _noteCount = NoteCache.instance.notifier.value.length;
+    final initialNotes = NoteCache.instance.notifier.value;
+    _noteCount = initialNotes.length;
+    _newestNoteId = initialNotes.isEmpty ? null : initialNotes.last.id;
     if (_noteCount > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
@@ -134,14 +141,28 @@ class _NotesScreenState extends State<NotesScreen> {
     return true;
   }
 
+  bool get _isAtBottom {
+    if (!_scrollController.hasClients) return true;
+    final pos = _scrollController.position;
+    return pos.maxScrollExtent - pos.pixels <= 50;
+  }
+
   void _onNotesChanged() {
     final notes = NoteCache.instance.notifier.value;
-    if (notes.length > _noteCount) {
+    final newestId = notes.isEmpty ? null : notes.last.id;
+    final newestChanged = newestId != _newestNoteId;
+    _newestNoteId = newestId;
+    _noteCount = notes.length;
+
+    final inactive =
+        DateTime.now().difference(_lastInteractionTime).inSeconds >= 30;
+
+    if (newestChanged && (_isAtBottom || inactive)) {
       _scrollDebounce?.cancel();
       _scrollDebounce =
           Timer(const Duration(milliseconds: 100), _scrollToBottom);
     }
-    _noteCount = notes.length;
+    // When scrolled up, new notes grow downward off-screen — no action needed.
   }
 
   void _onFallbackRelaysPrompt() {
@@ -184,7 +205,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
-      _scrollController.jumpTo(0);
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
     }
   }
 
@@ -1192,12 +1213,19 @@ class _NotesScreenState extends State<NotesScreen> {
                                     ),
                                   );
                                 }
-                                return ListView(
-                                  controller: _scrollController,
-                                  reverse: true,
-                                  padding: const EdgeInsets.all(16),
-                                  children: _buildNoteItems(notes,
-                                      loadingOlder: isLoadingOlder),
+                                return NotificationListener<ScrollNotification>(
+                                  onNotification: (n) {
+                                    if (n is ScrollUpdateNotification) {
+                                      _lastInteractionTime = DateTime.now();
+                                    }
+                                    return false;
+                                  },
+                                  child: ListView(
+                                    controller: _scrollController,
+                                    padding: const EdgeInsets.all(16),
+                                    children: _buildNoteItems(notes,
+                                        loadingOlder: isLoadingOlder),
+                                  ),
                                 );
                               },
                             );
@@ -1219,33 +1247,11 @@ class _NotesScreenState extends State<NotesScreen> {
   List<Widget> _buildNoteItems(List<DecryptedNote> notes,
       {bool loadingOlder = false}) {
     if (notes.isEmpty) return [];
-    // Build in reverse order for reverse:true ListView.
-    // items[0] = visual bottom (newest note), items[last] = visual top.
+    // Oldest-first for a normal (non-reversed) ListView.
+    // items[0] = visual top (oldest), items[last] = visual bottom (newest).
     final items = <Widget>[];
-    DateTime? currentDate;
-
-    for (int i = notes.length - 1; i >= 0; i--) {
-      final note = notes[i];
-      final noteDate = DateUtils.dateOnly(note.createdAt);
-
-      if (items.isNotEmpty) items.add(const SizedBox(height: 12));
-
-      // Date boundary: emit separator for the group we just finished
-      if (currentDate != null && noteDate != currentDate) {
-        items.add(_buildDateSeparator(_formatDate(notes[i + 1].createdAt)));
-        items.add(const SizedBox(height: 12));
-      }
-
-      items.add(_NoteCard(note: note, onEdit: () => _startEdit(note)));
-      currentDate = noteDate;
-    }
-
-    // Separator for the oldest date group
-    items.add(const SizedBox(height: 12));
-    items.add(_buildDateSeparator(_formatDate(notes.first.createdAt)));
 
     if (loadingOlder) {
-      items.add(const SizedBox(height: 12));
       items.add(
         Semantics(
           label: 'Loading older notes',
@@ -1264,6 +1270,24 @@ class _NotesScreenState extends State<NotesScreen> {
           ),
         ),
       );
+      items.add(const SizedBox(height: 12));
+    }
+
+    DateTime? currentDate;
+    for (int i = 0; i < notes.length; i++) {
+      final note = notes[i];
+      final noteDate = DateUtils.dateOnly(note.createdAt);
+
+      if (currentDate == null || noteDate != currentDate) {
+        if (items.isNotEmpty) items.add(const SizedBox(height: 12));
+        items.add(_buildDateSeparator(_formatDate(note.createdAt)));
+        items.add(const SizedBox(height: 12));
+      } else {
+        items.add(const SizedBox(height: 12));
+      }
+
+      items.add(_NoteCard(note: note, onEdit: () => _startEdit(note)));
+      currentDate = noteDate;
     }
 
     return items;
