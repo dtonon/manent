@@ -34,6 +34,75 @@ import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
 
 
+// Signals a pending pixel correction to apply during the next layout pass,
+// before the viewport paints. Used when toggling reverse mode so the visual
+// position is preserved with no frame flash.
+//
+// toBottom   → correctPixels(0)             (switching to reverse:true)
+// reversePixels != null → correctPixels(maxScrollExtent - reversePixels)
+//                                           (switching to reverse:false;
+//                                            reversePixels is pixels at switch time)
+class _ScrollSwitchFlag {
+  bool toBottom = false;
+  double? reversePixels; // non-null when switching to forward mode
+}
+
+class _BottomAnchorScrollPosition extends ScrollPositionWithSingleContext {
+  final _ScrollSwitchFlag flag;
+
+  _BottomAnchorScrollPosition({
+    required this.flag,
+    required super.physics,
+    required super.context,
+    super.initialPixels,
+    super.keepScrollOffset,
+    super.oldPosition,
+    super.debugLabel,
+  });
+
+  @override
+  bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    final rp = flag.reversePixels;
+    if (rp != null) {
+      flag.reversePixels = null;
+      final target = (maxScrollExtent - rp).clamp(0.0, maxScrollExtent);
+      if ((pixels - target).abs() > 1.0) {
+        correctPixels(target);
+        super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+        return false;
+      }
+    } else if (flag.toBottom) {
+      flag.toBottom = false;
+      if (pixels != 0.0) {
+        correctPixels(0.0);
+        super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+        return false;
+      }
+    }
+    return super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+  }
+}
+
+class _BottomAnchorScrollController extends ScrollController {
+  final _ScrollSwitchFlag flag;
+
+  _BottomAnchorScrollController({required this.flag});
+
+  @override
+  ScrollPosition createScrollPosition(ScrollPhysics physics,
+      ScrollContext context, ScrollPosition? oldPosition) {
+    return _BottomAnchorScrollPosition(
+      flag: flag,
+      physics: physics,
+      context: context,
+      initialPixels: initialScrollOffset,
+      keepScrollOffset: keepScrollOffset,
+      oldPosition: oldPosition,
+      debugLabel: debugLabel,
+    );
+  }
+}
+
 enum ImageResizePreset { small, medium, large, original }
 
 extension _ImageResizePresetExt on ImageResizePreset {
@@ -69,13 +138,17 @@ class NotesScreen extends StatefulWidget {
 
 class _NotesScreenState extends State<NotesScreen> {
   final TextEditingController _textController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  final _scrollSwitchFlag = _ScrollSwitchFlag();
+  late final _BottomAnchorScrollController _scrollController =
+      _BottomAnchorScrollController(flag: _scrollSwitchFlag);
   final FocusNode _inputFocusNode = FocusNode();
   bool _sending = false;
-  int _noteCount = 0;
+  // true  → reverse:true list (at bottom; new notes appear automatically)
+  // false → reverse:false list (scrolled up; new notes append without shifting)
+  bool _atBottom = true;
+  bool _showScrollToBottom = false;
   String? _newestNoteId;
   DateTime _lastInteractionTime = DateTime.now();
-  Timer? _scrollDebounce;
   StreamSubscription? _sharingMediaSub;
   static const _processTextChannel = MethodChannel('manent/process_text');
   String? _editingNoteId;
@@ -101,11 +174,7 @@ class _NotesScreenState extends State<NotesScreen> {
           .addPostFrameCallback((_) => _onFallbackRelaysPrompt());
     }
     final initialNotes = NoteCache.instance.notifier.value;
-    _noteCount = initialNotes.length;
     _newestNoteId = initialNotes.isEmpty ? null : initialNotes.last.id;
-    if (_noteCount > 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-    }
     _inputFocusNode.onKeyEvent = (_, event) {
       if (event is KeyDownEvent &&
           event.logicalKey == LogicalKeyboardKey.escape &&
@@ -141,28 +210,32 @@ class _NotesScreenState extends State<NotesScreen> {
     return true;
   }
 
-  bool get _isAtBottom {
-    if (!_scrollController.hasClients) return true;
-    final pos = _scrollController.position;
-    return pos.maxScrollExtent - pos.pixels <= 50;
-  }
-
   void _onNotesChanged() {
     final notes = NoteCache.instance.notifier.value;
     final newestId = notes.isEmpty ? null : notes.last.id;
     final newestChanged = newestId != _newestNoteId;
     _newestNoteId = newestId;
-    _noteCount = notes.length;
+
+    if (!newestChanged) return;
+
+    if (_atBottom) {
+      // reverse:true — new note at index 0 is already at the visual bottom.
+      // Nothing to do.
+      return;
+    }
 
     final inactive =
         DateTime.now().difference(_lastInteractionTime).inSeconds >= 30;
 
-    if (newestChanged && (_isAtBottom || inactive)) {
-      _scrollDebounce?.cancel();
-      _scrollDebounce =
-          Timer(const Duration(milliseconds: 100), _scrollToBottom);
+    if (inactive) {
+      _scrollSwitchFlag.toBottom = true;
+      setState(() {
+        _atBottom = true;
+        _showScrollToBottom = false;
+      });
+    } else {
+      setState(() => _showScrollToBottom = true);
     }
-    // When scrolled up, new notes grow downward off-screen — no action needed.
   }
 
   void _onFallbackRelaysPrompt() {
@@ -204,9 +277,11 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-    }
+    _scrollSwitchFlag.toBottom = true;
+    setState(() {
+      _atBottom = true;
+      _showScrollToBottom = false;
+    });
   }
 
   Future<void> _sendNote() async {
@@ -1213,19 +1288,64 @@ class _NotesScreenState extends State<NotesScreen> {
                                     ),
                                   );
                                 }
-                                return NotificationListener<ScrollNotification>(
-                                  onNotification: (n) {
-                                    if (n is ScrollUpdateNotification) {
-                                      _lastInteractionTime = DateTime.now();
-                                    }
-                                    return false;
-                                  },
-                                  child: ListView(
-                                    controller: _scrollController,
-                                    padding: const EdgeInsets.all(16),
-                                    children: _buildNoteItems(notes,
-                                        loadingOlder: isLoadingOlder),
-                                  ),
+                                return Stack(
+                                  children: [
+                                    NotificationListener<ScrollNotification>(
+                                      onNotification: (n) {
+                                        if (n is ScrollUpdateNotification) {
+                                          _lastInteractionTime = DateTime.now();
+                                          final pos = n.metrics;
+                                          if (_atBottom && pos.pixels > 50) {
+                                            // User scrolled up — switch to forward mode.
+                                            final rp = pos.pixels;
+                                            _scrollSwitchFlag.reversePixels = rp;
+                                            setState(() => _atBottom = false);
+                                          } else if (!_atBottom &&
+                                              pos.maxScrollExtent - pos.pixels <= 50) {
+                                            // User reached the bottom — switch back.
+                                            _scrollSwitchFlag.toBottom = true;
+                                            setState(() {
+                                              _atBottom = true;
+                                              _showScrollToBottom = false;
+                                            });
+                                          }
+                                        }
+                                        return false;
+                                      },
+                                      child: ListView(
+                                        controller: _scrollController,
+                                        reverse: _atBottom,
+                                        padding: const EdgeInsets.all(16),
+                                        children: _buildNoteItems(notes,
+                                            loadingOlder: isLoadingOlder),
+                                      ),
+                                    ),
+                                    if (_showScrollToBottom)
+                                      Positioned(
+                                        right: 16,
+                                        bottom: 16,
+                                        child: Semantics(
+                                          label: 'Scroll to latest note',
+                                          button: true,
+                                          child: GestureDetector(
+                                            onTap: _scrollToBottom,
+                                            child: Container(
+                                              width: 36,
+                                              height: 36,
+                                              decoration: const BoxDecoration(
+                                                color: accent,
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(
+                                                Icons.keyboard_arrow_down,
+                                                color: Colors.white,
+                                                size: 24,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 );
                               },
                             );
@@ -1247,37 +1367,34 @@ class _NotesScreenState extends State<NotesScreen> {
   List<Widget> _buildNoteItems(List<DecryptedNote> notes,
       {bool loadingOlder = false}) {
     if (notes.isEmpty) return [];
-    // Oldest-first for a normal (non-reversed) ListView.
-    // items[0] = visual top (oldest), items[last] = visual bottom (newest).
+
+    // Always build oldest-first. In reverse:true mode (atBottom) we flip the
+    // list so index 0 = newest = visual bottom. In reverse:false mode the list
+    // is used as-is: oldest at top, newest at bottom (highest index).
     final items = <Widget>[];
 
-    if (loadingOlder) {
-      items.add(
-        Semantics(
-          label: 'Loading older notes',
-          child: const Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(accent),
+    final loadingWidget = loadingOlder
+        ? Semantics(
+            label: 'Loading older notes',
+            child: const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(accent),
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
-      );
-      items.add(const SizedBox(height: 12));
-    }
+          )
+        : null;
 
     DateTime? currentDate;
-    for (int i = 0; i < notes.length; i++) {
-      final note = notes[i];
+    for (final note in notes) {
       final noteDate = DateUtils.dateOnly(note.createdAt);
-
       if (currentDate == null || noteDate != currentDate) {
         if (items.isNotEmpty) items.add(const SizedBox(height: 12));
         items.add(_buildDateSeparator(_formatDate(note.createdAt)));
@@ -1285,12 +1402,25 @@ class _NotesScreenState extends State<NotesScreen> {
       } else {
         items.add(const SizedBox(height: 12));
       }
-
       items.add(_NoteCard(note: note, onEdit: () => _startEdit(note)));
       currentDate = noteDate;
     }
 
-    return items;
+    if (_atBottom) {
+      // reverse:true — flip so newest (last) lands at index 0 (visual bottom).
+      final out = items.reversed.toList();
+      if (loadingWidget != null) {
+        out.add(const SizedBox(height: 12));
+        out.add(loadingWidget);
+      }
+      return out;
+    } else {
+      // reverse:false — normal order; loading indicator goes at the top.
+      if (loadingWidget != null) {
+        items.insertAll(0, [loadingWidget, const SizedBox(height: 12)]);
+      }
+      return items;
+    }
   }
 
   String _formatDate(DateTime dt) {
@@ -1670,7 +1800,6 @@ class _NotesScreenState extends State<NotesScreen> {
     NoteCache.instance.promptFallbackRelays
         .removeListener(_onFallbackRelaysPrompt);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
-    _scrollDebounce?.cancel();
     _sharingMediaSub?.cancel();
     _textController.dispose();
     _scrollController.dispose();
