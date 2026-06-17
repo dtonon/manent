@@ -11,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:super_clipboard/super_clipboard.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -2119,6 +2120,26 @@ class _NoteCardState extends State<_NoteCard>
     );
   }
 
+  Future<void> _copyImage() async {
+    final attachment = widget.note.attachment;
+    if (attachment == null) return;
+    final clipboard = SystemClipboard.instance;
+    if (clipboard == null) return; // Platform without clipboard write support
+    final bytes = await NoteCache.instance.getFileBytes(attachment);
+    if (bytes == null) return;
+    final format = switch (attachment.mimeType) {
+      'image/png' => Formats.png,
+      'image/jpeg' => Formats.jpeg,
+      'image/gif' => Formats.gif,
+      'image/webp' => Formats.webp,
+      'image/bmp' => Formats.bmp,
+      _ => Formats.png,
+    };
+    final item = DataWriterItem();
+    item.add(format(bytes));
+    await clipboard.write([item]);
+  }
+
   Future<void> _showContextMenu() async {
     _activeMenuId.value = widget.note.id;
 
@@ -2151,6 +2172,8 @@ class _NoteCardState extends State<_NoteCard>
           showEdit: widget.note.error == null && !isFileNote,
           showEditComment: isFileNote && widget.note.error == null,
           showSave: isFileNote,
+          showCopyImage:
+              isFileNote && widget.note.attachment?.isImage == true,
           showShare: isFileNote && !_isDesktopOrWeb,
           showCopyCaption:
               isFileNote && widget.note.attachment?.caption != null,
@@ -2180,6 +2203,8 @@ class _NoteCardState extends State<_NoteCard>
       if (mounted) _showJsonModal(widget.note);
     } else if (result == 'save') {
       _saveFile();
+    } else if (result == 'copy_image') {
+      _copyImage();
     } else if (result == 'share') {
       _shareFile();
     } else if (result == 'copy_caption') {
@@ -3103,6 +3128,7 @@ class _NoteMenuOverlay extends StatelessWidget {
   final String? copyLabel;
 
   final bool showSave;
+  final bool showCopyImage;
   final bool showShare;
   final bool showCopyCaption;
   final bool showSensitive;
@@ -3121,6 +3147,7 @@ class _NoteMenuOverlay extends StatelessWidget {
     this.showEdit = false,
     this.showEditComment = false,
     this.showSave = false,
+    this.showCopyImage = false,
     this.showShare = false,
     this.showCopyCaption = false,
     this.showSensitive = false,
@@ -3213,6 +3240,21 @@ class _NoteMenuOverlay extends StatelessWidget {
                                 horizontal: 16, vertical: 12),
                             child: Text(
                               'Save',
+                              style: TextStyle(
+                                  fontSize: 14, color: Colors.black87),
+                            ),
+                          ),
+                        ),
+                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
+                      ],
+                      if (showCopyImage) ...[
+                        InkWell(
+                          onTap: () => onSelect('copy_image'),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                            child: Text(
+                              'Copy',
                               style: TextStyle(
                                   fontSize: 14, color: Colors.black87),
                             ),

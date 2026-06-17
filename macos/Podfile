@@ -39,5 +39,22 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
+
+    # Xcode 26 exports a deployment-target env var for every platform (IPHONEOS,
+    # TVOS, WATCHOS, XROS, DRIVERKIT, ANDROID) into each pod build phase. Cargokit
+    # (super_native_extensions) inherits them when compiling its Rust host
+    # build-scripts, and clang 20 then aborts with "conflicting deployment targets"
+    # (macOS vs driverkit/watchOS). Strip the non-macOS vars from the cargokit phase.
+    target.build_phases.each do |phase|
+      next unless phase.respond_to?(:shell_script) && phase.shell_script
+      next unless phase.shell_script.include?('cargokit/build_pod.sh')
+      next if phase.shell_script.start_with?('unset ')
+      phase.shell_script =
+        "unset IPHONEOS_DEPLOYMENT_TARGET TVOS_DEPLOYMENT_TARGET " \
+        "WATCHOS_DEPLOYMENT_TARGET XROS_DEPLOYMENT_TARGET " \
+        "DRIVERKIT_DEPLOYMENT_TARGET ANDROID_DEPLOYMENT_TARGET\n" +
+        phase.shell_script
+    end
   end
+  installer.pods_project.save
 end
