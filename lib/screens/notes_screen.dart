@@ -34,7 +34,6 @@ import '../notes/note_cache.dart';
 import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
 
-
 // Signals a pending pixel correction to apply during the next layout pass,
 // before the viewport paints. Used when toggling reverse mode so the visual
 // position is preserved with no frame flash.
@@ -166,8 +165,7 @@ class _NotesScreenState extends State<NotesScreen> {
   void initState() {
     super.initState();
     NoteCache.instance.notifier.addListener(_onNotesChanged);
-    _textController.addListener(
-        () => _lastInteractionTime = DateTime.now());
+    _textController.addListener(() => _lastInteractionTime = DateTime.now());
     NoteCache.instance.promptFallbackRelays
         .addListener(_onFallbackRelaysPrompt);
     if (NoteCache.instance.promptFallbackRelays.value) {
@@ -1299,10 +1297,13 @@ class _NotesScreenState extends State<NotesScreen> {
                                           if (_atBottom && pos.pixels > 50) {
                                             // User scrolled up — switch to forward mode.
                                             final rp = pos.pixels;
-                                            _scrollSwitchFlag.reversePixels = rp;
+                                            _scrollSwitchFlag.reversePixels =
+                                                rp;
                                             setState(() => _atBottom = false);
                                           } else if (!_atBottom &&
-                                              pos.maxScrollExtent - pos.pixels <= 50) {
+                                              pos.maxScrollExtent -
+                                                      pos.pixels <=
+                                                  50) {
                                             // User reached the bottom — switch back.
                                             _scrollSwitchFlag.toBottom = true;
                                             setState(() {
@@ -1676,8 +1677,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                 if (!_textController.selection.isCollapsed) {
                                   _textController.selection =
                                       TextSelection.collapsed(
-                                    offset: _textController
-                                        .selection.extentOffset,
+                                    offset:
+                                        _textController.selection.extentOffset,
                                   );
                                 }
                               },
@@ -1819,7 +1820,8 @@ class LinkedText extends StatefulWidget {
   const LinkedText({
     super.key,
     required this.text,
-    this.style = const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
+    this.style =
+        const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
     this.selectionMode = false,
     this.selectionAreaKey,
     this.onSelectionChanged,
@@ -1886,8 +1888,8 @@ class _LinkedTextState extends State<LinkedText> {
 
     for (final match in _urlRegex.allMatches(text)) {
       if (match.start > lastEnd) {
-        spans.add(
-            TextSpan(text: text.substring(lastEnd, match.start), style: baseStyle));
+        spans.add(TextSpan(
+            text: text.substring(lastEnd, match.start), style: baseStyle));
       }
 
       String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
@@ -2172,8 +2174,7 @@ class _NoteCardState extends State<_NoteCard>
           showEdit: widget.note.error == null && !isFileNote,
           showEditComment: isFileNote && widget.note.error == null,
           showSave: isFileNote,
-          showCopyImage:
-              isFileNote && widget.note.attachment?.isImage == true,
+          showCopyImage: isFileNote && widget.note.attachment?.isImage == true,
           showShare: isFileNote && !_isDesktopOrWeb,
           showCopyCaption:
               isFileNote && widget.note.attachment?.caption != null,
@@ -2639,8 +2640,7 @@ String _formatFileSize(int bytes) {
 }
 
 // Opens image bytes in a native desktop viewer window (no reuse/tracking).
-Future<void> _openImageInDesktopViewer(
-    Uint8List bytes, String filename) async {
+Future<void> _openImageInDesktopViewer(Uint8List bytes, String filename) async {
   final file = File('${Directory.systemTemp.path}/manent_$filename');
   await file.writeAsBytes(bytes);
   final args = jsonEncode({'path': file.path, 'filename': filename});
@@ -3179,8 +3179,74 @@ class _NoteMenuOverlay extends StatelessWidget {
     return 'Edited ${dt.day} ${months[dt.month - 1]} $time';
   }
 
+  Widget _menuItem(String action, String label,
+      {Color color = Colors.black87}) {
+    return InkWell(
+      onTap: () => onSelect(action),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Text(label, style: TextStyle(fontSize: 14, color: color)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Menu actions in display order; dividers are interposed only between items
+    // so none ever touches the top or bottom edge of the menu.
+    final items = <Widget>[
+      if (showRetrySync) _menuItem('retry_sync', 'Retry sync'),
+      if (showSave) _menuItem('save', 'Save'),
+      if (showCopyImage) _menuItem('copy_image', 'Copy'),
+      if (showShare) _menuItem('share', 'Share'),
+      if (showCopyCaption) _menuItem('copy_caption', 'Copy caption'),
+      if (copyLabel != null) _menuItem('copy', copyLabel!),
+      if (showSelectText) _menuItem('select_text', 'Select text'),
+      if (showRetry) _menuItem('retry', 'Try to decrypt again'),
+      if (showEdit) _menuItem('edit', 'Edit'),
+      if (showEditComment) _menuItem('edit_caption', 'Edit caption'),
+      if (showSensitive)
+        _menuItem('set_sensitive',
+            isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
+      _menuItem('delete', 'Delete', color: Colors.red),
+      if (showDebugJson)
+        _menuItem('show_json', 'Show raw data', color: Colors.black54),
+      if (fileSize != null || editedAt != null)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (fileSize != null)
+                Text(
+                  'Size: ${_formatFileSize(fileSize!)}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+              if (dim != null)
+                Text(
+                  'Dimensions: $dim',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+              if ((fileSize != null || dim != null) && editedAt != null)
+                const SizedBox(height: 6),
+              if (editedAt != null)
+                Text(
+                  _formatEditedAt(editedAt!),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+            ],
+          ),
+        ),
+    ];
+
+    final children = <Widget>[];
+    for (final item in items) {
+      if (children.isNotEmpty) {
+        children.add(const Divider(height: 1, color: Color(0xFFE0E0E0)));
+      }
+      children.add(item);
+    }
+
     return Stack(
       children: [
         Positioned.fill(
@@ -3216,234 +3282,7 @@ class _NoteMenuOverlay extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (showRetrySync) ...[
-                        InkWell(
-                          onTap: () => onSelect('retry_sync'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Retry sync',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                      ],
-                      if (showSave) ...[
-                        InkWell(
-                          onTap: () => onSelect('save'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Save',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                      ],
-                      if (showCopyImage) ...[
-                        InkWell(
-                          onTap: () => onSelect('copy_image'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Copy',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                      ],
-                      if (showShare) ...[
-                        InkWell(
-                          onTap: () => onSelect('share'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Share',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                      ],
-                      if (showCopyCaption) ...[
-                        InkWell(
-                          onTap: () => onSelect('copy_caption'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Copy caption',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                      ],
-                      if (copyLabel != null) ...[
-                        InkWell(
-                          onTap: () => onSelect('copy'),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              copyLabel!,
-                              style: const TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (showSelectText) ...[
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                        InkWell(
-                          onTap: () => onSelect('select_text'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Select text',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (showRetry) ...[
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                        InkWell(
-                          onTap: () => onSelect('retry'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Try to decrypt again',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (showEdit) ...[
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                        InkWell(
-                          onTap: () => onSelect('edit'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Edit',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (showEditComment) ...[
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                        InkWell(
-                          onTap: () => onSelect('edit_caption'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Edit caption',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (showSensitive) ...[
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                        InkWell(
-                          onTap: () => onSelect('set_sensitive'),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              isSensitive
-                                  ? 'Unset as sensitive'
-                                  : 'Set as sensitive',
-                              style: const TextStyle(
-                                  fontSize: 14, color: Colors.black87),
-                            ),
-                          ),
-                        ),
-                      ],
-                      const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                      InkWell(
-                        onTap: () => onSelect('delete'),
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          child: Text(
-                            'Delete',
-                            style: TextStyle(fontSize: 14, color: Colors.red),
-                          ),
-                        ),
-                      ),
-                      if (showDebugJson) ...[
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                        InkWell(
-                          onTap: () => onSelect('show_json'),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Text(
-                              'Show raw data',
-                              style: TextStyle(
-                                  fontSize: 14, color: Colors.black54),
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (fileSize != null || editedAt != null) ...[
-                        const Divider(height: 1, color: Color(0xFFE0E0E0)),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 10),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (fileSize != null)
-                                Text(
-                                  'Size: ${_formatFileSize(fileSize!)}',
-                                  style: TextStyle(
-                                      fontSize: 12, color: Colors.grey[500]),
-                                ),
-                              if (dim != null)
-                                Text(
-                                  'Dimensions: $dim',
-                                  style: TextStyle(
-                                      fontSize: 12, color: Colors.grey[500]),
-                                ),
-                              if ((fileSize != null || dim != null) &&
-                                  editedAt != null)
-                                const SizedBox(height: 6),
-                              if (editedAt != null)
-                                Text(
-                                  _formatEditedAt(editedAt!),
-                                  style: TextStyle(
-                                      fontSize: 12, color: Colors.grey[500]),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
+                    children: children,
                   ),
                 ),
               ),
