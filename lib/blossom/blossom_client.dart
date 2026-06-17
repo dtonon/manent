@@ -5,6 +5,36 @@ import 'package:http/http.dart' as http;
 import 'package:ndk/ndk.dart';
 
 class BlossomClient {
+  // Follows 3xx redirects for a body-carrying request, re-sending method +
+  // body + headers (dart:io does not resend the body on 307/308 by default,
+  // so a proxy's http→https 308 would otherwise surface as a failure).
+  static Future<http.Response> _sendFollowingRedirects(
+    String method,
+    Uri uri,
+    Map<String, String> headers,
+    Uint8List? body,
+    Duration timeout,
+  ) async {
+    var target = uri;
+    for (var i = 0; i < 5; i++) {
+      final request = http.Request(method, target)
+        ..headers.addAll(headers)
+        ..followRedirects = false;
+      if (body != null) request.bodyBytes = body;
+
+      final streamed = await request.send().timeout(timeout);
+      final response = await http.Response.fromStream(streamed);
+
+      final isRedirect = response.statusCode >= 300 &&
+          response.statusCode < 400 &&
+          response.headers['location'] != null;
+      if (!isRedirect) return response;
+
+      target = target.resolve(response.headers['location']!);
+    }
+    throw Exception('too many redirects');
+  }
+
   // Uploads encrypted bytes to a Blossom server using BUD-01 auth.
   // Returns the blob URL on success, null on failure.
   static Future<String?> upload({
@@ -32,16 +62,16 @@ class BlossomClient {
       final eventJson = jsonEncode(Nip01EventModel.fromEntity(signed).toJson());
       final authHeader = 'Nostr ${base64Encode(utf8.encode(eventJson))}';
 
-      final response = await http
-          .put(
-            uri,
-            headers: {
-              'Authorization': authHeader,
-              'Content-Type': 'application/octet-stream',
-            },
-            body: data,
-          )
-          .timeout(const Duration(seconds: 60));
+      final response = await _sendFollowingRedirects(
+        'PUT',
+        uri,
+        {
+          'Authorization': authHeader,
+          'Content-Type': 'application/octet-stream',
+        },
+        data,
+        const Duration(seconds: 60),
+      );
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
@@ -82,9 +112,13 @@ class BlossomClient {
       final eventJson = jsonEncode(Nip01EventModel.fromEntity(signed).toJson());
       final authHeader = 'Nostr ${base64Encode(utf8.encode(eventJson))}';
 
-      await http
-          .delete(uri, headers: {'Authorization': authHeader})
-          .timeout(const Duration(seconds: 30));
+      await _sendFollowingRedirects(
+        'DELETE',
+        uri,
+        {'Authorization': authHeader},
+        null,
+        const Duration(seconds: 30),
+      );
     } catch (_) {}
   }
 
