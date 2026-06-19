@@ -203,10 +203,44 @@ class _NotesScreenState extends State<NotesScreen> {
   bool _onHardwareKey(KeyEvent event) {
     if (!mounted) return false;
     if (event is! KeyDownEvent) return false;
+    // Paste image from clipboard — works even when the input is unfocused,
+    // but not while editing (there the paste is a plain text edit).
+    if (event.logicalKey == LogicalKeyboardKey.keyV &&
+        (HardwareKeyboard.instance.isMetaPressed ||
+            HardwareKeyboard.instance.isControlPressed) &&
+        _editingNoteId == null) {
+      // Fire and forget; return false so a text paste still reaches the field
+      _pasteImageFromClipboard();
+      return false;
+    }
     if (event.logicalKey != LogicalKeyboardKey.arrowUp) return false;
     if (_textController.text.isNotEmpty || _editingNoteId != null) return false;
     _editLastNote();
     return true;
+  }
+
+  Future<void> _pasteImageFromClipboard() async {
+    final clipboard = SystemClipboard.instance;
+    if (clipboard == null) return;
+    final reader = await clipboard.read();
+    const candidates = <(SimpleFileFormat, String, String)>[
+      (Formats.png, 'png', 'image/png'),
+      (Formats.jpeg, 'jpg', 'image/jpeg'),
+      (Formats.gif, 'gif', 'image/gif'),
+      (Formats.webp, 'webp', 'image/webp'),
+      (Formats.bmp, 'bmp', 'image/bmp'),
+    ];
+    for (final (format, ext, mimeType) in candidates) {
+      if (!reader.canProvide(format)) continue;
+      reader.getFile(format, (file) async {
+        final bytes = await file.readAll();
+        // State may have changed while reading (e.g. edit started)
+        if (!mounted || _editingNoteId != null) return;
+        final name = 'pasted-${DateTime.now().millisecondsSinceEpoch}.$ext';
+        await _handleImagePicked(bytes, name, mimeType);
+      });
+      return;
+    }
   }
 
   void _onNotesChanged() {
