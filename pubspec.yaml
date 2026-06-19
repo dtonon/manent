@@ -57,7 +57,7 @@ dependencies:
   window_manager: ^0.5.1
   receive_sharing_intent: ^1.4.6
   super_clipboard: ^0.9.1
-  super_drag_and_drop: ^0.9.1
+  desktop_drop: ^0.7.1
 
 dev_dependencies:
   flutter_test:

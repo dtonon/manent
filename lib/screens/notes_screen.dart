@@ -12,7 +12,7 @@ import 'package:mime/mime.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:super_clipboard/super_clipboard.dart';
-import 'package:super_drag_and_drop/super_drag_and_drop.dart' as sdd;
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -253,80 +253,40 @@ class _NotesScreenState extends State<NotesScreen> {
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.linux;
 
-  sdd.DropOperation _onDropOver(sdd.DropOverEvent event) {
-    // Disabled while editing — there a drop can't attach to the edited note
-    if (_editingNoteId != null) return sdd.DropOperation.none;
-    if (event.session.items.isEmpty) return sdd.DropOperation.none;
-    if (!_dragging) setState(() => _dragging = true);
-    return event.session.allowedOperations.contains(sdd.DropOperation.copy)
-        ? sdd.DropOperation.copy
-        : (event.session.allowedOperations.firstOrNull ??
-            sdd.DropOperation.none);
-  }
-
-  void _onDropLeave(sdd.DropEvent event) {
-    if (_dragging) setState(() => _dragging = false);
-  }
-
-  Future<void> _onPerformDrop(sdd.PerformDropEvent event) async {
+  Future<void> _onDropFiles(List<XFile> files) async {
     if (mounted && _dragging) setState(() => _dragging = false);
-    if (_editingNoteId != null) return;
-    final items = event.session.items;
-    if (items.isEmpty) return;
-    final reader = items.first.dataReader;
-    if (reader == null) return;
-    await _readDroppedFile(reader);
-  }
-
-  Future<void> _readDroppedFile(DataReader reader) async {
-    final suggestedName = await reader.getSuggestedName();
-    if (suggestedName != null) {
-      final mimeType =
-          lookupMimeType(suggestedName) ?? 'application/octet-stream';
-      reader.getFile(null, (file) async {
-        final bytes = await file.readAll();
-        if (!mounted || _editingNoteId != null) return;
-        if (rasterImageMimeTypes.contains(mimeType)) {
-          await _handleImagePicked(bytes, suggestedName, mimeType);
-        } else {
-          setState(() {
-            _pendingFile =
-                (bytes: bytes, name: suggestedName, mimeType: mimeType);
-            _originalImageBytes = null;
-            _presetBytes = null;
-          });
-        }
+    // Disabled while editing — there a drop can't attach to the edited note
+    if (_editingNoteId != null || files.isEmpty) return;
+    final xfile = files.first;
+    final bytes = await xfile.readAsBytes();
+    if (!mounted || _editingNoteId != null) return;
+    final name = xfile.name.isNotEmpty
+        ? xfile.name
+        : 'dropped-${DateTime.now().millisecondsSinceEpoch}';
+    final mimeType = lookupMimeType(name) ?? 'application/octet-stream';
+    if (rasterImageMimeTypes.contains(mimeType)) {
+      await _handleImagePicked(bytes, name, mimeType);
+    } else {
+      setState(() {
+        _pendingFile = (bytes: bytes, name: name, mimeType: mimeType);
+        _originalImageBytes = null;
+        _presetBytes = null;
       });
-      return;
-    }
-    // No filename (e.g. image dragged from a web page) — read by image format
-    const candidates = <(SimpleFileFormat, String, String)>[
-      (Formats.png, 'png', 'image/png'),
-      (Formats.jpeg, 'jpg', 'image/jpeg'),
-      (Formats.gif, 'gif', 'image/gif'),
-      (Formats.webp, 'webp', 'image/webp'),
-      (Formats.bmp, 'bmp', 'image/bmp'),
-    ];
-    for (final (format, ext, mimeType) in candidates) {
-      if (!reader.canProvide(format)) continue;
-      reader.getFile(format, (file) async {
-        final bytes = await file.readAll();
-        if (!mounted || _editingNoteId != null) return;
-        final name = 'dropped-${DateTime.now().millisecondsSinceEpoch}.$ext';
-        await _handleImagePicked(bytes, name, mimeType);
-      });
-      return;
     }
   }
 
   Widget _wrapWithDropRegion(Widget child) {
     if (!_supportsDragDrop) return child;
-    return sdd.DropRegion(
-      formats: Formats.standardFormats,
-      hitTestBehavior: HitTestBehavior.opaque,
-      onDropOver: _onDropOver,
-      onDropLeave: _onDropLeave,
-      onPerformDrop: _onPerformDrop,
+    return DropTarget(
+      // Fully disabled while editing (no overlay, no drop)
+      enable: _editingNoteId == null,
+      onDragEntered: (_) {
+        if (!_dragging) setState(() => _dragging = true);
+      },
+      onDragExited: (_) {
+        if (_dragging) setState(() => _dragging = false);
+      },
+      onDragDone: (details) => _onDropFiles(details.files),
       child: Stack(
         children: [
           child,
