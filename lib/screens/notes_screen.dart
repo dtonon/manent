@@ -12,6 +12,7 @@ import 'package:mime/mime.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:super_clipboard/super_clipboard.dart';
+import 'package:super_drag_and_drop/super_drag_and_drop.dart' as sdd;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -153,6 +154,8 @@ class _NotesScreenState extends State<NotesScreen> {
   static const _processTextChannel = MethodChannel('manent/process_text');
   String? _editingNoteId;
   DecryptedNote? _editingNote;
+  // True while a file is being dragged over the window
+  bool _dragging = false;
   // Pending file selected by user, cleared after send
   ({Uint8List bytes, String name, String mimeType})? _pendingFile;
   // Original image bytes before any resize (null for non-image files)
@@ -241,6 +244,125 @@ class _NotesScreenState extends State<NotesScreen> {
       });
       return;
     }
+  }
+
+  // Drag & drop is a desktop/web concept — the whole window is the target
+  bool get _supportsDragDrop =>
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux;
+
+  sdd.DropOperation _onDropOver(sdd.DropOverEvent event) {
+    // Disabled while editing — there a drop can't attach to the edited note
+    if (_editingNoteId != null) return sdd.DropOperation.none;
+    if (event.session.items.isEmpty) return sdd.DropOperation.none;
+    if (!_dragging) setState(() => _dragging = true);
+    return event.session.allowedOperations.contains(sdd.DropOperation.copy)
+        ? sdd.DropOperation.copy
+        : (event.session.allowedOperations.firstOrNull ??
+            sdd.DropOperation.none);
+  }
+
+  void _onDropLeave(sdd.DropEvent event) {
+    if (_dragging) setState(() => _dragging = false);
+  }
+
+  Future<void> _onPerformDrop(sdd.PerformDropEvent event) async {
+    if (mounted && _dragging) setState(() => _dragging = false);
+    if (_editingNoteId != null) return;
+    final items = event.session.items;
+    if (items.isEmpty) return;
+    final reader = items.first.dataReader;
+    if (reader == null) return;
+    await _readDroppedFile(reader);
+  }
+
+  Future<void> _readDroppedFile(DataReader reader) async {
+    final suggestedName = await reader.getSuggestedName();
+    if (suggestedName != null) {
+      final mimeType =
+          lookupMimeType(suggestedName) ?? 'application/octet-stream';
+      reader.getFile(null, (file) async {
+        final bytes = await file.readAll();
+        if (!mounted || _editingNoteId != null) return;
+        if (rasterImageMimeTypes.contains(mimeType)) {
+          await _handleImagePicked(bytes, suggestedName, mimeType);
+        } else {
+          setState(() {
+            _pendingFile =
+                (bytes: bytes, name: suggestedName, mimeType: mimeType);
+            _originalImageBytes = null;
+            _presetBytes = null;
+          });
+        }
+      });
+      return;
+    }
+    // No filename (e.g. image dragged from a web page) — read by image format
+    const candidates = <(SimpleFileFormat, String, String)>[
+      (Formats.png, 'png', 'image/png'),
+      (Formats.jpeg, 'jpg', 'image/jpeg'),
+      (Formats.gif, 'gif', 'image/gif'),
+      (Formats.webp, 'webp', 'image/webp'),
+      (Formats.bmp, 'bmp', 'image/bmp'),
+    ];
+    for (final (format, ext, mimeType) in candidates) {
+      if (!reader.canProvide(format)) continue;
+      reader.getFile(format, (file) async {
+        final bytes = await file.readAll();
+        if (!mounted || _editingNoteId != null) return;
+        final name = 'dropped-${DateTime.now().millisecondsSinceEpoch}.$ext';
+        await _handleImagePicked(bytes, name, mimeType);
+      });
+      return;
+    }
+  }
+
+  Widget _wrapWithDropRegion(Widget child) {
+    if (!_supportsDragDrop) return child;
+    return sdd.DropRegion(
+      formats: Formats.standardFormats,
+      hitTestBehavior: HitTestBehavior.opaque,
+      onDropOver: _onDropOver,
+      onDropLeave: _onDropLeave,
+      onPerformDrop: _onPerformDrop,
+      child: Stack(
+        children: [
+          child,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: _dragging ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 150),
+                child: _buildDragOverlay(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDragOverlay() {
+    return Semantics(
+      label: 'Drop a file to attach it',
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.45),
+        child: const Center(
+          child: CustomPaint(
+            painter: _DashedBorderPainter(color: Colors.white),
+            child: SizedBox(
+              width: 170,
+              height: 170,
+              child: Center(
+                child: Icon(Icons.arrow_upward, size: 60, color: Colors.white),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _onNotesChanged() {
@@ -1234,7 +1356,7 @@ class _NotesScreenState extends State<NotesScreen> {
       valueListenable: _NoteCardState._selectionModeId,
       builder: (context, selectionId, _) {
         final inSelection = selectionId != null;
-        return PopScope(
+        return _wrapWithDropRegion(PopScope(
           canPop: !inSelection && _editingNoteId == null,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) {
@@ -1395,7 +1517,7 @@ class _NotesScreenState extends State<NotesScreen> {
               ),
             ),
           ),
-        );
+        ));
       },
     );
   }
@@ -1842,6 +1964,42 @@ class _NotesScreenState extends State<NotesScreen> {
     _inputFocusNode.dispose();
     super.dispose();
   }
+}
+
+// Dashed rounded-square border for the drag & drop overlay
+class _DashedBorderPainter extends CustomPainter {
+  final Color color;
+  const _DashedBorderPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
+    const dashLength = 11.0;
+    const gapLength = 8.0;
+    final rrect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      const Radius.circular(18),
+    );
+    final path = Path()..addRRect(rrect);
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = distance + dashLength;
+        canvas.drawPath(
+          metric.extractPath(distance, next.clamp(0, metric.length)),
+          paint,
+        );
+        distance = next + gapLength;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedBorderPainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
 class LinkedText extends StatefulWidget {
