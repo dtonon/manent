@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image/image.dart' as img;
 
+import 'package:crop_your_image/crop_your_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
@@ -548,6 +549,32 @@ class _NotesScreenState extends State<NotesScreen> {
           allBytes[p]!.length < originalSize);
       if (hasSmaller) await _showImageSizeModal();
     }
+  }
+
+  // Open the full-screen crop/rotate editor on the full-quality original,
+  // then re-run the resize pipeline on the edited (JPEG) result.
+  Future<void> _editPendingImage() async {
+    final file = _pendingFile;
+    final original = _originalImageBytes;
+    if (file == null || original == null) return;
+    // The editor only handles JPEG/PNG — normalize any source format to JPEG
+    final jpegInput = await compute(_encodeJpeg, original);
+    if (!mounted) return;
+    final edited = await Navigator.of(context).push<Uint8List>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _ImageEditorScreen(bytes: jpegInput),
+      ),
+    );
+    if (edited == null || !mounted) return;
+    final name = _swapExtension(file.name, 'jpg');
+    await _handleImagePicked(edited, name, 'image/jpeg');
+  }
+
+  static String _swapExtension(String name, String ext) {
+    final dot = name.lastIndexOf('.');
+    final base = dot == -1 ? name : name.substring(0, dot);
+    return '$base.$ext';
   }
 
   static Map<ImageResizePreset, Uint8List> _computeAllPresets(Uint8List bytes) {
@@ -1719,6 +1746,22 @@ class _NotesScreenState extends State<NotesScreen> {
                                 ),
                         ),
                         if (rasterImageMimeTypes
+                            .contains(_pendingFile!.mimeType)) ...[
+                          const SizedBox(width: 20),
+                          Semantics(
+                            label: 'Edit image',
+                            button: true,
+                            child: GestureDetector(
+                              onTap: (_presetBytes != null &&
+                                      _originalImageBytes != null)
+                                  ? _editPendingImage
+                                  : null,
+                              child: Icon(Icons.crop_rotate,
+                                  size: 24, color: Colors.grey[400]),
+                            ),
+                          ),
+                        ],
+                        if (rasterImageMimeTypes
                                 .contains(_pendingFile!.mimeType) &&
                             () {
                               final pb = _presetBytes;
@@ -1923,6 +1966,156 @@ class _NotesScreenState extends State<NotesScreen> {
     _scrollController.dispose();
     _inputFocusNode.dispose();
     super.dispose();
+  }
+}
+
+// Re-encode any decodable image to JPEG (runs in an isolate via compute)
+Uint8List _encodeJpeg(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return bytes;
+  return Uint8List.fromList(img.encodeJpg(decoded, quality: 95));
+}
+
+// Rotate by 90° * quarterTurns, re-encoding to JPEG (runs via compute)
+Uint8List _rotateJpeg((Uint8List, int) args) {
+  final (bytes, quarterTurns) = args;
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return bytes;
+  final rotated = img.copyRotate(decoded, angle: 90 * quarterTurns);
+  return Uint8List.fromList(img.encodeJpg(rotated, quality: 95));
+}
+
+// Full-screen crop & rotate editor; pops the edited JPEG bytes (or null)
+class _ImageEditorScreen extends StatefulWidget {
+  final Uint8List bytes;
+  const _ImageEditorScreen({required this.bytes});
+
+  @override
+  State<_ImageEditorScreen> createState() => _ImageEditorScreenState();
+}
+
+class _ImageEditorScreenState extends State<_ImageEditorScreen> {
+  final CropController _controller = CropController();
+  late Uint8List _current = widget.bytes;
+  bool _busy = false;
+
+  Future<void> _rotate(int quarterTurns) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final rotated = await compute(_rotateJpeg, (_current, quarterTurns));
+    if (!mounted) return;
+    _current = rotated;
+    _controller.image = rotated;
+    setState(() => _busy = false);
+  }
+
+  void _apply() {
+    if (_busy) return;
+    setState(() => _busy = true);
+    _controller.crop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: Semantics(
+          label: 'Cancel editing',
+          button: true,
+          child: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: _busy ? null : () => Navigator.of(context).pop(),
+          ),
+        ),
+        title: const Text('Edit image', style: TextStyle(fontSize: 18)),
+        actions: [
+          if (_busy)
+            const Padding(
+              padding: EdgeInsets.only(right: 20),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ),
+              ),
+            )
+          else
+            Semantics(
+              label: 'Apply changes',
+              button: true,
+              child: IconButton(
+                icon: const Icon(Icons.check),
+                onPressed: _apply,
+              ),
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: Crop(
+              controller: _controller,
+              image: widget.bytes,
+              baseColor: Colors.black,
+              maskColor: Colors.black.withValues(alpha: 0.6),
+              cornerDotBuilder: (size, _) =>
+                  const DotControl(color: Colors.white),
+              progressIndicator: const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+              onCropped: (result) {
+                if (!mounted) return;
+                switch (result) {
+                  case CropSuccess(:final croppedImage):
+                    Navigator.of(context).pop(croppedImage);
+                  case CropFailure():
+                    setState(() => _busy = false);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Could not crop the image')),
+                    );
+                }
+              },
+            ),
+          ),
+          Container(
+            color: Colors.black,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Semantics(
+                  label: 'Rotate left',
+                  button: true,
+                  child: IconButton(
+                    icon: const Icon(Icons.rotate_left, color: Colors.white),
+                    iconSize: 30,
+                    onPressed: _busy ? null : () => _rotate(-1),
+                  ),
+                ),
+                const SizedBox(width: 40),
+                Semantics(
+                  label: 'Rotate right',
+                  button: true,
+                  child: IconButton(
+                    icon: const Icon(Icons.rotate_right, color: Colors.white),
+                    iconSize: 30,
+                    onPressed: _busy ? null : () => _rotate(1),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

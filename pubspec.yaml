@@ -52,6 +52,7 @@ dependencies:
   mime: ^1.0.0
   share_plus: ^10.0.0
   image: ^4.2.0
+  crop_your_image: ^2.0.0
   flutter_image_compress: ^2.4.0
   desktop_multi_window: ^0.3.0
   window_manager: ^0.5.1
