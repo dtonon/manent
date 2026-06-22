@@ -25,6 +25,7 @@ import 'notes/notes_database.dart';
 import 'screens/login_screen.dart';
 import 'screens/notes_screen.dart';
 import 'theme.dart';
+import 'widgets/gif_player.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -376,20 +377,27 @@ class _ImageViewerAppState extends State<_ImageViewerApp> {
         },
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: _bytes != null
-              ? InteractiveViewer(
-                  transformationController: _transformController,
-                  minScale: 0.1,
-                  maxScale: 10.0,
-                  child: Center(
-                    child: Image.memory(
-                      _bytes!,
-                      fit: BoxFit.contain,
+          body: _bytes == null
+              ? const Center(child: CircularProgressIndicator())
+              : isGifBytes(_bytes!)
+                  ? GifPlayer(
+                      key: ValueKey(_bytes),
+                      bytes: _bytes!,
                       semanticLabel: _filename,
+                      minScale: 0.1,
+                    )
+                  : InteractiveViewer(
+                      transformationController: _transformController,
+                      minScale: 0.1,
+                      maxScale: 10.0,
+                      child: Center(
+                        child: Image.memory(
+                          _bytes!,
+                          fit: BoxFit.contain,
+                          semanticLabel: _filename,
+                        ),
+                      ),
                     ),
-                  ),
-                )
-              : const Center(child: CircularProgressIndicator()),
         ),
       ),
     );

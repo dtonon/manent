@@ -34,6 +34,7 @@ import '../notes/note.dart';
 import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
 import '../theme.dart';
+import '../widgets/gif_player.dart';
 import '../widgets/manent_app_bar.dart';
 
 // Signals a pending pixel correction to apply during the next layout pass,
@@ -2811,6 +2812,7 @@ class _NoteCardState extends State<_NoteCard>
         pageBuilder: (ctx, _, __) => _MobileImageViewer(
           imageBytesFuture: NoteCache.instance.getFileBytes(attachment),
           semanticLabel: attachment.filename,
+          isGif: attachment.isGif,
         ),
         transitionDuration: const Duration(milliseconds: 200),
       ),
@@ -3854,10 +3856,12 @@ class _MenuPositionDelegate extends SingleChildLayoutDelegate {
 class _MobileImageViewer extends StatefulWidget {
   final Future<Uint8List?> imageBytesFuture;
   final String semanticLabel;
+  final bool isGif;
 
   const _MobileImageViewer({
     required this.imageBytesFuture,
     required this.semanticLabel,
+    this.isGif = false,
   });
 
   @override
@@ -3933,6 +3937,12 @@ class _MobileImageViewerState extends State<_MobileImageViewer>
               future: widget.imageBytesFuture,
               builder: (ctx, snap) {
                 if (snap.hasData && snap.data != null) {
+                  if (widget.isGif) {
+                    return GifPlayer(
+                      bytes: snap.data!,
+                      semanticLabel: widget.semanticLabel,
+                    );
+                  }
                   return GestureDetector(
                     onDoubleTapDown: (d) =>
                         _doubleTapPosition = d.localPosition,
