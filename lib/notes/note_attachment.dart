@@ -37,6 +37,7 @@ class NoteAttachment {
 
   bool get isInline => data != null;
   bool get isImage => rasterImageMimeTypes.contains(mimeType);
+  bool get isGif => mimeType == 'image/gif';
 
   Map<String, dynamic> toJson() => {
         if (url != null) 'url': url,

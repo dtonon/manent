@@ -1547,7 +1547,8 @@ class _NotesScreenState extends State<NotesScreen> {
       } else {
         items.add(const SizedBox(height: 12));
       }
-      items.add(_NoteCard(note: note, onEdit: () => _startEdit(note)));
+      items.add(_NoteCard(
+          key: ValueKey(note.id), note: note, onEdit: () => _startEdit(note)));
       currentDate = noteDate;
     }
 
@@ -2341,7 +2342,7 @@ class _NoteCard extends StatefulWidget {
   final DecryptedNote note;
   final VoidCallback? onEdit;
 
-  const _NoteCard({required this.note, this.onEdit});
+  const _NoteCard({super.key, required this.note, this.onEdit});
 
   @override
   State<_NoteCard> createState() => _NoteCardState();
@@ -3256,6 +3257,15 @@ class _FileNoteContent extends StatelessWidget {
             future: imageBytesFuture,
             builder: (ctx, snap) {
               if (snap.hasData && snap.data != null) {
+                // GIFs: show a still first frame + play icon; they only
+                // animate in the fullscreen viewer.
+                if (attachment.isGif) {
+                  return _GifStillImage(
+                    bytes: snap.data!,
+                    cacheKey: attachment.sha256,
+                    filename: attachment.filename,
+                  );
+                }
                 return Image.memory(
                   snap.data!,
                   fit: BoxFit.fitWidth,
@@ -3505,6 +3515,119 @@ class _ThumbhashImageState extends State<_ThumbhashImage> {
           width: double.infinity,
         ),
       ),
+    );
+  }
+}
+
+// Still first frame of a GIF with a centered play icon; the animation only
+// plays in the fullscreen viewer. Non-animated GIFs render without the icon.
+class _GifStillImage extends StatefulWidget {
+  final Uint8List bytes;
+  final String cacheKey; // sha256
+  final String filename;
+
+  const _GifStillImage({
+    required this.bytes,
+    required this.cacheKey,
+    required this.filename,
+  });
+
+  @override
+  State<_GifStillImage> createState() => _GifStillImageState();
+}
+
+class _GifStillImageState extends State<_GifStillImage> {
+  // One first frame kept alive per gif (sha256) — small, avoids re-decoding
+  // while scrolling. Not disposed: shared across cards.
+  static final Map<String, ui.Image> _frameCache = {};
+  static final Set<String> _animatedKeys = {};
+
+  ui.Image? _frame;
+  bool _animated = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final cached = _frameCache[widget.cacheKey];
+    if (cached != null) {
+      _frame = cached;
+      _animated = _animatedKeys.contains(widget.cacheKey);
+      return;
+    }
+    try {
+      final codec = await ui.instantiateImageCodec(widget.bytes);
+      final animated = codec.frameCount > 1;
+      final frame = await codec.getNextFrame();
+      codec.dispose();
+      _frameCache[widget.cacheKey] = frame.image;
+      if (animated) _animatedKeys.add(widget.cacheKey);
+      if (!mounted) return;
+      setState(() {
+        _frame = frame.image;
+        _animated = animated;
+      });
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final frame = _frame;
+    if (frame == null) {
+      return const AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Semantics(
+          label: widget.filename,
+          image: true,
+          child: AspectRatio(
+            aspectRatio: frame.width / frame.height,
+            child: RawImage(
+              image: frame,
+              fit: BoxFit.fitWidth,
+              width: double.infinity,
+            ),
+          ),
+        ),
+        if (_animated) ...[
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.45),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.play_arrow, color: Colors.white, size: 36),
+          ),
+          Positioned(
+            top: 16,
+            left: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.9),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'GIF',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
