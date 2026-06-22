@@ -2020,106 +2020,150 @@ class _ImageEditorScreenState extends State<_ImageEditorScreen> {
     _controller.crop();
   }
 
+  void _cancel() {
+    if (_busy) return;
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        leading: Semantics(
-          label: 'Cancel editing',
-          button: true,
-          child: IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: _busy ? null : () => Navigator.of(context).pop(),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): _cancel,
+        const SingleActivator(LogicalKeyboardKey.enter, meta: true): _apply,
+        const SingleActivator(LogicalKeyboardKey.enter, control: true): _apply,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            automaticallyImplyLeading: false,
+            title: const Text('Edit image', style: TextStyle(fontSize: 18)),
+            actions: [
+              Semantics(
+                label: 'Cancel editing',
+                button: true,
+                child: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
           ),
-        ),
-        title: const Text('Edit image', style: TextStyle(fontSize: 18)),
-        actions: [
-          if (_busy)
-            const Padding(
-              padding: EdgeInsets.only(right: 20),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
+          body: Column(
+            children: [
+              Expanded(
+                child: Crop(
+                  key: ValueKey(_revision),
+                  controller: _controller,
+                  image: _current,
+                  baseColor: Colors.black,
+                  maskColor: Colors.black.withValues(alpha: 0.6),
+                  cornerDotBuilder: (size, _) =>
+                      const DotControl(color: Colors.white),
+                  progressIndicator: const CircularProgressIndicator(
                     valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                   ),
+                  onCropped: (result) {
+                    if (!mounted) return;
+                    switch (result) {
+                      case CropSuccess(:final croppedImage):
+                        Navigator.of(context).pop(croppedImage);
+                      case CropFailure():
+                        setState(() => _busy = false);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Could not crop the image')),
+                        );
+                    }
+                  },
                 ),
               ),
-            )
-          else
-            Semantics(
-              label: 'Apply changes',
-              button: true,
-              child: IconButton(
-                icon: const Icon(Icons.check),
-                onPressed: _apply,
-              ),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Crop(
-              key: ValueKey(_revision),
-              controller: _controller,
-              image: _current,
-              baseColor: Colors.black,
-              maskColor: Colors.black.withValues(alpha: 0.6),
-              cornerDotBuilder: (size, _) =>
-                  const DotControl(color: Colors.white),
-              progressIndicator: const CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
-              onCropped: (result) {
-                if (!mounted) return;
-                switch (result) {
-                  case CropSuccess(:final croppedImage):
-                    Navigator.of(context).pop(croppedImage);
-                  case CropFailure():
-                    setState(() => _busy = false);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Could not crop the image')),
-                    );
-                }
-              },
-            ),
-          ),
-          Container(
-            color: Colors.black,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Semantics(
-                  label: 'Rotate left',
-                  button: true,
-                  child: IconButton(
-                    icon: const Icon(Icons.rotate_left, color: Colors.white),
-                    iconSize: 30,
-                    onPressed: _busy ? null : () => _rotate(-1),
+              Container(
+                color: Colors.black,
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Semantics(
+                              label: 'Rotate left',
+                              button: true,
+                              child: IconButton(
+                                icon: const Icon(Icons.rotate_left,
+                                    color: Colors.white),
+                                iconSize: 30,
+                                onPressed: _busy ? null : () => _rotate(-1),
+                              ),
+                            ),
+                            const SizedBox(width: 40),
+                            Semantics(
+                              label: 'Rotate right',
+                              button: true,
+                              child: IconButton(
+                                icon: const Icon(Icons.rotate_right,
+                                    color: Colors.white),
+                                iconSize: 30,
+                                onPressed: _busy ? null : () => _rotate(1),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Semantics(
+                          label: _busy ? 'Saving image' : 'Save image',
+                          button: true,
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: accent,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor:
+                                    accent.withValues(alpha: 0.5),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              onPressed: _busy ? null : _apply,
+                              child: _busy
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                                Colors.white),
+                                      ),
+                                    )
+                                  : const Text('Save',
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w600)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(width: 40),
-                Semantics(
-                  label: 'Rotate right',
-                  button: true,
-                  child: IconButton(
-                    icon: const Icon(Icons.rotate_right, color: Colors.white),
-                    iconSize: 30,
-                    onPressed: _busy ? null : () => _rotate(1),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
