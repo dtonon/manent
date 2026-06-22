@@ -1997,6 +1997,9 @@ class _ImageEditorScreen extends StatefulWidget {
 class _ImageEditorScreenState extends State<_ImageEditorScreen> {
   final CropController _controller = CropController();
   late Uint8List _current = widget.bytes;
+  // Bumped on each rotate to force Crop to re-init with the rotated bytes,
+  // since it renders widget.image directly and only parses on first init.
+  int _revision = 0;
   bool _busy = false;
 
   Future<void> _rotate(int quarterTurns) async {
@@ -2004,9 +2007,11 @@ class _ImageEditorScreenState extends State<_ImageEditorScreen> {
     setState(() => _busy = true);
     final rotated = await compute(_rotateJpeg, (_current, quarterTurns));
     if (!mounted) return;
-    _current = rotated;
-    _controller.image = rotated;
-    setState(() => _busy = false);
+    setState(() {
+      _current = rotated;
+      _revision++;
+      _busy = false;
+    });
   }
 
   void _apply() {
@@ -2062,8 +2067,9 @@ class _ImageEditorScreenState extends State<_ImageEditorScreen> {
         children: [
           Expanded(
             child: Crop(
+              key: ValueKey(_revision),
               controller: _controller,
-              image: widget.bytes,
+              image: _current,
               baseColor: Colors.black,
               maskColor: Colors.black.withValues(alpha: 0.6),
               cornerDotBuilder: (size, _) =>
