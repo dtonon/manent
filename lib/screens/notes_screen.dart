@@ -507,8 +507,23 @@ class _NotesScreenState extends State<NotesScreen> {
     await _handleImagePicked(bytes, xfile.name, mimeType);
   }
 
+  // Raster image that can be resized/cropped — excludes GIFs, whose animation
+  // would be flattened by the (first-frame-only) resize and crop pipelines.
+  static bool _isResizableImage(String mimeType) =>
+      rasterImageMimeTypes.contains(mimeType) && mimeType != 'image/gif';
+
   Future<void> _handleImagePicked(
       Uint8List bytes, String name, String mimeType) async {
+    // GIFs are sent as-is to preserve the animation — no resize, no crop
+    if (mimeType == 'image/gif') {
+      setState(() {
+        _originalImageBytes = null;
+        _presetBytes = null;
+        _currentPreset = ImageResizePreset.original;
+        _pendingFile = (bytes: bytes, name: name, mimeType: mimeType);
+      });
+      return;
+    }
     // Show the image immediately
     setState(() {
       _originalImageBytes = bytes;
@@ -1704,8 +1719,7 @@ class _NotesScreenState extends State<NotesScreen> {
                           const SizedBox(width: 10),
                         ],
                         Expanded(
-                          child: rasterImageMimeTypes
-                                  .contains(_pendingFile!.mimeType)
+                          child: _isResizableImage(_pendingFile!.mimeType)
                               ? GestureDetector(
                                   onTap: _presetBytes != null
                                       ? _showImageSizeModal
@@ -1747,8 +1761,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                         ),
-                        if (rasterImageMimeTypes
-                            .contains(_pendingFile!.mimeType)) ...[
+                        if (_isResizableImage(_pendingFile!.mimeType)) ...[
                           const SizedBox(width: 20),
                           Semantics(
                             label: 'Edit image',
@@ -1763,8 +1776,7 @@ class _NotesScreenState extends State<NotesScreen> {
                             ),
                           ),
                         ],
-                        if (rasterImageMimeTypes
-                                .contains(_pendingFile!.mimeType) &&
+                        if (_isResizableImage(_pendingFile!.mimeType) &&
                             () {
                               final pb = _presetBytes;
                               if (pb == null ||
