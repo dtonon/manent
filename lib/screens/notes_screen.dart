@@ -40,75 +40,6 @@ import '../widgets/inline_web_video.dart';
 import '../widgets/manent_app_bar.dart';
 import '../widgets/video_player_screen.dart';
 
-// Signals a pending pixel correction to apply during the next layout pass,
-// before the viewport paints. Used when toggling reverse mode so the visual
-// position is preserved with no frame flash.
-//
-// toBottom   → correctPixels(0)             (switching to reverse:true)
-// reversePixels != null → correctPixels(maxScrollExtent - reversePixels)
-//                                           (switching to reverse:false;
-//                                            reversePixels is pixels at switch time)
-class _ScrollSwitchFlag {
-  bool toBottom = false;
-  double? reversePixels; // non-null when switching to forward mode
-}
-
-class _BottomAnchorScrollPosition extends ScrollPositionWithSingleContext {
-  final _ScrollSwitchFlag flag;
-
-  _BottomAnchorScrollPosition({
-    required this.flag,
-    required super.physics,
-    required super.context,
-    super.initialPixels,
-    super.keepScrollOffset,
-    super.oldPosition,
-    super.debugLabel,
-  });
-
-  @override
-  bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
-    final rp = flag.reversePixels;
-    if (rp != null) {
-      flag.reversePixels = null;
-      final target = (maxScrollExtent - rp).clamp(0.0, maxScrollExtent);
-      if ((pixels - target).abs() > 1.0) {
-        correctPixels(target);
-        super.applyContentDimensions(minScrollExtent, maxScrollExtent);
-        return false;
-      }
-    } else if (flag.toBottom) {
-      flag.toBottom = false;
-      if (pixels != 0.0) {
-        correctPixels(0.0);
-        super.applyContentDimensions(minScrollExtent, maxScrollExtent);
-        return false;
-      }
-    }
-    return super.applyContentDimensions(minScrollExtent, maxScrollExtent);
-  }
-}
-
-class _BottomAnchorScrollController extends ScrollController {
-  final _ScrollSwitchFlag flag;
-
-  _BottomAnchorScrollController({required this.flag});
-
-  @override
-  ScrollPosition createScrollPosition(ScrollPhysics physics,
-      ScrollContext context, ScrollPosition? oldPosition) {
-    return _BottomAnchorScrollPosition(
-      flag: flag,
-      physics: physics,
-      context: context,
-      initialPixels: initialScrollOffset,
-      keepScrollOffset: keepScrollOffset,
-      oldPosition: oldPosition,
-      debugLabel: debugLabel,
-    );
-  }
-}
-
 enum ImageResizePreset { small, medium, large, original }
 
 extension _ImageResizePresetExt on ImageResizePreset {
@@ -144,15 +75,15 @@ class NotesScreen extends StatefulWidget {
 
 class _NotesScreenState extends State<NotesScreen> {
   final TextEditingController _textController = TextEditingController();
-  final _scrollSwitchFlag = _ScrollSwitchFlag();
-  late final _BottomAnchorScrollController _scrollController =
-      _BottomAnchorScrollController(flag: _scrollSwitchFlag);
+  final ScrollController _scrollController = ScrollController();
   final FocusNode _inputFocusNode = FocusNode();
   bool _sending = false;
-  // true  → reverse:true list (at bottom; new notes appear automatically)
-  // false → reverse:false list (scrolled up; new notes append without shifting)
+  // The list is always reverse:true (newest at index 0 = visual bottom). This
+  // tracks whether the user is currently near the bottom (pixels ≈ 0), used to
+  // pin new notes and toggle the scroll-to-bottom button.
   bool _atBottom = true;
   bool _showScrollToBottom = false;
+  static const _bottomThreshold = 50.0;
   String? _newestNoteId;
   DateTime _lastInteractionTime = DateTime.now();
   StreamSubscription? _sharingMediaSub;
@@ -339,8 +270,9 @@ class _NotesScreenState extends State<NotesScreen> {
     if (!newestChanged) return;
 
     if (_atBottom) {
-      // reverse:true — new note at index 0 is already at the visual bottom.
-      // Nothing to do.
+      // Near the bottom — snap fully to the newest note so it's visible.
+      // reverse:true keeps the offset stable, so a small nudge to 0 is enough.
+      _jumpToBottom();
       return;
     }
 
@@ -348,13 +280,20 @@ class _NotesScreenState extends State<NotesScreen> {
         DateTime.now().difference(_lastInteractionTime).inSeconds >= 30;
 
     if (inactive) {
-      _scrollSwitchFlag.toBottom = true;
+      _jumpToBottom();
       setState(() {
         _atBottom = true;
         _showScrollToBottom = false;
       });
     } else {
       setState(() => _showScrollToBottom = true);
+    }
+  }
+
+  void _jumpToBottom() {
+    if (!_scrollController.hasClients) return;
+    if (_scrollController.position.pixels != 0.0) {
+      _scrollController.jumpTo(0.0);
     }
   }
 
@@ -397,7 +336,13 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   void _scrollToBottom() {
-    _scrollSwitchFlag.toBottom = true;
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0.0,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    }
     setState(() {
       _atBottom = true;
       _showScrollToBottom = false;
@@ -1455,22 +1400,16 @@ class _NotesScreenState extends State<NotesScreen> {
                                       onNotification: (n) {
                                         if (n is ScrollUpdateNotification) {
                                           _lastInteractionTime = DateTime.now();
-                                          final pos = n.metrics;
-                                          if (_atBottom && pos.pixels > 50) {
-                                            // User scrolled up — switch to forward mode.
-                                            final rp = pos.pixels;
-                                            _scrollSwitchFlag.reversePixels =
-                                                rp;
-                                            setState(() => _atBottom = false);
-                                          } else if (!_atBottom &&
-                                              pos.maxScrollExtent -
-                                                      pos.pixels <=
-                                                  50) {
-                                            // User reached the bottom — switch back.
-                                            _scrollSwitchFlag.toBottom = true;
+                                          // reverse:true — pixels ≈ 0 is the
+                                          // bottom (newest). Toggle the
+                                          // scroll-to-bottom button as the user
+                                          // moves away from / back to it.
+                                          final atBottom = n.metrics.pixels <=
+                                              _bottomThreshold;
+                                          if (atBottom != _atBottom) {
                                             setState(() {
-                                              _atBottom = true;
-                                              _showScrollToBottom = false;
+                                              _atBottom = atBottom;
+                                              _showScrollToBottom = !atBottom;
                                             });
                                           }
                                         }
@@ -1478,7 +1417,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                       },
                                       child: ListView(
                                         controller: _scrollController,
-                                        reverse: _atBottom,
+                                        reverse: true,
                                         padding: const EdgeInsets.all(16),
                                         children: _buildNoteItems(notes,
                                             loadingOlder: isLoadingOlder),
@@ -1532,9 +1471,8 @@ class _NotesScreenState extends State<NotesScreen> {
       {bool loadingOlder = false}) {
     if (notes.isEmpty) return [];
 
-    // Always build oldest-first. In reverse:true mode (atBottom) we flip the
-    // list so index 0 = newest = visual bottom. In reverse:false mode the list
-    // is used as-is: oldest at top, newest at bottom (highest index).
+    // Build oldest-first, then flip: the list is always reverse:true, so
+    // index 0 = newest = visual bottom, and older notes run toward the top.
     final items = <Widget>[];
 
     final loadingWidget = loadingOlder
@@ -1571,21 +1509,14 @@ class _NotesScreenState extends State<NotesScreen> {
       currentDate = noteDate;
     }
 
-    if (_atBottom) {
-      // reverse:true — flip so newest (last) lands at index 0 (visual bottom).
-      final out = items.reversed.toList();
-      if (loadingWidget != null) {
-        out.add(const SizedBox(height: 12));
-        out.add(loadingWidget);
-      }
-      return out;
-    } else {
-      // reverse:false — normal order; loading indicator goes at the top.
-      if (loadingWidget != null) {
-        items.insertAll(0, [loadingWidget, const SizedBox(height: 12)]);
-      }
-      return items;
+    // Flip so newest (last) lands at index 0 (visual bottom). Older notes are
+    // at high indices (top), so the "loading older" indicator goes at the end.
+    final out = items.reversed.toList();
+    if (loadingWidget != null) {
+      out.add(const SizedBox(height: 12));
+      out.add(loadingWidget);
     }
+    return out;
   }
 
   String _formatDate(DateTime dt) {
