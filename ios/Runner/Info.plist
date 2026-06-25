@@ -3,7 +3,9 @@
 <plist version="1.0">
 	<dict>
 		<key>NSCameraUsageDescription</key>
-		<string>Used to take photos to attach to your notes</string>
+		<string>Used to take photos and record videos to attach to your notes</string>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Used to record audio when capturing videos for your notes</string>
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>

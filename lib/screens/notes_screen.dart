@@ -455,6 +455,22 @@ class _NotesScreenState extends State<NotesScreen> {
     await _handleImagePicked(bytes, xfile.name, mimeType);
   }
 
+  // Long-press the camera icon records a video via the native camera app,
+  // keeping all its settings (zoom, HDR…). Videos skip the image pipeline.
+  Future<void> _recordVideo() async {
+    _inputFocusNode.unfocus();
+    final xfile = await ImagePicker().pickVideo(source: ImageSource.camera);
+    if (xfile == null) return;
+    final bytes = await xfile.readAsBytes();
+    if (!mounted) return;
+    final mimeType = lookupMimeType(xfile.name) ?? 'video/mp4';
+    setState(() {
+      _pendingFile = (bytes: bytes, name: xfile.name, mimeType: mimeType);
+      _originalImageBytes = null;
+      _presetBytes = null;
+    });
+  }
+
   // Raster image that can be resized/cropped — excludes GIFs, whose animation
   // would be flattened by the (first-frame-only) resize and crop pipelines.
   static bool _isResizableImage(String mimeType) =>
@@ -1847,10 +1863,11 @@ class _NotesScreenState extends State<NotesScreen> {
                                 children: [
                                   if (!_NoteCardState._isDesktopOrWeb) ...[
                                     Semantics(
-                                      label: 'Take photo',
+                                      label: 'Take photo, long press to record video',
                                       button: true,
                                       child: GestureDetector(
                                         onTap: _takePhoto,
+                                        onLongPress: _recordVideo,
                                         child: Padding(
                                           padding:
                                               const EdgeInsets.only(right: 20),
