@@ -28,6 +28,9 @@ class GifPlayer extends StatefulWidget {
   final String semanticLabel;
   final double minScale;
   final double maxScale;
+  // Inline: sized to the frame's aspect ratio, no zoom, starts paused with a
+  // centre play button (for embedding in a card). Off: full-screen viewer.
+  final bool inline;
 
   const GifPlayer({
     super.key,
@@ -35,6 +38,7 @@ class GifPlayer extends StatefulWidget {
     required this.semanticLabel,
     this.minScale = 0.5,
     this.maxScale = 10.0,
+    this.inline = false,
   });
 
   @override
@@ -45,7 +49,7 @@ class _GifPlayerState extends State<GifPlayer> {
   final _transformController = TransformationController();
   List<_Frame>? _frames;
   int _index = 0;
-  bool _playing = true;
+  late bool _playing = !widget.inline;
   Timer? _timer;
 
   @override
@@ -74,7 +78,8 @@ class _GifPlayerState extends State<GifPlayer> {
         return;
       }
       setState(() => _frames = frames);
-      if (frames.length > 1) _scheduleNext();
+      // Full-screen autoplays; inline waits for the play button.
+      if (!widget.inline && frames.length > 1) _scheduleNext();
     } catch (_) {
       if (mounted) setState(() => _frames = []);
     }
@@ -123,11 +128,15 @@ class _GifPlayerState extends State<GifPlayer> {
   Widget build(BuildContext context) {
     final frames = _frames;
     if (frames == null) {
-      return const Center(
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
-        ),
-      );
+      return widget.inline
+          ? const AspectRatio(
+              aspectRatio: 16 / 9,
+              child: ColoredBox(color: Color(0xFF1A1A1A)))
+          : const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
+              ),
+            );
     }
     if (frames.isEmpty) {
       // Decode failed — fall back to Flutter's own decoder
@@ -136,6 +145,51 @@ class _GifPlayerState extends State<GifPlayer> {
           widget.bytes,
           fit: BoxFit.contain,
           semanticLabel: widget.semanticLabel,
+        ),
+      );
+    }
+
+    final frame = frames[_index];
+
+    if (widget.inline) {
+      return AspectRatio(
+        aspectRatio: frame.image.width / frame.image.height,
+        child: GestureDetector(
+          onTap: frames.length > 1 ? _togglePlay : null,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Semantics(
+                label: widget.semanticLabel,
+                image: true,
+                child: RawImage(image: frame.image, fit: BoxFit.cover),
+              ),
+              if (frames.length > 1 && !_playing)
+                Center(
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Semantics(
+                      label: 'Play',
+                      button: true,
+                      child: const Icon(Icons.play_arrow,
+                          color: Colors.white, size: 36),
+                    ),
+                  ),
+                ),
+              if (frames.length > 1 && _playing)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _controls(frames.length),
+                ),
+            ],
+          ),
         ),
       );
     }
@@ -152,7 +206,7 @@ class _GifPlayerState extends State<GifPlayer> {
                 label: widget.semanticLabel,
                 image: true,
                 child: RawImage(
-                  image: frames[_index].image,
+                  image: frame.image,
                   fit: BoxFit.contain,
                 ),
               ),

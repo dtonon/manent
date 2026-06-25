@@ -10,3 +10,10 @@ Future<void> downloadOnWeb(String filename, Uint8List bytes) async {
     ..click();
   html.Url.revokeObjectUrl(url);
 }
+
+Future<void> openBytesInBrowser(Uint8List bytes, String mimeType) async {
+  final blob = html.Blob([bytes], mimeType);
+  final url = html.Url.createObjectUrlFromBlob(blob);
+  html.window.open(url, '_blank');
+  // The tab holds the object URL; don't revoke immediately or it won't load
+}

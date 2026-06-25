@@ -26,6 +26,7 @@ import 'screens/login_screen.dart';
 import 'screens/notes_screen.dart';
 import 'theme.dart';
 import 'widgets/gif_player.dart';
+import 'widgets/video_player_screen.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -36,6 +37,7 @@ void main(List<String> args) async {
     final argument = jsonDecode(controller.arguments) as Map<String, dynamic>;
     final filePath = argument['path'] as String;
     final filename = argument['filename'] as String;
+    final mimeType = (argument['mimeType'] as String?) ?? '';
     const options = WindowOptions(
       size: Size(900, 700),
       center: true,
@@ -46,7 +48,8 @@ void main(List<String> args) async {
       await windowManager.show();
       await windowManager.focus();
     });
-    runApp(_ImageViewerApp(filePath: filePath, filename: filename));
+    runApp(_ImageViewerApp(
+        filePath: filePath, filename: filename, mimeType: mimeType));
     return;
   }
 
@@ -311,8 +314,13 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
 class _ImageViewerApp extends StatefulWidget {
   final String filePath;
   final String filename;
+  final String mimeType;
 
-  const _ImageViewerApp({required this.filePath, required this.filename});
+  const _ImageViewerApp({
+    required this.filePath,
+    required this.filename,
+    required this.mimeType,
+  });
 
   @override
   State<_ImageViewerApp> createState() => _ImageViewerAppState();
@@ -321,13 +329,17 @@ class _ImageViewerApp extends StatefulWidget {
 class _ImageViewerAppState extends State<_ImageViewerApp> {
   Uint8List? _bytes;
   late String _filename;
+  String _filePath = '';
+  bool _isVideo = false;
   final _transformController = TransformationController();
 
   @override
   void initState() {
     super.initState();
     _filename = widget.filename;
-    _load(widget.filePath);
+    _filePath = widget.filePath;
+    _isVideo = widget.mimeType.startsWith('video/');
+    if (!_isVideo) _load(widget.filePath);
     _setupMethodHandler();
   }
 
@@ -337,6 +349,7 @@ class _ImageViewerAppState extends State<_ImageViewerApp> {
     super.dispose();
   }
 
+  // Images/GIFs only — video plays straight from the file path.
   Future<void> _load(String path) async {
     final b = await File(path).readAsBytes();
     if (mounted) {
@@ -351,11 +364,21 @@ class _ImageViewerAppState extends State<_ImageViewerApp> {
       if (call.method == 'loadImage') {
         final data =
             jsonDecode(call.arguments as String) as Map<String, dynamic>;
-        if (mounted) setState(() => _filename = data['filename'] as String);
-        await windowManager.setTitle(data['filename'] as String);
+        final filename = data['filename'] as String;
+        final path = data['path'] as String;
+        final isVideo = ((data['mimeType'] as String?) ?? '').startsWith('video/');
+        await windowManager.setTitle(filename);
         await windowManager.show();
         await windowManager.focus();
-        _load(data['path'] as String);
+        if (mounted) {
+          setState(() {
+            _filename = filename;
+            _filePath = path;
+            _isVideo = isVideo;
+            _bytes = null;
+          });
+        }
+        if (!isVideo) _load(path);
       }
     });
   }
@@ -377,7 +400,9 @@ class _ImageViewerAppState extends State<_ImageViewerApp> {
         },
         child: Scaffold(
           backgroundColor: Colors.black,
-          body: _bytes == null
+          body: _isVideo
+              ? VideoPlayerView(key: ValueKey(_filePath), file: File(_filePath))
+              : _bytes == null
               ? const Center(child: CircularProgressIndicator())
               : isGifBytes(_bytes!)
                   ? GifPlayer(

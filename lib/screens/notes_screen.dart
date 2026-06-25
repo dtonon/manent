@@ -25,6 +25,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../utils/web_download.dart';
 import '../utils/web_image_resize.dart';
+import '../utils/video_thumb.dart';
 
 import 'package:ndk/ndk.dart';
 
@@ -35,7 +36,9 @@ import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
 import '../theme.dart';
 import '../widgets/gif_player.dart';
+import '../widgets/inline_web_video.dart';
 import '../widgets/manent_app_bar.dart';
+import '../widgets/video_player_screen.dart';
 
 // Signals a pending pixel correction to apply during the next layout pass,
 // before the viewport paints. Used when toggling reverse mode so the visual
@@ -2183,6 +2186,102 @@ class _ImageEditorScreenState extends State<_ImageEditorScreen> {
   }
 }
 
+// Real first-frame thumbnail for a video, generated natively (or via canvas
+// on web) from the decrypted bytes and cached by sha256. Falls back to a plain
+// dark box while loading or where extraction isn't available (e.g. no ffmpeg).
+class _VideoThumbnail extends StatefulWidget {
+  final NoteAttachment attachment;
+  const _VideoThumbnail({required this.attachment});
+
+  @override
+  State<_VideoThumbnail> createState() => _VideoThumbnailState();
+}
+
+class _VideoThumbnailState extends State<_VideoThumbnail> {
+  // sha256 -> thumbnail bytes (null = generated but none available)
+  static final Map<String, Uint8List?> _cache = {};
+
+  Uint8List? _thumb;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final key = widget.attachment.sha256;
+    if (_cache.containsKey(key)) {
+      _thumb = _cache[key];
+      return;
+    }
+    final bytes = await NoteCache.instance.getFileBytes(widget.attachment);
+    if (bytes == null) return;
+    final thumb = await generateVideoThumbnail(bytes, widget.attachment.filename);
+    _cache[key] = thumb;
+    if (!mounted) return;
+    setState(() => _thumb = thumb);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final thumb = _thumb;
+    if (thumb != null) {
+      return Image.memory(
+        thumb,
+        fit: BoxFit.fitWidth,
+        width: double.infinity,
+        semanticLabel: widget.attachment.filename,
+      );
+    }
+    return const AspectRatio(
+      aspectRatio: 16 / 9,
+      child: ColoredBox(color: Color(0xFF1A1A1A)),
+    );
+  }
+}
+
+// Web only: fetches the decrypted bytes then plays them inline via a native
+// <video> element. Non-web builds never construct this.
+class _WebVideoInline extends StatefulWidget {
+  final NoteAttachment attachment;
+  const _WebVideoInline({required this.attachment});
+
+  @override
+  State<_WebVideoInline> createState() => _WebVideoInlineState();
+}
+
+class _WebVideoInlineState extends State<_WebVideoInline> {
+  Uint8List? _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final b = await NoteCache.instance.getFileBytes(widget.attachment);
+    if (mounted) setState(() => _bytes = b);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = _bytes;
+    if (b == null) {
+      return const ColoredBox(
+        color: Color(0xFF1A1A1A),
+        child: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
+          ),
+        ),
+      );
+    }
+    return InlineWebVideo(bytes: b, mimeType: widget.attachment.mimeType);
+  }
+}
+
 // Dashed rounded-square border for the drag & drop overlay
 class _DashedBorderPainter extends CustomPainter {
   final Color color;
@@ -2698,6 +2797,13 @@ class _NoteCardState extends State<_NoteCard>
             widget.note.kind == NoteKind.file && widget.note.error == null;
         final isFileImage =
             isFileNote && widget.note.attachment?.isImage == true;
+        final isFileVideo =
+            isFileNote && widget.note.attachment?.isVideo == true;
+        final isFileGif =
+            isFileNote && widget.note.attachment?.isGif == true;
+        // On web, GIFs/videos play inline in the card — the outer tap just
+        // opens the context menu (the inline player handles its own controls).
+        final isWebInlineMedia = kIsWeb && (isFileVideo || isFileGif);
 
         if (isActiveSelection) {
           // All null — SelectableText handles everything
@@ -2714,8 +2820,16 @@ class _NoteCardState extends State<_NoteCard>
           if (!_isDesktopOrWeb) {
             onTapDown = (d) =>
                 _tapPosition = _toOverlayLocal(context, d.globalPosition);
-            if (isFileImage) {
+            if (isWebInlineMedia) {
+              onTap = _showContextMenu;
+            } else if (isFileImage) {
               onTap = () => _openImageViewer(context);
+              onLongPressStart = (d) {
+                _tapPosition = _toOverlayLocal(context, d.globalPosition);
+                _showContextMenu();
+              };
+            } else if (isFileVideo) {
+              onTap = () => _openVideo(context);
               onLongPressStart = (d) {
                 _tapPosition = _toOverlayLocal(context, d.globalPosition);
                 _showContextMenu();
@@ -2727,16 +2841,20 @@ class _NoteCardState extends State<_NoteCard>
           if (_isDesktopOrWeb) {
             // File notes (non-image): left-click saves the file directly
             final isFileNonImage = isFileNote && !isFileImage;
-            onTap = isFileNonImage
-                ? () => _saveFile()
-                : isFileImage
-                    ? () => _openImageViewer(context)
-                    : () {
-                        _desktopSelectedContent = null;
-                        _capturedSelectionOnRightClick = null;
-                        _selectionAreaKey.currentState?.selectableRegion
-                            .clearSelection();
-                      };
+            onTap = isWebInlineMedia
+                ? _showContextMenu
+                : isFileVideo
+                ? () => _openVideo(context)
+                : isFileNonImage
+                    ? () => _saveFile()
+                    : isFileImage
+                        ? () => _openImageViewer(context)
+                        : () {
+                            _desktopSelectedContent = null;
+                            _capturedSelectionOnRightClick = null;
+                            _selectionAreaKey.currentState?.selectableRegion
+                                .clearSelection();
+                          };
             onSecondaryTapDown = (d) {
               _tapPosition = _toOverlayLocal(context, d.globalPosition);
               // Capture before SelectionArea word-selects on right-click
@@ -2755,8 +2873,8 @@ class _NoteCardState extends State<_NoteCard>
           onSecondaryTapDown: onSecondaryTapDown,
           onLongPressStart: onLongPressStart,
           child: Container(
-            // Image file notes use zero padding — the image fills the card
-            padding: isFileImage
+            // Image/video notes use zero padding — the preview fills the card
+            padding: (isFileImage || isFileVideo)
                 ? EdgeInsets.zero
                 : const EdgeInsets.fromLTRB(16, 16, 16, 8),
             decoration: BoxDecoration(
@@ -2773,44 +2891,106 @@ class _NoteCardState extends State<_NoteCard>
     return core;
   }
 
+  // Platforms with an in-app video_player; others open the video externally
+  static bool get _videoPlayable =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS ||
+          defaultTargetPlatform == TargetPlatform.macOS);
+
+  void _openVideo(BuildContext context) {
+    final attachment = widget.note.attachment;
+    if (attachment == null) return;
+    // Native desktop opens a separate window (macOS has an in-app player);
+    // mobile plays in-app; Windows/Linux/web open externally.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
+      _openMediaInDesktopWindow(attachment);
+    } else if (_videoPlayable) {
+      _openVideoPlayer(context);
+    } else {
+      _openVideoExternally();
+    }
+  }
+
+  Future<void> _openVideoPlayer(BuildContext context) async {
+    final attachment = widget.note.attachment;
+    if (attachment == null) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (!mounted) return;
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierColor: Colors.black,
+        pageBuilder: (ctx, _, __) => VideoPlayerScreen(
+          bytesFuture: NoteCache.instance.getFileBytes(attachment),
+          filename: attachment.filename,
+        ),
+        transitionDuration: const Duration(milliseconds: 200),
+      ),
+    );
+  }
+
+  // Windows/Linux/web: no in-app player — open the video in the OS/browser
+  Future<void> _openVideoExternally() async {
+    final attachment = widget.note.attachment;
+    if (attachment == null) return;
+    final bytes = await NoteCache.instance.getFileBytes(attachment);
+    if (bytes == null) return;
+    if (kIsWeb) {
+      await openBytesInBrowser(bytes, attachment.mimeType);
+      return;
+    }
+    final file =
+        File('${Directory.systemTemp.path}/manent_${attachment.filename}');
+    await file.writeAsBytes(bytes);
+    await launchUrl(Uri.file(file.path));
+  }
+
+  // Native desktop: write decrypted bytes to a temp file, open in a separate
+  // window (reused across clicks). Handles images, GIFs and video.
+  Future<void> _openMediaInDesktopWindow(NoteAttachment attachment) async {
+    final bytes = await NoteCache.instance.getFileBytes(attachment);
+    if (bytes == null) return;
+    final file =
+        File('${Directory.systemTemp.path}/manent_${attachment.filename}');
+    await file.writeAsBytes(bytes);
+    final args = jsonEncode({
+      'path': file.path,
+      'filename': attachment.filename,
+      'mimeType': attachment.mimeType,
+    });
+    final existing = _imageViewerWindow;
+    if (existing != null) {
+      try {
+        await existing.invokeMethod('loadImage', args);
+        return;
+      } catch (_) {
+        _imageViewerWindow = null;
+        _windowsChangedSub?.cancel();
+        _windowsChangedSub = null;
+      }
+    }
+    final controller = await WindowController.create(
+      WindowConfiguration(hiddenAtLaunch: true, arguments: args),
+    );
+    _imageViewerWindow = controller;
+    _windowsChangedSub = onWindowsChanged.listen((_) async {
+      final all = await WindowController.getAll();
+      if (_imageViewerWindow != null &&
+          !all.any((c) => c.windowId == _imageViewerWindow!.windowId)) {
+        _imageViewerWindow = null;
+        _windowsChangedSub?.cancel();
+        _windowsChangedSub = null;
+      }
+    });
+  }
+
   Future<void> _openImageViewer(BuildContext context) async {
     final attachment = widget.note.attachment;
     if (attachment == null) return;
 
-    // Native desktop: write decrypted bytes to a temp file, open in a new window.
-    // The window is reused across clicks to avoid cold-starting a new Flutter engine.
     if (!kIsWeb && _isDesktopOrWeb) {
-      final bytes = await NoteCache.instance.getFileBytes(attachment);
-      if (bytes == null) return;
-      final file =
-          File('${Directory.systemTemp.path}/manent_${attachment.filename}');
-      await file.writeAsBytes(bytes);
-      final args =
-          jsonEncode({'path': file.path, 'filename': attachment.filename});
-      final existing = _imageViewerWindow;
-      if (existing != null) {
-        try {
-          await existing.invokeMethod('loadImage', args);
-          return;
-        } catch (_) {
-          _imageViewerWindow = null;
-          _windowsChangedSub?.cancel();
-          _windowsChangedSub = null;
-        }
-      }
-      final controller = await WindowController.create(
-        WindowConfiguration(hiddenAtLaunch: true, arguments: args),
-      );
-      _imageViewerWindow = controller;
-      _windowsChangedSub = onWindowsChanged.listen((_) async {
-        final all = await WindowController.getAll();
-        if (_imageViewerWindow != null &&
-            !all.any((c) => c.windowId == _imageViewerWindow!.windowId)) {
-          _imageViewerWindow = null;
-          _windowsChangedSub?.cancel();
-          _windowsChangedSub = null;
-        }
-      });
+      await _openMediaInDesktopWindow(attachment);
       return;
     }
 
@@ -3092,7 +3272,134 @@ class _FileNoteContent extends StatelessWidget {
     if (attachment.isImage) {
       return _buildImageContent(attachment);
     }
+    if (attachment.isVideo) {
+      return _buildVideoContent(attachment);
+    }
     return _buildFileContent(attachment);
+  }
+
+  Widget _buildVideoContent(NoteAttachment attachment) {
+    Widget badge(Widget child) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.9),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: child,
+        );
+
+    // On web, play the video inline (native <video controls>); elsewhere show
+    // a tappable thumbnail that opens the player/window.
+    final Widget preview = kIsWeb
+        ? ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
+              child: _WebVideoInline(attachment: attachment),
+            ),
+          )
+        : ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Stack(
+              children: [
+                _VideoThumbnail(attachment: attachment),
+                Positioned.fill(
+                  child: Center(
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Semantics(
+                        label: 'Play video',
+                        button: true,
+                        child: const Icon(Icons.play_arrow,
+                            color: Colors.white, size: 36),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: badge(Text(
+                    attachment.formatBadge,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[700]),
+                  )),
+                ),
+                Positioned(
+                  bottom: 12,
+                  right: 12,
+                  child: badge(Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      buildSyncIcon(),
+                      const SizedBox(width: 4),
+                      Text(
+                        formatTime(note.createdAt),
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                    ],
+                  )),
+                ),
+                if (note.sensitive)
+                  Positioned(
+                    bottom: 12,
+                    left: 12,
+                    child: Semantics(
+                      label: 'Hide sensitive content',
+                      button: true,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: onHide,
+                        child: badge(Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.visibility_off_outlined,
+                                size: 12, color: Colors.grey[600]),
+                            const SizedBox(width: 4),
+                            Text('Hide',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.grey[600])),
+                          ],
+                        )),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        preview,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${attachment.filename} - ${_formatFileSize(attachment.size)}',
+                style: TextStyle(
+                    fontSize: 14, height: 1.3, color: Colors.grey[600]),
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (attachment.caption != null) ...[
+                const SizedBox(height: 6),
+                LinkedText(text: attachment.caption!),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   static final _showButtonStyle = ElevatedButton.styleFrom(
@@ -3271,9 +3578,16 @@ class _FileNoteContent extends StatelessWidget {
             future: imageBytesFuture,
             builder: (ctx, snap) {
               if (snap.hasData && snap.data != null) {
-                // GIFs: show a still first frame + play icon; they only
-                // animate in the fullscreen viewer.
+                // GIFs: on web play inline in the card (still → play → controls);
+                // elsewhere show a still + play icon that opens the viewer.
                 if (attachment.isGif) {
+                  if (kIsWeb) {
+                    return GifPlayer(
+                      bytes: snap.data!,
+                      semanticLabel: attachment.filename,
+                      inline: true,
+                    );
+                  }
                   return _GifStillImage(
                     bytes: snap.data!,
                     cacheKey: attachment.sha256,

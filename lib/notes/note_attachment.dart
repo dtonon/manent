@@ -38,6 +38,18 @@ class NoteAttachment {
   bool get isInline => data != null;
   bool get isImage => rasterImageMimeTypes.contains(mimeType);
   bool get isGif => mimeType == 'image/gif';
+  bool get isVideo => mimeType.startsWith('video/');
+
+  // Short uppercase label for badges, e.g. MP4 / MOV — from the extension,
+  // falling back to the mime subtype.
+  String get formatBadge {
+    final dot = filename.lastIndexOf('.');
+    if (dot != -1 && dot < filename.length - 1) {
+      return filename.substring(dot + 1).toUpperCase();
+    }
+    final slash = mimeType.indexOf('/');
+    return slash != -1 ? mimeType.substring(slash + 1).toUpperCase() : 'VIDEO';
+  }
 
   Map<String, dynamic> toJson() => {
         if (url != null) 'url': url,
