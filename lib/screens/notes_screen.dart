@@ -629,12 +629,24 @@ class _NotesScreenState extends State<NotesScreen> {
         ImageResizePreset.original => 0,
       };
 
+  // Largest pixel dimension read from the header, no full pixel decode
+  static Future<int> _maxDimension(Uint8List bytes) async {
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    final descriptor = await ui.ImageDescriptor.encoded(buffer);
+    final maxDim =
+        descriptor.width > descriptor.height ? descriptor.width : descriptor.height;
+    descriptor.dispose();
+    return maxDim;
+  }
+
   Future<Uint8List> _resizeOne(
       Uint8List bytes, ImageResizePreset preset) async {
     if (preset == ImageResizePreset.original) return bytes;
     final maxDim = _presetMaxDim(preset);
     if (kIsWeb) return resizeImageForWeb(bytes, maxDim);
     if (_useNativeResize) {
+      // Leave already-small images untouched, matching web/desktop paths
+      if (await _maxDimension(bytes) <= maxDim) return bytes;
       return await FlutterImageCompress.compressWithList(
         bytes,
         minWidth: maxDim,
@@ -660,15 +672,14 @@ class _NotesScreenState extends State<NotesScreen> {
       };
     }
     if (_useNativeResize) {
+      final maxOrig = await _maxDimension(bytes);
+      // Leave already-small images untouched, matching web/desktop paths
+      Future<Uint8List> resize(int maxDim) async => maxOrig <= maxDim
+          ? bytes
+          : FlutterImageCompress.compressWithList(bytes,
+              minWidth: maxDim, minHeight: maxDim, quality: 85);
       // Native threads run in parallel on multi-core CPUs
-      final results = await Future.wait([
-        FlutterImageCompress.compressWithList(bytes,
-            minWidth: 800, minHeight: 800, quality: 85),
-        FlutterImageCompress.compressWithList(bytes,
-            minWidth: 1440, minHeight: 1440, quality: 85),
-        FlutterImageCompress.compressWithList(bytes,
-            minWidth: 2500, minHeight: 2500, quality: 85),
-      ]);
+      final results = await Future.wait([resize(800), resize(1440), resize(2500)]);
       return {
         ImageResizePreset.small: results[0],
         ImageResizePreset.medium: results[1],
