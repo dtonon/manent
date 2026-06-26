@@ -99,6 +99,8 @@ class _NotesScreenState extends State<NotesScreen> {
   ImageResizePreset _currentPreset = ImageResizePreset.original;
   // Encoded bytes per preset, computed in background after image pick
   Map<ImageResizePreset, Uint8List>? _presetBytes;
+  // Guards against opening the crop editor twice on a rapid double-tap
+  bool _openingEditor = false;
 
   @override
   void initState() {
@@ -534,21 +536,31 @@ class _NotesScreenState extends State<NotesScreen> {
   // Open the full-screen crop/rotate editor on the full-quality original,
   // then re-run the resize pipeline on the edited (JPEG) result.
   Future<void> _editPendingImage() async {
+    if (_openingEditor) return;
     final file = _pendingFile;
     final original = _originalImageBytes;
     if (file == null || original == null) return;
-    // The editor only handles JPEG/PNG — normalize any source format to JPEG
-    final jpegInput = await compute(_encodeJpeg, original);
-    if (!mounted) return;
-    final edited = await Navigator.of(context).push<Uint8List>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => _ImageEditorScreen(bytes: jpegInput),
-      ),
-    );
-    if (edited == null || !mounted) return;
-    final name = _swapExtension(file.name, 'jpg');
-    await _handleImagePicked(edited, name, 'image/jpeg');
+    _openingEditor = true;
+    try {
+      // The editor handles JPEG/PNG natively — only re-encode other formats,
+      // so camera photos (already JPEG) open instantly without a decode pass
+      final mime = file.mimeType;
+      final editorInput = (mime == 'image/jpeg' || mime == 'image/png')
+          ? original
+          : await compute(_encodeJpeg, original);
+      if (!mounted) return;
+      final edited = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => _ImageEditorScreen(bytes: editorInput),
+        ),
+      );
+      if (edited == null || !mounted) return;
+      final name = _swapExtension(file.name, 'jpg');
+      await _handleImagePicked(edited, name, 'image/jpeg');
+    } finally {
+      _openingEditor = false;
+    }
   }
 
   static String _swapExtension(String name, String ext) {
