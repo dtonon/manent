@@ -3,7 +3,8 @@ import 'dart:html' as html;
 import 'dart:convert';
 import 'dart:typed_data';
 
-Future<Uint8List> resizeImageForWeb(Uint8List bytes, int maxDim) async {
+Future<Uint8List> resizeImageForWeb(Uint8List bytes, int maxDim,
+    {bool toJpeg = true}) async {
   final blob = html.Blob([bytes]);
   final url = html.Url.createObjectUrlFromBlob(blob);
   final img = html.ImageElement()..src = url;
@@ -21,6 +22,7 @@ Future<Uint8List> resizeImageForWeb(Uint8List bytes, int maxDim) async {
 
   final canvas = html.CanvasElement(width: tw, height: th);
   canvas.context2D.drawImageScaled(img, 0, 0, tw, th);
-  final dataUrl = canvas.toDataUrl('image/jpeg', 0.85);
+  final dataUrl =
+      canvas.toDataUrl(toJpeg ? 'image/jpeg' : 'image/png', 0.85);
   return base64Decode(dataUrl.split(',').last);
 }

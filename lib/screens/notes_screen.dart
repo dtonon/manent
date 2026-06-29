@@ -490,6 +490,17 @@ class _NotesScreenState extends State<NotesScreen> {
       });
       return;
     }
+    // Preserve the source format through resizing: JPEG stays JPEG, everything
+    // else becomes PNG (keeps transparency). Normalize exotic formats — webp,
+    // bmp — to PNG up front so every preset shares one format across platforms.
+    if (mimeType != 'image/jpeg' && mimeType != 'image/png') {
+      bytes = await compute(_encodePng, bytes);
+      if (!mounted) return;
+      name = _swapExtension(name, 'png');
+      mimeType = 'image/png';
+    }
+    final toJpeg = mimeType == 'image/jpeg';
+
     // Show the image immediately
     setState(() {
       _originalImageBytes = bytes;
@@ -511,7 +522,7 @@ class _NotesScreenState extends State<NotesScreen> {
           );
 
     // Compute target preset first — clears the spinner as soon as possible
-    final targetBytes = await _resizeOne(bytes, targetPreset);
+    final targetBytes = await _resizeOne(bytes, targetPreset, toJpeg: toJpeg);
     if (!mounted) return;
     setState(() {
       _currentPreset = targetPreset;
@@ -520,7 +531,7 @@ class _NotesScreenState extends State<NotesScreen> {
     });
 
     // Then compute remaining presets (needed only for the size modal)
-    final allBytes = await _resizeAll(bytes);
+    final allBytes = await _resizeAll(bytes, toJpeg: toJpeg);
     if (!mounted) return;
     setState(() => _presetBytes = allBytes);
 
@@ -569,7 +580,12 @@ class _NotesScreenState extends State<NotesScreen> {
     return '$base.$ext';
   }
 
-  static Map<ImageResizePreset, Uint8List> _computeAllPresets(Uint8List bytes) {
+  static Uint8List _encodeResized(img.Image im, bool toJpeg) => Uint8List.fromList(
+      toJpeg ? img.encodeJpg(im, quality: 85) : img.encodePng(im));
+
+  static Map<ImageResizePreset, Uint8List> _computeAllPresets(
+      (Uint8List, bool) args) {
+    final (bytes, toJpeg) = args;
     final decoded = img.decodeImage(bytes);
     if (decoded == null) {
       return {for (final p in ImageResizePreset.values) p: bytes};
@@ -584,7 +600,7 @@ class _NotesScreenState extends State<NotesScreen> {
         width: (decoded.width * scale).round(),
         height: (decoded.height * scale).round(),
       );
-      return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
+      return _encodeResized(resized, toJpeg);
     }
 
     return {
@@ -595,8 +611,8 @@ class _NotesScreenState extends State<NotesScreen> {
     };
   }
 
-  static Uint8List _computePreset((Uint8List, ImageResizePreset) args) {
-    final (bytes, preset) = args;
+  static Uint8List _computePreset((Uint8List, ImageResizePreset, bool) args) {
+    final (bytes, preset, toJpeg) = args;
     if (preset == ImageResizePreset.original) return bytes;
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return bytes;
@@ -615,7 +631,7 @@ class _NotesScreenState extends State<NotesScreen> {
       width: (decoded.width * scale).round(),
       height: (decoded.height * scale).round(),
     );
-    return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
+    return _encodeResized(resized, toJpeg);
   }
 
   // True on platforms with hardware-accelerated image compression
@@ -640,10 +656,11 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   Future<Uint8List> _resizeOne(
-      Uint8List bytes, ImageResizePreset preset) async {
+      Uint8List bytes, ImageResizePreset preset,
+      {required bool toJpeg}) async {
     if (preset == ImageResizePreset.original) return bytes;
     final maxDim = _presetMaxDim(preset);
-    if (kIsWeb) return resizeImageForWeb(bytes, maxDim);
+    if (kIsWeb) return resizeImageForWeb(bytes, maxDim, toJpeg: toJpeg);
     if (_useNativeResize) {
       // Leave already-small images untouched, matching web/desktop paths
       if (await _maxDimension(bytes) <= maxDim) return bytes;
@@ -652,17 +669,19 @@ class _NotesScreenState extends State<NotesScreen> {
         minWidth: maxDim,
         minHeight: maxDim,
         quality: 85,
+        format: toJpeg ? CompressFormat.jpeg : CompressFormat.png,
       );
     }
-    return compute(_computePreset, (bytes, preset));
+    return compute(_computePreset, (bytes, preset, toJpeg));
   }
 
-  Future<Map<ImageResizePreset, Uint8List>> _resizeAll(Uint8List bytes) async {
+  Future<Map<ImageResizePreset, Uint8List>> _resizeAll(Uint8List bytes,
+      {required bool toJpeg}) async {
     if (kIsWeb) {
       final results = await Future.wait([
-        resizeImageForWeb(bytes, 800),
-        resizeImageForWeb(bytes, 1440),
-        resizeImageForWeb(bytes, 2500),
+        resizeImageForWeb(bytes, 800, toJpeg: toJpeg),
+        resizeImageForWeb(bytes, 1440, toJpeg: toJpeg),
+        resizeImageForWeb(bytes, 2500, toJpeg: toJpeg),
       ]);
       return {
         ImageResizePreset.small: results[0],
@@ -673,11 +692,12 @@ class _NotesScreenState extends State<NotesScreen> {
     }
     if (_useNativeResize) {
       final maxOrig = await _maxDimension(bytes);
+      final format = toJpeg ? CompressFormat.jpeg : CompressFormat.png;
       // Leave already-small images untouched, matching web/desktop paths
       Future<Uint8List> resize(int maxDim) async => maxOrig <= maxDim
           ? bytes
           : FlutterImageCompress.compressWithList(bytes,
-              minWidth: maxDim, minHeight: maxDim, quality: 85);
+              minWidth: maxDim, minHeight: maxDim, quality: 85, format: format);
       // Native threads run in parallel on multi-core CPUs
       final results = await Future.wait([resize(800), resize(1440), resize(2500)]);
       return {
@@ -687,7 +707,7 @@ class _NotesScreenState extends State<NotesScreen> {
         ImageResizePreset.original: bytes,
       };
     }
-    return compute(_computeAllPresets, bytes);
+    return compute(_computeAllPresets, (bytes, toJpeg));
   }
 
   void _applyPreset(ImageResizePreset preset, {bool save = true}) {
@@ -1962,6 +1982,13 @@ Uint8List _encodeJpeg(Uint8List bytes) {
   final decoded = img.decodeImage(bytes);
   if (decoded == null) return bytes;
   return Uint8List.fromList(img.encodeJpg(decoded, quality: 95));
+}
+
+// Re-encode any decodable image to PNG, preserving transparency (via compute)
+Uint8List _encodePng(Uint8List bytes) {
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return bytes;
+  return Uint8List.fromList(img.encodePng(decoded));
 }
 
 // Rotate by 90° * quarterTurns, re-encoding to JPEG (runs via compute)
