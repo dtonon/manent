@@ -478,8 +478,8 @@ class _NotesScreenState extends State<NotesScreen> {
   static bool _isResizableImage(String mimeType) =>
       rasterImageMimeTypes.contains(mimeType) && mimeType != 'image/gif';
 
-  Future<void> _handleImagePicked(
-      Uint8List bytes, String name, String mimeType) async {
+  Future<void> _handleImagePicked(Uint8List bytes, String name, String mimeType,
+      {bool losslessBitmap = false}) async {
     // GIFs are sent as-is to preserve the animation — no resize, no crop
     if (mimeType == 'image/gif') {
       setState(() {
@@ -522,7 +522,8 @@ class _NotesScreenState extends State<NotesScreen> {
           );
 
     // Compute target preset first — clears the spinner as soon as possible
-    final targetBytes = await _resizeOne(bytes, targetPreset, toJpeg: toJpeg);
+    final targetBytes = await _resizeOne(bytes, targetPreset,
+        toJpeg: toJpeg, bitmapInput: losslessBitmap);
     if (!mounted) return;
     setState(() {
       _currentPreset = targetPreset;
@@ -531,7 +532,8 @@ class _NotesScreenState extends State<NotesScreen> {
     });
 
     // Then compute remaining presets (needed only for the size modal)
-    final allBytes = await _resizeAll(bytes, toJpeg: toJpeg);
+    final allBytes =
+        await _resizeAll(bytes, toJpeg: toJpeg, bitmapInput: losslessBitmap);
     if (!mounted) return;
     setState(() => _presetBytes = allBytes);
 
@@ -544,8 +546,9 @@ class _NotesScreenState extends State<NotesScreen> {
     }
   }
 
-  // Open the full-screen crop/rotate editor on the full-quality original,
-  // then re-run the resize pipeline on the edited (JPEG) result.
+  // Open the full-screen crop/rotate editor on the full-quality original.
+  // The editor is lossless (PNG output); the resize step below is the single
+  // compression pass, so we keep the source format instead of forcing JPEG.
   Future<void> _editPendingImage() async {
     if (_openingEditor) return;
     final file = _pendingFile;
@@ -553,22 +556,16 @@ class _NotesScreenState extends State<NotesScreen> {
     if (file == null || original == null) return;
     _openingEditor = true;
     try {
-      // The editor handles JPEG/PNG natively — only re-encode other formats,
-      // so camera photos (already JPEG) open instantly without a decode pass
-      final mime = file.mimeType;
-      final editorInput = (mime == 'image/jpeg' || mime == 'image/png')
-          ? original
-          : await compute(_encodeJpeg, original);
-      if (!mounted) return;
       final edited = await Navigator.of(context).push<Uint8List>(
         MaterialPageRoute(
           fullscreenDialog: true,
-          builder: (_) => _ImageEditorScreen(bytes: editorInput),
+          builder: (_) => _ImageEditorScreen(bytes: original),
         ),
       );
       if (edited == null || !mounted) return;
-      final name = _swapExtension(file.name, 'jpg');
-      await _handleImagePicked(edited, name, 'image/jpeg');
+      // Editor output is a lossless PNG bitmap; the resize step compresses once.
+      await _handleImagePicked(edited, file.name, file.mimeType,
+          losslessBitmap: true);
     } finally {
       _openingEditor = false;
     }
@@ -584,8 +581,8 @@ class _NotesScreenState extends State<NotesScreen> {
       toJpeg ? img.encodeJpg(im, quality: 85) : img.encodePng(im));
 
   static Map<ImageResizePreset, Uint8List> _computeAllPresets(
-      (Uint8List, bool) args) {
-    final (bytes, toJpeg) = args;
+      (Uint8List, bool, bool) args) {
+    final (bytes, toJpeg, bitmapInput) = args;
     final decoded = img.decodeImage(bytes);
     if (decoded == null) {
       return {for (final p in ImageResizePreset.values) p: bytes};
@@ -593,7 +590,10 @@ class _NotesScreenState extends State<NotesScreen> {
     Uint8List resize(int maxDim) {
       final maxOrig =
           decoded.width > decoded.height ? decoded.width : decoded.height;
-      if (maxOrig <= maxDim) return bytes;
+      // Lossless bitmap input always needs its single encode, even at full size
+      if (maxOrig <= maxDim) {
+        return bitmapInput ? _encodeResized(decoded, toJpeg) : bytes;
+      }
       final scale = maxDim / maxOrig;
       final resized = img.copyResize(
         decoded,
@@ -611,8 +611,9 @@ class _NotesScreenState extends State<NotesScreen> {
     };
   }
 
-  static Uint8List _computePreset((Uint8List, ImageResizePreset, bool) args) {
-    final (bytes, preset, toJpeg) = args;
+  static Uint8List _computePreset(
+      (Uint8List, ImageResizePreset, bool, bool) args) {
+    final (bytes, preset, toJpeg, bitmapInput) = args;
     if (preset == ImageResizePreset.original) return bytes;
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return bytes;
@@ -624,7 +625,10 @@ class _NotesScreenState extends State<NotesScreen> {
     };
     final maxOrig =
         decoded.width > decoded.height ? decoded.width : decoded.height;
-    if (maxOrig <= maxDim) return bytes;
+    // Lossless bitmap input always needs its single encode, even at full size
+    if (maxOrig <= maxDim) {
+      return bitmapInput ? _encodeResized(decoded, toJpeg) : bytes;
+    }
     final scale = maxDim / maxOrig;
     final resized = img.copyResize(
       decoded,
@@ -655,42 +659,57 @@ class _NotesScreenState extends State<NotesScreen> {
     return maxDim;
   }
 
+  // Encode the full-res edited bitmap once for the Original preset: JPEG at 80%
+  // (no downscale to justify a higher quality), or keep the lossless PNG as-is.
+  Future<Uint8List> _encodeOriginalBitmap(Uint8List bytes, bool toJpeg) async =>
+      toJpeg ? compute(_encodeJpegQuality, (bytes, 80)) : bytes;
+
   Future<Uint8List> _resizeOne(
       Uint8List bytes, ImageResizePreset preset,
-      {required bool toJpeg}) async {
-    if (preset == ImageResizePreset.original) return bytes;
-    final maxDim = _presetMaxDim(preset);
-    if (kIsWeb) return resizeImageForWeb(bytes, maxDim, toJpeg: toJpeg);
-    if (_useNativeResize) {
-      // Leave already-small images untouched, matching web/desktop paths
-      if (await _maxDimension(bytes) <= maxDim) return bytes;
-      return await FlutterImageCompress.compressWithList(
-        bytes,
-        minWidth: maxDim,
-        minHeight: maxDim,
-        quality: 85,
-        format: toJpeg ? CompressFormat.jpeg : CompressFormat.png,
-      );
+      {required bool toJpeg, bool bitmapInput = false}) async {
+    if (preset == ImageResizePreset.original) {
+      // Edited input is a lossless bitmap needing one encode; a picked file is
+      // already compressed, so pass it through untouched.
+      return bitmapInput ? _encodeOriginalBitmap(bytes, toJpeg) : bytes;
     }
-    return compute(_computePreset, (bytes, preset, toJpeg));
+    final maxDim = _presetMaxDim(preset);
+    // Lossless bitmap (edited) input routes through the image package, which
+    // always re-encodes; native/canvas short-circuits would leak raw PNG bytes.
+    if (!bitmapInput) {
+      if (kIsWeb) return resizeImageForWeb(bytes, maxDim, toJpeg: toJpeg);
+      if (_useNativeResize) {
+        // Leave already-small images untouched, matching web/desktop paths
+        if (await _maxDimension(bytes) <= maxDim) return bytes;
+        return await FlutterImageCompress.compressWithList(
+          bytes,
+          minWidth: maxDim,
+          minHeight: maxDim,
+          quality: 85,
+          format: toJpeg ? CompressFormat.jpeg : CompressFormat.png,
+        );
+      }
+    }
+    return compute(_computePreset, (bytes, preset, toJpeg, bitmapInput));
   }
 
   Future<Map<ImageResizePreset, Uint8List>> _resizeAll(Uint8List bytes,
-      {required bool toJpeg}) async {
-    if (kIsWeb) {
+      {required bool toJpeg, bool bitmapInput = false}) async {
+    final Map<ImageResizePreset, Uint8List> map;
+    // Lossless bitmap (edited) input routes through the image package, which
+    // always re-encodes; native/canvas short-circuits would leak raw PNG bytes.
+    if (kIsWeb && !bitmapInput) {
       final results = await Future.wait([
         resizeImageForWeb(bytes, 800, toJpeg: toJpeg),
         resizeImageForWeb(bytes, 1440, toJpeg: toJpeg),
         resizeImageForWeb(bytes, 2500, toJpeg: toJpeg),
       ]);
-      return {
+      map = {
         ImageResizePreset.small: results[0],
         ImageResizePreset.medium: results[1],
         ImageResizePreset.large: results[2],
         ImageResizePreset.original: bytes,
       };
-    }
-    if (_useNativeResize) {
+    } else if (_useNativeResize && !bitmapInput) {
       final maxOrig = await _maxDimension(bytes);
       final format = toJpeg ? CompressFormat.jpeg : CompressFormat.png;
       // Leave already-small images untouched, matching web/desktop paths
@@ -700,14 +719,21 @@ class _NotesScreenState extends State<NotesScreen> {
               minWidth: maxDim, minHeight: maxDim, quality: 85, format: format);
       // Native threads run in parallel on multi-core CPUs
       final results = await Future.wait([resize(800), resize(1440), resize(2500)]);
-      return {
+      map = {
         ImageResizePreset.small: results[0],
         ImageResizePreset.medium: results[1],
         ImageResizePreset.large: results[2],
         ImageResizePreset.original: bytes,
       };
+    } else {
+      map = await compute(_computeAllPresets, (bytes, toJpeg, bitmapInput));
     }
-    return compute(_computeAllPresets, (bytes, toJpeg));
+    // Edited input has no pristine file to keep — encode Original once too
+    if (bitmapInput) {
+      map[ImageResizePreset.original] =
+          await _encodeOriginalBitmap(bytes, toJpeg);
+    }
+    return map;
   }
 
   void _applyPreset(ImageResizePreset preset, {bool save = true}) {
@@ -1977,13 +2003,6 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 }
 
-// Re-encode any decodable image to JPEG (runs in an isolate via compute)
-Uint8List _encodeJpeg(Uint8List bytes) {
-  final decoded = img.decodeImage(bytes);
-  if (decoded == null) return bytes;
-  return Uint8List.fromList(img.encodeJpg(decoded, quality: 95));
-}
-
 // Re-encode any decodable image to PNG, preserving transparency (via compute)
 Uint8List _encodePng(Uint8List bytes) {
   final decoded = img.decodeImage(bytes);
@@ -1991,16 +2010,58 @@ Uint8List _encodePng(Uint8List bytes) {
   return Uint8List.fromList(img.encodePng(decoded));
 }
 
-// Rotate by 90° * quarterTurns, re-encoding to JPEG (runs via compute)
-Uint8List _rotateJpeg((Uint8List, int) args) {
+// Re-encode any decodable image to JPEG at the given quality (via compute)
+Uint8List _encodeJpegQuality((Uint8List, int) args) {
+  final (bytes, quality) = args;
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) return bytes;
+  return Uint8List.fromList(img.encodeJpg(decoded, quality: quality));
+}
+
+// Rotate by 90° * quarterTurns losslessly, re-encoding to PNG (runs via compute)
+Uint8List _rotateLossless((Uint8List, int) args) {
   final (bytes, quarterTurns) = args;
   final decoded = img.decodeImage(bytes);
   if (decoded == null) return bytes;
   final rotated = img.copyRotate(decoded, angle: 90 * quarterTurns);
-  return Uint8List.fromList(img.encodeJpg(rotated, quality: 95));
+  return Uint8List.fromList(img.encodePng(rotated));
 }
 
-// Full-screen crop & rotate editor; pops the edited JPEG bytes (or null)
+// Cropper that always emits lossless PNG regardless of the source format, so no
+// compression happens in the editor. Parsing still uses the real detected
+// format; only the encode is overridden. Tear-offs stay top-level to survive
+// crop_your_image's compute() isolate hop.
+class _PngCropper extends ImageCropper<img.Image> {
+  const _PngCropper();
+  @override
+  RectValidator<img.Image> get rectValidator => defaultRectValidator;
+  @override
+  RectCropper<img.Image> get rectCropper => _pngRectCropper;
+  @override
+  CircleCropper<img.Image> get circleCropper => _pngCircleCropper;
+}
+
+Uint8List _pngRectCropper(img.Image original,
+    {required Offset topLeft,
+    required Size size,
+    required ImageFormat? outputFormat}) {
+  return Uint8List.fromList(img.encodePng(img.copyCrop(
+    original,
+    x: topLeft.dx.toInt(),
+    y: topLeft.dy.toInt(),
+    width: size.width.toInt(),
+    height: size.height.toInt(),
+  )));
+}
+
+// Circle crop is never used (rectangular UI only), but the interface requires it
+Uint8List _pngCircleCropper(img.Image original,
+        {required Offset center,
+        required double radius,
+        required ImageFormat? outputFormat}) =>
+    throw UnsupportedError('circle crop is not used');
+
+// Full-screen crop & rotate editor; pops the edited lossless PNG bytes (or null)
 class _ImageEditorScreen extends StatefulWidget {
   final Uint8List bytes;
   const _ImageEditorScreen({required this.bytes});
@@ -2020,7 +2081,7 @@ class _ImageEditorScreenState extends State<_ImageEditorScreen> {
   Future<void> _rotate(int quarterTurns) async {
     if (_busy) return;
     setState(() => _busy = true);
-    final rotated = await compute(_rotateJpeg, (_current, quarterTurns));
+    final rotated = await compute(_rotateLossless, (_current, quarterTurns));
     if (!mounted) return;
     setState(() {
       _current = rotated;
@@ -2077,6 +2138,8 @@ class _ImageEditorScreenState extends State<_ImageEditorScreen> {
                   key: ValueKey(_revision),
                   controller: _controller,
                   image: _current,
+                  // Force lossless PNG output — compression happens once, later
+                  imageCropper: const _PngCropper(),
                   baseColor: Colors.black,
                   maskColor: Colors.black.withValues(alpha: 0.6),
                   cornerDotBuilder: (size, _) =>
