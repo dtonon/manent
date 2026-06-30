@@ -2134,32 +2134,63 @@ class _ImageEditorScreenState extends State<_ImageEditorScreen> {
           body: Column(
             children: [
               Expanded(
-                child: Crop(
-                  key: ValueKey(_revision),
-                  controller: _controller,
-                  image: _current,
-                  // Force lossless PNG output — compression happens once, later
-                  imageCropper: const _PngCropper(),
-                  baseColor: Colors.black,
-                  maskColor: Colors.black.withValues(alpha: 0.6),
-                  cornerDotBuilder: (size, _) =>
-                      const DotControl(color: Colors.white),
-                  progressIndicator: const CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                  onCropped: (result) {
-                    if (!mounted) return;
-                    switch (result) {
-                      case CropSuccess(:final croppedImage):
-                        Navigator.of(context).pop(croppedImage);
-                      case CropFailure():
-                        setState(() => _busy = false);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Could not crop the image')),
-                        );
-                    }
-                  },
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: Crop(
+                        key: ValueKey(_revision),
+                        controller: _controller,
+                        image: _current,
+                        // Force lossless PNG output — compression happens once, later
+                        imageCropper: const _PngCropper(),
+                        baseColor: Colors.black,
+                        maskColor: Colors.black.withValues(alpha: 0.6),
+                        cornerDotBuilder: (size, _) =>
+                            const DotControl(color: Colors.white),
+                        progressIndicator: const CircularProgressIndicator(
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                        onCropped: (result) {
+                          if (!mounted) return;
+                          switch (result) {
+                            case CropSuccess(:final croppedImage):
+                              Navigator.of(context).pop(croppedImage);
+                            case CropFailure():
+                              setState(() => _busy = false);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text('Could not crop the image')),
+                              );
+                          }
+                        },
+                      ),
+                    ),
+                    // While processing, hide the crop chrome but keep the image
+                    // visible (dimmed) so no stale selection rectangle shows
+                    if (_busy)
+                      Positioned.fill(
+                        child: Semantics(
+                          label: 'Processing image',
+                          child: ColoredBox(
+                            color: Colors.black,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Image.memory(_current, fit: BoxFit.contain),
+                                const ColoredBox(color: Color(0x66000000)),
+                                const Center(
+                                  child: CircularProgressIndicator(
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.white),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
               Container(
