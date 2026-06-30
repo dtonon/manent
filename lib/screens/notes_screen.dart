@@ -38,6 +38,7 @@ import '../theme.dart';
 import '../widgets/gif_player.dart';
 import '../widgets/inline_web_video.dart';
 import '../widgets/manent_app_bar.dart';
+import '../widgets/media_kit_video_screen.dart';
 import '../widgets/video_player_screen.dart';
 
 enum ImageResizePreset { small, medium, large, original }
@@ -2993,12 +2994,14 @@ class _NoteCardState extends State<_NoteCard>
   void _openVideo(BuildContext context) {
     final attachment = widget.note.attachment;
     if (attachment == null) return;
-    // Native desktop opens a separate window (macOS has an in-app player);
-    // mobile plays in-app; Windows/Linux/web open externally.
+    // macOS opens a separate native window; iOS/Android play in-app via
+    // video_player; Linux/Windows play in-app via media_kit; web opens inline.
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
       _openMediaInDesktopWindow(attachment);
     } else if (_videoPlayable) {
       _openVideoPlayer(context);
+    } else if (!kIsWeb) {
+      _openVideoInApp(context);
     } else {
       _openVideoExternally();
     }
@@ -3022,20 +3025,33 @@ class _NoteCardState extends State<_NoteCard>
     );
   }
 
-  // Windows/Linux/web: no in-app player — open the video in the OS/browser
+  // Linux/Windows: video_player has no desktop implementation, so play in-app
+  // with media_kit (libmpv-backed).
+  Future<void> _openVideoInApp(BuildContext context) async {
+    final attachment = widget.note.attachment;
+    if (attachment == null) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (!mounted) return;
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        opaque: false,
+        barrierColor: Colors.black,
+        pageBuilder: (ctx, _, __) => MediaKitVideoScreen(
+          bytesFuture: NoteCache.instance.getFileBytes(attachment),
+          filename: attachment.filename,
+        ),
+        transitionDuration: const Duration(milliseconds: 200),
+      ),
+    );
+  }
+
+  // Web: no in-app player on the outer tap path — open the video in the browser
   Future<void> _openVideoExternally() async {
     final attachment = widget.note.attachment;
     if (attachment == null) return;
     final bytes = await NoteCache.instance.getFileBytes(attachment);
     if (bytes == null) return;
-    if (kIsWeb) {
-      await openBytesInBrowser(bytes, attachment.mimeType);
-      return;
-    }
-    final file =
-        File('${Directory.systemTemp.path}/manent_${attachment.filename}');
-    await file.writeAsBytes(bytes);
-    await launchUrl(Uri.file(file.path));
+    await openBytesInBrowser(bytes, attachment.mimeType);
   }
 
   // Native desktop: write decrypted bytes to a temp file, open in a separate

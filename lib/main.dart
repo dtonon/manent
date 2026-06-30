@@ -5,6 +5,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:ndk/ndk.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:ndk/shared/nips/nip01/bip340.dart';
@@ -30,6 +31,7 @@ import 'widgets/video_player_screen.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
 
   if (args.firstOrNull == 'multi_window') {
     await windowManager.ensureInitialized();
@@ -326,7 +328,7 @@ class _ImageViewerApp extends StatefulWidget {
   State<_ImageViewerApp> createState() => _ImageViewerAppState();
 }
 
-class _ImageViewerAppState extends State<_ImageViewerApp> {
+class _ImageViewerAppState extends State<_ImageViewerApp> with WindowListener {
   Uint8List? _bytes;
   late String _filename;
   String _filePath = '';
@@ -340,13 +342,36 @@ class _ImageViewerAppState extends State<_ImageViewerApp> {
     _filePath = widget.filePath;
     _isVideo = widget.mimeType.startsWith('video/');
     if (!_isVideo) _load(widget.filePath);
+    // Window is reused across clicks: intercept close so we hide + stop the
+    // video instead of tearing down the engine.
+    windowManager.addListener(this);
+    windowManager.setPreventClose(true);
     _setupMethodHandler();
   }
 
   @override
   void dispose() {
+    windowManager.removeListener(this);
     _transformController.dispose();
     super.dispose();
+  }
+
+  @override
+  void onWindowClose() {
+    _hideAndStop();
+  }
+
+  // Hide the reusable window and unmount the player so its controller disposes
+  // (otherwise video/audio keeps playing while the window is hidden).
+  Future<void> _hideAndStop() async {
+    await windowManager.hide();
+    if (mounted) {
+      setState(() {
+        _isVideo = false;
+        _filePath = '';
+        _bytes = null;
+      });
+    }
   }
 
   // Images/GIFs only — video plays straight from the file path.
@@ -393,7 +418,7 @@ class _ImageViewerAppState extends State<_ImageViewerApp> {
         onKeyEvent: (_, event) {
           if (event is KeyDownEvent &&
               event.logicalKey == LogicalKeyboardKey.escape) {
-            windowManager.hide();
+            _hideAndStop();
             return KeyEventResult.handled;
           }
           return KeyEventResult.ignored;

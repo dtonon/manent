@@ -61,6 +61,9 @@ dependencies:
   receive_sharing_intent: ^1.4.6
   super_clipboard: ^0.9.1
   desktop_drop: ^0.7.1
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
 
 dev_dependencies:
   flutter_test:
