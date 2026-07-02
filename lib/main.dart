@@ -31,7 +31,11 @@ import 'widgets/video_player_screen.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
+  // media_kit is only used for in-app video on Linux; other platforms play via
+  // video_player, so we avoid bundling/initializing libmpv there.
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
+    MediaKit.ensureInitialized();
+  }
 
   if (args.firstOrNull == 'multi_window') {
     await windowManager.ensureInitialized();
