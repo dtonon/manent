@@ -29,7 +29,7 @@ build_android_bundle:
 build_linux:
     dart pub global activate flutter_distributor
     export PATH="$PATH":"$HOME/.pub-cache/bin"
-    flutter_distributor release --name linux --jobs release-linux-appimage
+    $HOME/.pub-cache/bin/flutter_distributor release --name linux --jobs release-linux-appimage
 
 build_web:
     flutter build web --release
