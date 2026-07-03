@@ -30,6 +30,10 @@ build_linux:
     dart pub global activate flutter_distributor
     export PATH="$PATH":"$HOME/.pub-cache/bin"
     $HOME/.pub-cache/bin/flutter_distributor release --name linux --jobs release-linux-appimage
+    # The AppImage maker bundles a mismatched mpv/ffmpeg stack that crashes
+    # libmpv on video playback; strip it so it uses the system libmpv.
+    # Runtime dependency: mpv-libs (Fedora) / libmpv2 (Debian/Ubuntu).
+    ./scripts/strip_bundled_mpv.sh
 
 build_web:
     flutter build web --release

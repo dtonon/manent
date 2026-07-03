@@ -42,3 +42,15 @@ final String deploymentTarget =
 Then add `'-mmacosx-version-min=$deploymentTarget'` to the clang args list, and delete `$(flutter sdk-path)/bin/cache/flutter_tools.snapshot` to force a rebuild of the Flutter tools.
 
 This patch is overwritten by `flutter upgrade` and must be reapplied until Flutter adds native Xcode 26 support.
+
+### Linux build (`just build_linux`)
+
+Building the Linux AppImage needs libmpv's headers and `appimagetool`:
+
+- **Fedora:** `sudo dnf install mpv-devel`
+- **Debian/Ubuntu:** `sudo apt install libmpv-dev`
+- **appimagetool:** download the [AppImage](https://github.com/AppImage/appimagetool/releases) and put it on your `PATH`.
+
+The `media_kit` video player links against libmpv. `flutter_distributor`'s AppImage maker bundles libmpv together with its entire ffmpeg stack, but on distros where ffmpeg is split across packages (e.g. Fedora's `ffmpeg-free` + RPM Fusion `libavcodec-freeworld`) it captures a mismatched mix of `libav*` libraries. That inconsistent set aborts inside libmpv on playback (`m_config_cache_from_shadow: Assertion 'group_index >= 0' failed`). `build_linux` therefore runs `scripts/strip_bundled_mpv.sh`, which removes the bundled media stack so the AppImage uses the system libmpv instead.
+
+**Runtime dependency:** because of the above, the AppImage requires libmpv to be installed on the target machine — `mpv-libs` (Fedora) or `libmpv2` (Debian/Ubuntu).
