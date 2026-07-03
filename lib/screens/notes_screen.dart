@@ -2994,9 +2994,11 @@ class _NoteCardState extends State<_NoteCard>
   void _openVideo(BuildContext context) {
     final attachment = widget.note.attachment;
     if (attachment == null) return;
-    // macOS opens a separate native window; iOS/Android play in-app via
-    // video_player; Linux/Windows play in-app via media_kit; web opens inline.
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS) {
+    // macOS/Linux open a separate native window; iOS/Android play in-app via
+    // video_player; Windows plays in-app via media_kit; web opens inline.
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.linux)) {
       _openMediaInDesktopWindow(attachment);
     } else if (_videoPlayable) {
       _openVideoPlayer(context);

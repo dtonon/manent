@@ -27,6 +27,7 @@ import 'screens/login_screen.dart';
 import 'screens/notes_screen.dart';
 import 'theme.dart';
 import 'widgets/gif_player.dart';
+import 'widgets/media_kit_video_screen.dart';
 import 'widgets/video_player_screen.dart';
 
 void main(List<String> args) async {
@@ -430,7 +431,12 @@ class _ImageViewerAppState extends State<_ImageViewerApp> with WindowListener {
         child: Scaffold(
           backgroundColor: Colors.black,
           body: _isVideo
-              ? VideoPlayerView(key: ValueKey(_filePath), file: File(_filePath))
+              // Linux has no video_player desktop backend; use media_kit there.
+              ? defaultTargetPlatform == TargetPlatform.linux
+                  ? MediaKitVideoView(
+                      key: ValueKey(_filePath), file: File(_filePath))
+                  : VideoPlayerView(
+                      key: ValueKey(_filePath), file: File(_filePath))
               : _bytes == null
               ? const Center(child: CircularProgressIndicator())
               : isGifBytes(_bytes!)

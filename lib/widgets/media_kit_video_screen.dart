@@ -5,6 +5,56 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+// Bare media_kit video view for a local file (Linux/Windows, where
+// video_player has no desktop implementation). Plays with media_kit's built-in
+// controls; the host provides the surrounding window chrome. The media_kit
+// equivalent of VideoPlayerView, used by the separate desktop media window.
+class MediaKitVideoView extends StatefulWidget {
+  final File file;
+
+  const MediaKitVideoView({super.key, required this.file});
+
+  @override
+  State<MediaKitVideoView> createState() => _MediaKitVideoViewState();
+}
+
+class _MediaKitVideoViewState extends State<MediaKitVideoView> {
+  late final Player _player = Player();
+  late final VideoController _controller = VideoController(_player);
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      await _player.open(Media(widget.file.path));
+      await _player.setPlaylistMode(PlaylistMode.loop);
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Could not play this video');
+    }
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return Center(
+        child: Text(_error!, style: const TextStyle(color: Colors.white70)),
+      );
+    }
+    return Video(controller: _controller);
+  }
+}
+
 // In-app video player for Linux/Windows (video_player has no desktop support).
 // Decrypts bytes → temp file → media_kit Video widget with built-in controls,
 // a close button and Esc-to-close. Matches VideoPlayerScreen's chrome.
