@@ -1468,6 +1468,63 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
+  // The bar docks at the bottom on mobile (thumb reach) and stays on top
+  // elsewhere, where a bottom bar is not the platform idiom.
+  bool get _useBottomBar =>
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.android;
+
+  Widget _buildAvatar() {
+    return Semantics(
+      label: 'Profile: ${widget.user.name}',
+      button: true,
+      child: GestureDetector(
+        onTap: _showProfileSheet,
+        child: CircleAvatar(
+          radius: 18,
+          backgroundImage: widget.user.avatarUrl != null
+              ? NetworkImage(widget.user.avatarUrl!)
+              : null,
+          backgroundColor: accent,
+          child: widget.user.avatarUrl == null
+              ? Text(
+                  widget.user.name.isNotEmpty
+                      ? widget.user.name[0].toUpperCase()
+                      : '?',
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                )
+              : null,
+        ),
+      ),
+    );
+  }
+
+  void _exitSelection() {
+    _NoteCardState._selectionModeId.value = null;
+    _inputFocusNode.unfocus();
+  }
+
+  Widget _buildBottomBar(bool inSelection) {
+    if (inSelection) {
+      return ManentBottomBar(
+        title: 'Selection mode',
+        compactTitle: true,
+        trailing: Semantics(
+          label: 'Exit selection mode',
+          button: true,
+          child: IconButton(
+            icon: Icon(Icons.close, color: context.mc.appBarTitle),
+            onPressed: _exitSelection,
+          ),
+        ),
+      );
+    }
+    return ManentBottomBar(
+      onTitleTap: _showAbout,
+      trailing: _buildAvatar(),
+    );
+  }
+
   AppBar _buildSelectionAppBar() {
     // Background and elevation come from appBarTheme
     return AppBar(
@@ -1503,7 +1560,7 @@ class _NotesScreenState extends State<NotesScreen> {
       valueListenable: _NoteCardState._selectionModeId,
       builder: (context, selectionId, _) {
         final inSelection = selectionId != null;
-        return _wrapWithDropRegion(PopScope(
+        final content = _wrapWithDropRegion(PopScope(
           canPop: !inSelection && _editingNoteId == null,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) {
@@ -1517,47 +1574,28 @@ class _NotesScreenState extends State<NotesScreen> {
           },
           child: Scaffold(
             backgroundColor: context.mc.surface,
-            appBar: inSelection
-                ? _buildSelectionAppBar()
-                : manentAppBar(
-                    onTitleTap: _showAbout,
-                    actions: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 20),
-                        child: Semantics(
-                          label: 'Profile: ${widget.user.name}',
-                          button: true,
-                          child: GestureDetector(
-                            onTap: _showProfileSheet,
-                            child: CircleAvatar(
-                              radius: 18,
-                              backgroundImage: widget.user.avatarUrl != null
-                                  ? NetworkImage(widget.user.avatarUrl!)
-                                  : null,
-                              backgroundColor: accent,
-                              child: widget.user.avatarUrl == null
-                                  ? Text(
-                                      widget.user.name.isNotEmpty
-                                          ? widget.user.name[0].toUpperCase()
-                                          : '?',
-                                      style: const TextStyle(
-                                          color: Colors.white, fontSize: 14),
-                                    )
-                                  : null,
-                            ),
+            appBar: _useBottomBar
+                ? null
+                : inSelection
+                    ? _buildSelectionAppBar()
+                    : manentAppBar(
+                        onTitleTap: _showAbout,
+                        actions: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 20),
+                            child: _buildAvatar(),
                           ),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-            body: GestureDetector(
+            bottomNavigationBar:
+                _useBottomBar ? _buildBottomBar(inSelection) : null,
+            body: SafeArea(
+              // With no top bar the list would otherwise run under the status bar
+              top: _useBottomBar,
+              bottom: false,
+              child: GestureDetector(
               behavior: HitTestBehavior.translucent,
-              onTap: inSelection
-                  ? () {
-                      _NoteCardState._selectionModeId.value = null;
-                      _inputFocusNode.unfocus();
-                    }
-                  : null,
+              onTap: inSelection ? _exitSelection : null,
               child: Column(
                 children: [
                   Expanded(
@@ -1658,8 +1696,22 @@ class _NotesScreenState extends State<NotesScreen> {
                 ],
               ),
             ),
+            ),
           ),
         ));
+        if (!_useBottomBar) return content;
+        // No top bar means no appBarTheme.systemOverlayStyle — the status bar
+        // now sits over `surface`, so drive its icons off the theme brightness.
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness:
+                isDark ? Brightness.light : Brightness.dark,
+            statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+          ),
+          child: content,
+        );
       },
     );
   }
@@ -1754,9 +1806,9 @@ class _NotesScreenState extends State<NotesScreen> {
 
   Widget _buildInputBar(BuildContext context) {
     final mc = context.mc;
-    final isMobile = defaultTargetPlatform == TargetPlatform.iOS ||
-        defaultTargetPlatform == TargetPlatform.android;
-    final bottomInset = isMobile ? MediaQuery.of(context).padding.bottom : 0.0;
+    // When the bar is docked at the bottom it owns the safe-area inset
+    final bottomInset =
+        _useBottomBar ? 0.0 : MediaQuery.of(context).padding.bottom;
     final maxHeight = MediaQuery.of(context).size.height * 0.5;
     final isEditing = _editingNoteId != null;
     final hasPendingFile = _pendingFile != null;
