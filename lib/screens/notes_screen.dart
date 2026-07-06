@@ -21,7 +21,9 @@ import 'package:flutter/rendering.dart' show SelectedContent;
 import 'package:flutter/services.dart';
 import 'package:thumbhash/thumbhash.dart' hide Image;
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../utils/web_download.dart';
 import '../utils/web_image_resize.dart';
@@ -34,6 +36,9 @@ import '../auth/relay_constants.dart';
 import '../notes/note.dart';
 import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
+import '../search/note_filter.dart';
+import '../search/note_search.dart';
+import '../search/search_ui.dart';
 import '../theme.dart';
 import '../widgets/gif_player.dart';
 import '../widgets/inline_web_video.dart';
@@ -103,11 +108,15 @@ class _NotesScreenState extends State<NotesScreen> {
   Map<ImageResizePreset, Uint8List>? _presetBytes;
   // Guards against opening the crop editor twice on a rapid double-tap
   bool _openingEditor = false;
+  // How much the search panel grew / moved the window, to undo on close
+  double _panelWindowGrowth = 0;
+  double _panelWindowShift = 0;
 
   @override
   void initState() {
     super.initState();
     NoteCache.instance.notifier.addListener(_onNotesChanged);
+    NoteSearch.instance.open.addListener(_onSearchOpenChanged);
     _textController.addListener(() => _lastInteractionTime = DateTime.now());
     NoteCache.instance.promptFallbackRelays
         .addListener(_onFallbackRelaysPrompt);
@@ -146,6 +155,22 @@ class _NotesScreenState extends State<NotesScreen> {
   bool _onHardwareKey(KeyEvent event) {
     if (!mounted) return false;
     if (event is! KeyDownEvent) return false;
+    if (event.logicalKey == LogicalKeyboardKey.keyF &&
+        (HardwareKeyboard.instance.isMetaPressed ||
+            HardwareKeyboard.instance.isControlPressed)) {
+      if (!NoteSearch.instance.open.value) {
+        _inputFocusNode.unfocus();
+        NoteSearch.instance.openSearch();
+      } else {
+        NoteSearch.instance.queryFocus.requestFocus();
+      }
+      return true;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape &&
+        NoteSearch.instance.open.value) {
+      NoteSearch.instance.close();
+      return true;
+    }
     // Paste from clipboard — works even when the input is unfocused, but not
     // while editing (there the paste is a plain text edit).
     if (event.logicalKey == LogicalKeyboardKey.keyV &&
@@ -1504,6 +1529,126 @@ class _NotesScreenState extends State<NotesScreen> {
     _inputFocusNode.unfocus();
   }
 
+  // The lens lives opposite the profile in both bars
+  Widget _buildSearchButton() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: NoteSearch.instance.open,
+      builder: (context, open, _) {
+        return Semantics(
+          label: open ? 'Close search' : 'Search notes',
+          button: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleSearch,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: open ? Colors.white24 : Colors.transparent,
+              ),
+              child: Icon(Icons.search, color: context.mc.appBarTitle),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Opening the panel widens the window instead of narrowing the list. It grows
+  // to the right when there is room, otherwise leftward with its distance from
+  // the right edge preserved. If the display can't fit the wider window at all,
+  // the panel shares the width instead (the half-width clamp in build()).
+  bool get _canResizeWindowForPanel => !kIsWeb && !_useBottomBar;
+
+  void _onSearchOpenChanged() {
+    if (!_canResizeWindowForPanel) return;
+    if (NoteSearch.instance.open.value) {
+      _growWindowForPanel();
+    } else {
+      _shrinkWindowAfterPanel();
+    }
+  }
+
+  Future<Display> _displayForWindow(Rect bounds) async {
+    final displays = await screenRetriever.getAllDisplays();
+    final center = bounds.center;
+    for (final d in displays) {
+      final pos = d.visiblePosition ?? Offset.zero;
+      final size = d.visibleSize ?? d.size;
+      if (center.dx >= pos.dx &&
+          center.dx < pos.dx + size.width &&
+          center.dy >= pos.dy &&
+          center.dy < pos.dy + size.height) {
+        return d;
+      }
+    }
+    return screenRetriever.getPrimaryDisplay();
+  }
+
+  Future<void> _growWindowForPanel() async {
+    try {
+      if (await windowManager.isMaximized() ||
+          await windowManager.isFullScreen()) {
+        return;
+      }
+      final bounds = await windowManager.getBounds();
+      final display = await _displayForWindow(bounds);
+      final origin = display.visiblePosition ?? Offset.zero;
+      final area = display.visibleSize ?? display.size;
+      final targetWidth = bounds.width + searchPanelWidth;
+      // Not enough room even flush against the left edge — keep the window put
+      if (targetWidth > area.width) return;
+
+      var left = bounds.left;
+      final screenRight = origin.dx + area.width;
+      if (left + targetWidth > screenRight) {
+        // Not enough room on the right: grow leftward instead, keeping the gap
+        // the window already had from the right edge rather than going flush.
+        final rightGap = screenRight - (bounds.left + bounds.width);
+        left = screenRight - (rightGap < 0 ? 0 : rightGap) - targetWidth;
+        if (left < origin.dx) left = origin.dx;
+      }
+
+      _panelWindowShift = bounds.left - left;
+      _panelWindowGrowth = searchPanelWidth;
+      await windowManager.setBounds(
+        Rect.fromLTWH(left, bounds.top, targetWidth, bounds.height),
+      );
+    } catch (_) {
+      _panelWindowShift = 0;
+      _panelWindowGrowth = 0;
+    }
+  }
+
+  Future<void> _shrinkWindowAfterPanel() async {
+    if (_panelWindowGrowth == 0) return;
+    final growth = _panelWindowGrowth;
+    final shift = _panelWindowShift;
+    _panelWindowGrowth = 0;
+    _panelWindowShift = 0;
+    try {
+      final bounds = await windowManager.getBounds();
+      // Derive from current bounds, not a snapshot, so a manual resize while
+      // the panel was open is preserved.
+      final width = bounds.width - growth;
+      if (width < 320) return;
+      await windowManager.setBounds(
+        Rect.fromLTWH(bounds.left + shift, bounds.top, width, bounds.height),
+      );
+    } catch (_) {}
+  }
+
+  void _toggleSearch() {
+    final search = NoteSearch.instance;
+    if (search.open.value) {
+      search.close();
+    } else {
+      _inputFocusNode.unfocus();
+      search.openSearch();
+    }
+  }
+
   Widget _buildBottomBar(bool inSelection) {
     if (inSelection) {
       return ManentBottomBar(
@@ -1521,6 +1666,7 @@ class _NotesScreenState extends State<NotesScreen> {
     }
     return ManentBottomBar(
       onTitleTap: _showAbout,
+      leading: _buildSearchButton(),
       trailing: _buildAvatar(),
     );
   }
@@ -1560,12 +1706,17 @@ class _NotesScreenState extends State<NotesScreen> {
       valueListenable: _NoteCardState._selectionModeId,
       builder: (context, selectionId, _) {
         final inSelection = selectionId != null;
+        return ValueListenableBuilder<bool>(
+          valueListenable: NoteSearch.instance.open,
+          builder: (context, searchOpen, _) {
         final content = _wrapWithDropRegion(PopScope(
-          canPop: !inSelection && _editingNoteId == null,
+          canPop: !inSelection && _editingNoteId == null && !searchOpen,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) {
               if (_editingNoteId != null) {
                 _cancelEdit();
+              } else if (NoteSearch.instance.open.value) {
+                NoteSearch.instance.close();
               } else {
                 _NoteCardState._selectionModeId.value = null;
                 _inputFocusNode.unfocus();
@@ -1580,10 +1731,11 @@ class _NotesScreenState extends State<NotesScreen> {
                     ? _buildSelectionAppBar()
                     : manentAppBar(
                         onTitleTap: _showAbout,
+                        leading: Center(child: _buildAvatar()),
                         actions: [
                           Padding(
-                            padding: const EdgeInsets.only(right: 20),
-                            child: _buildAvatar(),
+                            padding: const EdgeInsets.only(right: 12),
+                            child: _buildSearchButton(),
                           ),
                         ],
                       ),
@@ -1593,10 +1745,22 @@ class _NotesScreenState extends State<NotesScreen> {
               // With no top bar the list would otherwise run under the status bar
               top: _useBottomBar,
               bottom: false,
-              child: GestureDetector(
+              child: LayoutBuilder(builder: (context, constraints) {
+                // Desktop always gets the panel — the window width is the
+                // user's choice, so never swap the layout under them. On a very
+                // narrow window the panel gives way rather than eat the list.
+                final useSidePanel = !_useBottomBar;
+                final halfWidth = constraints.maxWidth / 2;
+                final panelWidth = halfWidth < searchPanelWidth
+                    ? halfWidth
+                    : searchPanelWidth;
+                return GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: inSelection ? _exitSelection : null,
-              child: Column(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
                 children: [
                   Expanded(
                     child: ValueListenableBuilder<bool>(
@@ -1618,11 +1782,18 @@ class _NotesScreenState extends State<NotesScreen> {
                           builder: (context, isLoadingOlder, _) {
                             return ValueListenableBuilder<List<DecryptedNote>>(
                               valueListenable: NoteCache.instance.notifier,
-                              builder: (context, notes, _) {
+                              builder: (context, allNotes, _) {
+                                return ValueListenableBuilder<NoteFilter>(
+                                  valueListenable: NoteSearch.instance.filter,
+                                  builder: (context, activeFilter, _) {
+                                final notes =
+                                    filterNotes(allNotes, activeFilter);
                                 if (notes.isEmpty) {
                                   return Center(
                                     child: Text(
-                                      'No notes yet',
+                                      allNotes.isEmpty
+                                          ? 'No notes yet'
+                                          : 'No matching notes',
                                       style: TextStyle(
                                           color: context.mc.secondaryText,
                                           fontSize: 14),
@@ -1685,6 +1856,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                       ),
                                   ],
                                 );
+                                  },
+                                );
                               },
                             );
                           },
@@ -1692,10 +1865,29 @@ class _NotesScreenState extends State<NotesScreen> {
                       },
                     ),
                   ),
-                  _buildInputBar(context),
+                  // The search field takes the composer's slot rather than
+                  // stacking below it — only one text field is ever focusable.
+                  if (searchOpen && !useSidePanel)
+                    ValueListenableBuilder<List<DecryptedNote>>(
+                      valueListenable: NoteCache.instance.notifier,
+                      builder: (context, allNotes, _) =>
+                          InlineSearchBar(allNotes: allNotes),
+                    )
+                  else
+                    _buildInputBar(context),
                 ],
               ),
-            ),
+                  ),
+                  if (searchOpen && useSidePanel)
+                    ValueListenableBuilder<List<DecryptedNote>>(
+                      valueListenable: NoteCache.instance.notifier,
+                      builder: (context, allNotes, _) =>
+                          SearchSidePanel(allNotes: allNotes, width: panelWidth),
+                    ),
+                ],
+              ),
+            );
+              }),
             ),
           ),
         ));
@@ -1711,6 +1903,8 @@ class _NotesScreenState extends State<NotesScreen> {
             statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
           ),
           child: content,
+        );
+          },
         );
       },
     );
@@ -2180,6 +2374,7 @@ class _NotesScreenState extends State<NotesScreen> {
     if (kIsWeb) BrowserContextMenu.enableContextMenu();
     _NoteCardState._selectionModeId.value = null;
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
+    NoteSearch.instance.open.removeListener(_onSearchOpenChanged);
     NoteCache.instance.promptFallbackRelays
         .removeListener(_onFallbackRelaysPrompt);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);

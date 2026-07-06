@@ -2,10 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
-AppBar manentAppBar({List<Widget>? actions, VoidCallback? onTitleTap}) {
+AppBar manentAppBar({
+  List<Widget>? actions,
+  VoidCallback? onTitleTap,
+  Widget? leading,
+}) {
   // Background, elevation and status bar style come from appBarTheme
   return AppBar(
     automaticallyImplyLeading: false,
+    leading: leading,
     centerTitle: true,
     title: GestureDetector(
       onTap: onTitleTap,

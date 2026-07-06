@@ -25,6 +25,8 @@ import 'notes/note_cache.dart';
 import 'notes/notes_database.dart';
 import 'screens/login_screen.dart';
 import 'screens/notes_screen.dart';
+import 'search/note_search.dart';
+import 'search/search_ui.dart';
 import 'theme.dart';
 import 'widgets/gif_player.dart';
 import 'widgets/media_kit_video_screen.dart';
@@ -58,6 +60,11 @@ void main(List<String> args) async {
     runApp(_ImageViewerApp(
         filePath: filePath, filename: filename, mimeType: mimeType));
     return;
+  }
+
+  // Needed by the notes screen to grow the window when the search panel opens
+  if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+    await windowManager.ensureInitialized();
   }
 
   NostrClient().init();
@@ -251,6 +258,7 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
   }
 
   Future<void> _onLogout() async {
+    NoteSearch.instance.close();
     await NoteCache.instance.clear();
     SignerSession.clear();
     NostrClient().ndk.accounts.logout();
@@ -281,12 +289,22 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
           final gutter = Theme.of(context).brightness == Brightness.dark
               ? const Color(0xFF0A0A0A)
               : const Color(0xFFAAAAAA);
+          final inner = result;
           result = ColoredBox(
             color: gutter,
             child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 800),
-                child: result,
+              // The search panel grows into the gutter rather than squeezing
+              // the notes column, so nothing reflows when it opens.
+              child: ValueListenableBuilder<bool>(
+                valueListenable: NoteSearch.instance.open,
+                builder: (context, searchOpen, child) => ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth:
+                        searchOpen && !isMobile ? 800 + searchPanelWidth : 800,
+                  ),
+                  child: child,
+                ),
+                child: inner,
               ),
             ),
           );
