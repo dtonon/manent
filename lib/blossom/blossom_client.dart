@@ -43,7 +43,7 @@ class BlossomClient {
     required String sha256,
     required EventSigner signer,
   }) async {
-    final uri = Uri.parse('$server/upload');
+    final uri = _upgradeScheme(Uri.parse('$server/upload'));
     try {
       final expiration =
           (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 3600;
@@ -93,7 +93,7 @@ class BlossomClient {
     required String sha256,
     required EventSigner signer,
   }) async {
-    final uri = Uri.parse('$server/$sha256');
+    final uri = _upgradeScheme(Uri.parse('$server/$sha256'));
     try {
       final expiration =
           (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 3600;
@@ -125,13 +125,31 @@ class BlossomClient {
   static Future<Uint8List?> download(String url) async {
     try {
       final response = await http
-          .get(Uri.parse(url))
+          .get(_upgradeScheme(Uri.parse(url)))
           .timeout(const Duration(seconds: 60));
       if (response.statusCode == 200) return response.bodyBytes;
       return null;
     } catch (_) {
       return null;
     }
+  }
+
+  // Upgrades http→https for public hosts. A Blossom server reachable over http
+  // typically redirects to https, and the browser refuses to follow a redirect
+  // on a CORS preflight, so we request https up front. Local/LAN hosts (which
+  // may be http-only) are left untouched.
+  static Uri _upgradeScheme(Uri uri) {
+    if (uri.scheme != 'http') return uri;
+    final host = uri.host;
+    final isLocal = host == 'localhost' ||
+        host == '127.0.0.1' ||
+        host == '::1' ||
+        host.endsWith('.local') ||
+        host.startsWith('192.168.') ||
+        host.startsWith('10.') ||
+        host.startsWith('172.16.');
+    if (isLocal) return uri;
+    return uri.replace(scheme: 'https');
   }
 }
 
