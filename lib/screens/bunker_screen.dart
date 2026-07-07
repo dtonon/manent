@@ -14,6 +14,7 @@ import '../auth/signer_session.dart';
 import '../auth/signer_store.dart';
 import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
+import '../widgets/middle_click_paste.dart';
 
 class BunkerScreen extends StatefulWidget {
   final Future<void> Function(AuthUser) onLogin;
@@ -48,7 +49,13 @@ class _BunkerScreenState extends State<BunkerScreen> {
   final _nostrConnect = NostrConnect(
     relays: _nostrConnectRelays,
     appName: 'Manent',
-    perms: ['get_public_key', 'nip44_decrypt', 'nip44_encrypt', 'sign_event:33301', 'sign_event:5'],
+    perms: [
+      'get_public_key',
+      'nip44_decrypt',
+      'nip44_encrypt',
+      'sign_event:33301',
+      'sign_event:5'
+    ],
   );
 
   bool _connectingWithUrl = false;
@@ -321,22 +328,25 @@ class _BunkerScreenState extends State<BunkerScreen> {
                 style: TextStyle(fontSize: 13, color: Colors.black54),
               ),
               const SizedBox(height: 24),
-              TextField(
+              MiddleClickPaste(
                 controller: _bunkerController,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: InputDecoration(
-                  hintText: 'bunker://....',
-                  hintStyle: TextStyle(color: Colors.grey[400]),
-                  filled: true,
-                  fillColor: Colors.white,
-                  hoverColor: Colors.transparent,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
+                child: TextField(
+                  controller: _bunkerController,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: InputDecoration(
+                    hintText: 'bunker://....',
+                    hintStyle: TextStyle(color: Colors.grey[400]),
+                    filled: true,
+                    fillColor: Colors.white,
+                    hoverColor: Colors.transparent,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
                   ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 ),
               ),
               if (_error != null) ...[

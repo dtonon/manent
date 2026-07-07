@@ -23,7 +23,6 @@ import 'package:thumbhash/thumbhash.dart' hide Image;
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../utils/primary_selection.dart';
 import '../utils/web_download.dart';
 import '../utils/web_image_resize.dart';
 import '../utils/video_thumb.dart';
@@ -39,6 +38,7 @@ import '../theme.dart';
 import '../widgets/gif_player.dart';
 import '../widgets/inline_web_video.dart';
 import '../widgets/manent_app_bar.dart';
+import '../widgets/middle_click_paste.dart';
 import '../widgets/media_kit_video_screen.dart';
 import '../widgets/video_player_screen.dart';
 
@@ -351,30 +351,6 @@ class _NotesScreenState extends State<NotesScreen> {
       _atBottom = true;
       _showScrollToBottom = false;
     });
-  }
-
-  // Linux middle-mouse-button paste: insert the PRIMARY selection at the caret.
-  void _handleComposerPointerDown(PointerDownEvent event) {
-    if (!PrimarySelection.isSupported) return;
-    if (event.buttons != kMiddleMouseButton) return;
-    _pastePrimarySelection();
-  }
-
-  Future<void> _pastePrimarySelection() async {
-    final text = await PrimarySelection.read();
-    if (text == null || !mounted) return;
-
-    final value = _textController.value;
-    final selection = value.selection;
-    final start = selection.isValid ? selection.start : value.text.length;
-    final end = selection.isValid ? selection.end : value.text.length;
-
-    final newText = value.text.replaceRange(start, end, text);
-    _textController.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: start + text.length),
-    );
-    _inputFocusNode.requestFocus();
   }
 
   Future<void> _sendNote() async {
@@ -1885,9 +1861,9 @@ class _NotesScreenState extends State<NotesScreen> {
                                       ? _confirmEdit()
                                       : _sendNote(),
                             },
-                            child: Listener(
-                              // Middle-click pastes the Linux PRIMARY selection.
-                              onPointerDown: _handleComposerPointerDown,
+                            child: MiddleClickPaste(
+                              controller: _textController,
+                              focusNode: _inputFocusNode,
                               child: TextField(
                                 controller: _textController,
                                 focusNode: _inputFocusNode,

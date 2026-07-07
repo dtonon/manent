@@ -9,6 +9,7 @@ import '../auth/signer_session.dart';
 import '../auth/signer_store.dart';
 import '../theme.dart';
 import '../widgets/manent_app_bar.dart';
+import '../widgets/middle_click_paste.dart';
 
 class NsecScreen extends StatefulWidget {
   final Future<void> Function(AuthUser) onLogin;
@@ -35,7 +36,10 @@ class _NsecScreenState extends State<NsecScreen> {
 
   Future<void> _login() async {
     final text = _nsecController.text.trim();
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final privkey = Nip19.decode(text);
       if (privkey.isEmpty) throw 'decode failed';
@@ -55,7 +59,10 @@ class _NsecScreenState extends State<NsecScreen> {
       if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
     } catch (_) {
       if (mounted) {
-        setState(() { _error = 'Invalid nsec key'; _loading = false; });
+        setState(() {
+          _error = 'Invalid nsec key';
+          _loading = false;
+        });
       }
     }
   }
@@ -78,26 +85,29 @@ class _NsecScreenState extends State<NsecScreen> {
                 style: TextStyle(fontSize: 16, color: Colors.black87),
               ),
               const SizedBox(height: 32),
-              TextField(
+              MiddleClickPaste(
                 controller: _nsecController,
-                minLines: 4,
-                maxLines: 6,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: InputDecoration(
-                  hintText: 'nsec1....',
-                  hintStyle: TextStyle(color: Colors.grey[400]),
-                  filled: true,
-                  fillColor: Colors.white,
-                  hoverColor: Colors.transparent,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
+                child: TextField(
+                  controller: _nsecController,
+                  minLines: 4,
+                  maxLines: 6,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: InputDecoration(
+                    hintText: 'nsec1....',
+                    hintStyle: TextStyle(color: Colors.grey[400]),
+                    filled: true,
+                    fillColor: Colors.white,
+                    hoverColor: Colors.transparent,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.all(16),
+                    alignLabelWithHint: true,
                   ),
-                  contentPadding: const EdgeInsets.all(16),
-                  alignLabelWithHint: true,
+                  style: const TextStyle(fontSize: 14, fontFamily: 'monospace'),
                 ),
-                style: const TextStyle(fontSize: 14, fontFamily: 'monospace'),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 8),
