@@ -1,6 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <gtk/gtk.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -12,9 +13,28 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* primary_selection_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+// Handles calls on the "manent/primary_selection" channel. Returns the current
+// X11/Wayland PRIMARY selection text (the last text highlighted in any
+// application), which is what the middle mouse button pastes on Linux.
+static void primary_selection_method_call_cb(FlMethodChannel* channel,
+                                             FlMethodCall* method_call,
+                                             gpointer user_data) {
+  const gchar* method = fl_method_call_get_name(method_call);
+  if (g_strcmp0(method, "getPrimarySelection") == 0) {
+    GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
+    g_autofree gchar* text = gtk_clipboard_wait_for_text(clipboard);
+    g_autoptr(FlValue) result =
+        fl_value_new_string(text != nullptr ? text : "");
+    fl_method_call_respond_success(method_call, result, nullptr);
+  } else {
+    fl_method_call_respond_not_implemented(method_call, nullptr);
+  }
+}
 
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
@@ -79,6 +99,16 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  // Channel used by the Dart side to read the PRIMARY selection for
+  // middle-mouse-button paste.
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->primary_selection_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "manent/primary_selection", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->primary_selection_channel, primary_selection_method_call_cb, self,
+      nullptr);
+
   desktop_multi_window_plugin_set_window_created_callback([](FlPluginRegistry* registry){
     fl_register_plugins(registry);
   });
@@ -127,6 +157,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->primary_selection_channel);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

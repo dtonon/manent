@@ -23,6 +23,7 @@ import 'package:thumbhash/thumbhash.dart' hide Image;
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../utils/primary_selection.dart';
 import '../utils/web_download.dart';
 import '../utils/web_image_resize.dart';
 import '../utils/video_thumb.dart';
@@ -352,6 +353,30 @@ class _NotesScreenState extends State<NotesScreen> {
     });
   }
 
+  // Linux middle-mouse-button paste: insert the PRIMARY selection at the caret.
+  void _handleComposerPointerDown(PointerDownEvent event) {
+    if (!PrimarySelection.isSupported) return;
+    if (event.buttons != kMiddleMouseButton) return;
+    _pastePrimarySelection();
+  }
+
+  Future<void> _pastePrimarySelection() async {
+    final text = await PrimarySelection.read();
+    if (text == null || !mounted) return;
+
+    final value = _textController.value;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : value.text.length;
+    final end = selection.isValid ? selection.end : value.text.length;
+
+    final newText = value.text.replaceRange(start, end, text);
+    _textController.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: start + text.length),
+    );
+    _inputFocusNode.requestFocus();
+  }
+
   Future<void> _sendNote() async {
     if (_sending) return;
     final file = _pendingFile;
@@ -578,8 +603,9 @@ class _NotesScreenState extends State<NotesScreen> {
     return '$base.$ext';
   }
 
-  static Uint8List _encodeResized(img.Image im, bool toJpeg) => Uint8List.fromList(
-      toJpeg ? img.encodeJpg(im, quality: 85) : img.encodePng(im));
+  static Uint8List _encodeResized(img.Image im, bool toJpeg) =>
+      Uint8List.fromList(
+          toJpeg ? img.encodeJpg(im, quality: 85) : img.encodePng(im));
 
   static Map<ImageResizePreset, Uint8List> _computeAllPresets(
       (Uint8List, bool, bool) args) {
@@ -654,8 +680,9 @@ class _NotesScreenState extends State<NotesScreen> {
   static Future<int> _maxDimension(Uint8List bytes) async {
     final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
     final descriptor = await ui.ImageDescriptor.encoded(buffer);
-    final maxDim =
-        descriptor.width > descriptor.height ? descriptor.width : descriptor.height;
+    final maxDim = descriptor.width > descriptor.height
+        ? descriptor.width
+        : descriptor.height;
     descriptor.dispose();
     return maxDim;
   }
@@ -665,8 +692,7 @@ class _NotesScreenState extends State<NotesScreen> {
   Future<Uint8List> _encodeOriginalBitmap(Uint8List bytes, bool toJpeg) async =>
       toJpeg ? compute(_encodeJpegQuality, (bytes, 80)) : bytes;
 
-  Future<Uint8List> _resizeOne(
-      Uint8List bytes, ImageResizePreset preset,
+  Future<Uint8List> _resizeOne(Uint8List bytes, ImageResizePreset preset,
       {required bool toJpeg, bool bitmapInput = false}) async {
     if (preset == ImageResizePreset.original) {
       // Edited input is a lossless bitmap needing one encode; a picked file is
@@ -719,7 +745,8 @@ class _NotesScreenState extends State<NotesScreen> {
           : FlutterImageCompress.compressWithList(bytes,
               minWidth: maxDim, minHeight: maxDim, quality: 85, format: format);
       // Native threads run in parallel on multi-core CPUs
-      final results = await Future.wait([resize(800), resize(1440), resize(2500)]);
+      final results =
+          await Future.wait([resize(800), resize(1440), resize(2500)]);
       map = {
         ImageResizePreset.small: results[0],
         ImageResizePreset.medium: results[1],
@@ -1858,37 +1885,42 @@ class _NotesScreenState extends State<NotesScreen> {
                                       ? _confirmEdit()
                                       : _sendNote(),
                             },
-                            child: TextField(
-                              controller: _textController,
-                              focusNode: _inputFocusNode,
-                              maxLines: null,
-                              keyboardType: TextInputType.multiline,
-                              textInputAction: TextInputAction.newline,
-                              onTap: () {
-                                // Android creates word selections on single tap
-                                // in a focused field; collapse back to cursor
-                                if (!_textController.selection.isCollapsed) {
-                                  _textController.selection =
-                                      TextSelection.collapsed(
-                                    offset:
-                                        _textController.selection.extentOffset,
-                                  );
-                                }
-                              },
-                              decoration: InputDecoration(
-                                hintText: hasPendingFile ||
-                                        editingFileAttachment != null
-                                    ? 'Add a caption...'
-                                    : 'Memo...',
-                                border: InputBorder.none,
-                                isDense: true,
-                                contentPadding: EdgeInsets.zero,
-                                hintStyle: const TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 14,
+                            child: Listener(
+                              // Middle-click pastes the Linux PRIMARY selection.
+                              onPointerDown: _handleComposerPointerDown,
+                              child: TextField(
+                                controller: _textController,
+                                focusNode: _inputFocusNode,
+                                maxLines: null,
+                                keyboardType: TextInputType.multiline,
+                                textInputAction: TextInputAction.newline,
+                                onTap: () {
+                                  // Android creates word selections on single
+                                  // tap in a focused field; collapse to cursor
+                                  if (!_textController.selection.isCollapsed) {
+                                    _textController.selection =
+                                        TextSelection.collapsed(
+                                      offset: _textController
+                                          .selection.extentOffset,
+                                    );
+                                  }
+                                },
+                                decoration: InputDecoration(
+                                  hintText: hasPendingFile ||
+                                          editingFileAttachment != null
+                                      ? 'Add a caption...'
+                                      : 'Memo...',
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  hintStyle: const TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 14,
+                                  ),
                                 ),
+                                style:
+                                    const TextStyle(fontSize: 14, height: 1.3),
                               ),
-                              style: const TextStyle(fontSize: 14, height: 1.3),
                             ),
                           ),
                         ),
@@ -1933,7 +1965,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                 children: [
                                   if (!_NoteCardState._isDesktopOrWeb) ...[
                                     Semantics(
-                                      label: 'Take photo, long press to record video',
+                                      label:
+                                          'Take photo, long press to record video',
                                       button: true,
                                       child: GestureDetector(
                                         onTap: _takePhoto,
@@ -2310,7 +2343,8 @@ class _VideoThumbnailState extends State<_VideoThumbnail> {
     }
     final bytes = await NoteCache.instance.getFileBytes(widget.attachment);
     if (bytes == null) return;
-    final thumb = await generateVideoThumbnail(bytes, widget.attachment.filename);
+    final thumb =
+        await generateVideoThumbnail(bytes, widget.attachment.filename);
     _cache[key] = thumb;
     if (!mounted) return;
     setState(() => _thumb = thumb);
@@ -2892,8 +2926,7 @@ class _NoteCardState extends State<_NoteCard>
             isFileNote && widget.note.attachment?.isImage == true;
         final isFileVideo =
             isFileNote && widget.note.attachment?.isVideo == true;
-        final isFileGif =
-            isFileNote && widget.note.attachment?.isGif == true;
+        final isFileGif = isFileNote && widget.note.attachment?.isGif == true;
         // On web, GIFs/videos play inline in the card — the outer tap just
         // opens the context menu (the inline player handles its own controls).
         final isWebInlineMedia = kIsWeb && (isFileVideo || isFileGif);
@@ -2937,17 +2970,17 @@ class _NoteCardState extends State<_NoteCard>
             onTap = isWebInlineMedia
                 ? _showContextMenu
                 : isFileVideo
-                ? () => _openVideo(context)
-                : isFileNonImage
-                    ? () => _saveFile()
-                    : isFileImage
-                        ? () => _openImageViewer(context)
-                        : () {
-                            _desktopSelectedContent = null;
-                            _capturedSelectionOnRightClick = null;
-                            _selectionAreaKey.currentState?.selectableRegion
-                                .clearSelection();
-                          };
+                    ? () => _openVideo(context)
+                    : isFileNonImage
+                        ? () => _saveFile()
+                        : isFileImage
+                            ? () => _openImageViewer(context)
+                            : () {
+                                _desktopSelectedContent = null;
+                                _capturedSelectionOnRightClick = null;
+                                _selectionAreaKey.currentState?.selectableRegion
+                                    .clearSelection();
+                              };
             onSecondaryTapDown = (d) {
               _tapPosition = _toOverlayLocal(context, d.globalPosition);
               // Capture before SelectionArea word-selects on right-click
@@ -3452,8 +3485,7 @@ class _FileNoteContent extends StatelessWidget {
                       const SizedBox(width: 4),
                       Text(
                         formatTime(note.createdAt),
-                        style:
-                            TextStyle(fontSize: 11, color: Colors.grey[500]),
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                       ),
                     ],
                   )),
