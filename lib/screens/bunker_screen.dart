@@ -297,109 +297,122 @@ class _BunkerScreenState extends State<BunkerScreen> {
       backgroundColor: background,
       appBar: manentAppBar(),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 60),
-          child: Column(
-            children: [
-              const Spacer(),
-              const Text(
-                'Scan the QR Code with your signer app or enter a bunker URL',
-                textAlign: TextAlign.center,
-                style:
-                    TextStyle(fontSize: 16, height: 1.3, color: Colors.black87),
-              ),
-              const SizedBox(height: 32),
-              Container(
-                color: Colors.white,
-                padding: const EdgeInsets.all(12),
-                child: Semantics(
-                  label: 'Nostr Connect QR code — scan with your signer app',
-                  image: true,
-                  child: QrImageView(
-                    data: _nostrConnectURL,
-                    size: 260,
-                    backgroundColor: Colors.white,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Waiting for signer to scan…',
-                style: TextStyle(fontSize: 13, color: Colors.black54),
-              ),
-              const SizedBox(height: 24),
-              MiddleClickPaste(
-                controller: _bunkerController,
-                child: TextField(
-                  controller: _bunkerController,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: InputDecoration(
-                    hintText: 'bunker://....',
-                    hintStyle: TextStyle(color: Colors.grey[400]),
-                    filled: true,
-                    fillColor: Colors.white,
-                    hoverColor: Colors.transparent,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 14),
-                  ),
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  _error!,
-                  style: const TextStyle(fontSize: 13, color: Colors.red),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _canLogin ? _loginWithBunkerUrl : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: accent,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: accent.withValues(alpha: 0.4),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                    elevation: 0,
-                  ),
-                  child: _connectingWithUrl
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 60, vertical: 32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Scan the QR Code with your signer app or enter a bunker URL',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 16, height: 1.3, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 32),
+                      Container(
+                        color: Colors.white,
+                        padding: const EdgeInsets.all(12),
+                        child: Semantics(
+                          label:
+                              'Nostr Connect QR code — scan with your signer app',
+                          image: true,
+                          child: QrImageView(
+                            data: _nostrConnectURL,
+                            size: 260,
+                            backgroundColor: Colors.white,
                           ),
-                        )
-                      : const Text('Login', style: TextStyle(fontSize: 16)),
-                ),
-              ),
-              const Spacer(),
-              Semantics(
-                button: true,
-                child: GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: const Text(
-                    'Go back to the login screen',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.black87,
-                      decoration: TextDecoration.underline,
-                    ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Waiting for signer to scan…',
+                        style: TextStyle(fontSize: 13, color: Colors.black54),
+                      ),
+                      const SizedBox(height: 24),
+                      MiddleClickPaste(
+                        controller: _bunkerController,
+                        child: TextField(
+                          controller: _bunkerController,
+                          autocorrect: false,
+                          enableSuggestions: false,
+                          decoration: InputDecoration(
+                            hintText: 'bunker://....',
+                            hintStyle: TextStyle(color: Colors.grey[400]),
+                            filled: true,
+                            fillColor: Colors.white,
+                            hoverColor: Colors.transparent,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 14),
+                          ),
+                        ),
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _error!,
+                          style:
+                              const TextStyle(fontSize: 13, color: Colors.red),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _canLogin ? _loginWithBunkerUrl : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: accent,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor:
+                                accent.withValues(alpha: 0.4),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                            elevation: 0,
+                          ),
+                          child: _connectingWithUrl
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text('Login',
+                                  style: TextStyle(fontSize: 16)),
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      Semantics(
+                        button: true,
+                        child: GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: const Text(
+                            'Go back to the login screen',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.black87,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(height: 32),
-            ],
+            ),
           ),
         ),
       ),
