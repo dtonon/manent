@@ -136,6 +136,7 @@ class NoteCache {
             final result = await _decryptViaSigner(signer, ciphertext);
             final plain = result.text;
             if (plain != null) {
+              bool payloadSensitive = false;
               if (kind == NoteKind.file) {
                 try {
                   attachment = NoteAttachment.fromJson(
@@ -147,19 +148,14 @@ class NoteCache {
               } else {
                 final payload = _extractPayload(plain);
                 text = payload.text;
-                // Also update the sensitive column from relay payload
-                if (payload.sensitive && _db != null) {
-                  await _db!.updateSensitive(
-                      id: id,
-                      sensitive: true,
-                      editedAt: (row['edited_at'] as int?) ??
-                          (row['created_at'] as int));
-                }
+                payloadSensitive = payload.sensitive;
               }
               if (errorMsg == null) {
                 final toCache = kind == NoteKind.file ? plain : text!;
                 final cached = await LocalCrypto.encrypt(_localKey!, toCache);
-                await _db!.updateLocalContent(id, cached);
+                // Persist the sensitive flag without touching sync status
+                await _db!.updateLocalContent(id, cached,
+                    sensitive: kind == NoteKind.text ? payloadSensitive : null);
               }
             } else {
               errorMsg =
@@ -1022,11 +1018,8 @@ class NoteCache {
       }
 
       final localContent = await LocalCrypto.encrypt(_localKey!, plain);
-      await _db!.updateLocalContent(id, localContent);
-      if (sensitive) {
-        final ts = (row['edited_at'] as int?) ?? (row['created_at'] as int);
-        await _db!.updateSensitive(id: id, sensitive: true, editedAt: ts);
-      }
+      // Persist the now-known sensitive flag without touching sync status
+      await _db!.updateLocalContent(id, localContent, sensitive: sensitive);
 
       final editedAtRaw = row['edited_at'] as int?;
       _map[id] = DecryptedNote(

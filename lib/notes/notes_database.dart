@@ -187,11 +187,15 @@ class AppDatabase {
     );
   }
 
-  Future<void> updateLocalContent(String id, String localContent) async {
+  Future<void> updateLocalContent(String id, String localContent,
+      {bool? sensitive}) async {
     final db = await _getDb();
     await db.update(
       'notes',
-      {'local_content': localContent},
+      {
+        'local_content': localContent,
+        if (sensitive != null) 'sensitive': sensitive ? 1 : 0,
+      },
       where: 'id = ?',
       whereArgs: [id],
     );
