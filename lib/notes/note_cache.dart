@@ -179,7 +179,7 @@ class NoteCache {
           editedAt: editedAtRaw != null
               ? DateTime.fromMillisecondsSinceEpoch(editedAtRaw * 1000)
               : null,
-          syncStatus: SyncStatus.fromInt(row['synced_to_relay'] as int),
+          syncStatus: _loadedSyncStatus(row['synced_to_relay'] as int),
           kind: kind,
           attachment: attachment,
           sensitive: sensitive,
@@ -445,7 +445,10 @@ class NoteCache {
     NoteAttachment attachment,
     int createdAt,
   ) async {
-    if (_signer == null) return;
+    if (_signer == null) {
+      await _markSyncFailed(localId);
+      return;
+    }
     // Never publish a remote file note that hasn't been uploaded yet
     if (!attachment.isInline && attachment.url == null) return;
     if (_writeRelays.isEmpty) {
@@ -465,7 +468,10 @@ class NoteCache {
         plaintext: metaJson,
         recipientPubKey: _signer!.getPublicKey(),
       );
-      if (encrypted == null) return;
+      if (encrypted == null) {
+        await _markSyncFailed(localId);
+        return;
+      }
 
       if (_db != null) {
         await _db!.updateEncryptedContent(
@@ -594,7 +600,10 @@ class NoteCache {
 
   Future<void> _publishToRelays(String localId, String plaintext, int createdAt,
       {bool sensitive = false}) async {
-    if (_signer == null) return;
+    if (_signer == null) {
+      await _markSyncFailed(localId);
+      return;
+    }
     if (_writeRelays.isEmpty) {
       promptFallbackRelays.value = true;
       if (_db != null)
@@ -614,7 +623,10 @@ class NoteCache {
         }),
         recipientPubKey: _signer!.getPublicKey(),
       );
-      if (encrypted == null) return;
+      if (encrypted == null) {
+        await _markSyncFailed(localId);
+        return;
+      }
 
       if (_db != null) {
         await _db!.updateEncryptedContent(
@@ -1356,6 +1368,25 @@ class NoteCache {
       if (ms != null) return DateTime.fromMillisecondsSinceEpoch(ms);
     }
     return DateTime.now();
+  }
+
+  // A pending status read from disk means a publish was interrupted; there is no
+  // in-flight publish after a fresh load, so surface it as failed (retryable).
+  static SyncStatus _loadedSyncStatus(int raw) {
+    final s = SyncStatus.fromInt(raw);
+    return s == SyncStatus.pending ? SyncStatus.failed : s;
+  }
+
+  // Marks a note failed in DB + memory; pending is transient, never terminal
+  Future<void> _markSyncFailed(String localId) async {
+    if (_db != null) {
+      await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
+    }
+    final existing = _map[localId];
+    if (existing != null) {
+      _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
+      _emit();
+    }
   }
 
   DecryptedNote _withSyncStatus(DecryptedNote n, SyncStatus s) => DecryptedNote(
