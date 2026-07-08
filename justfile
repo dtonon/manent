@@ -11,6 +11,10 @@ dev_macos:
 dev_android:
     flutter run -d Pixel
 
+dev_ios:
+    open -a Simulator
+    flutter run -d iPhone
+
 dev_web:
     export CHROME_EXECUTABLE=/Applications/Chromium.app/Contents/MacOS/Chromium
     flutter run -d chrome --web-port 8080
@@ -25,6 +29,10 @@ build_android:
 
 build_android_bundle:
     flutter build appbundle --release --obfuscate --split-debug-info=build/symbols/android
+
+build_ios:
+    flutter build ipa --release --obfuscate --split-debug-info=build/symbols/ios
+    cp build/ios/ipa/*.ipa dist/
 
 build_linux:
     dart pub global activate flutter_distributor
