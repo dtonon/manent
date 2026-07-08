@@ -9,7 +9,10 @@ Think of it as your personal "Saved Messages": write notes, attach images and fi
 ## Features
 
 - **Notes** — Write, edit, and delete text notes
-- **Images & files** — Attach and preview images; store any file type
+- **Attachments** — Store any file type
+- **Images** - Crop, roate and compress images
+- **Video** - Play video files and gifs
+- **Camera** - Capture photo and video from the app
 - **End-to-end encrypted** — Everything (notes, files, metadata) is encrypted with NIP-44 before leaving your device
 - **Synced via Nostr** — Your data lives on your own relays; files (larger than 32KB) are stored on Blossom servers
 - **Multi-platform** — Web, Android, Linux, macOS (iOS and Windows builds untested)
@@ -28,7 +31,7 @@ Think of it as your personal "Saved Messages": write notes, attach images and fi
 
 ## Known issues
 
-### macOS build fails on Xcode 26 (`conflicting deployment targets`)
+### macOS build fails on Xcode 26
 
 Xcode 26's clang errors when the deployment target is inferred from multiple sources simultaneously. Fix: patch Flutter's `DebugMacOSFramework` to pass an explicit `-mmacosx-version-min` flag.
 
@@ -43,9 +46,9 @@ Then add `'-mmacosx-version-min=$deploymentTarget'` to the clang args list, and 
 
 This patch is overwritten by `flutter upgrade` and must be reapplied until Flutter adds native Xcode 26 support.
 
-### Linux build (`just build_linux`)
+### Linux build
 
-Building the Linux AppImage needs libmpv's headers and `appimagetool`:
+Building the Linux AppImage (`just build_linux`) needs libmpv's headers and `appimagetool`:
 
 - **Fedora:** `sudo dnf install mpv-devel`
 - **Debian/Ubuntu:** `sudo apt install libmpv-dev`
