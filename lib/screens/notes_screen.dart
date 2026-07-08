@@ -1030,6 +1030,61 @@ class _NotesScreenState extends State<NotesScreen> {
     }
   }
 
+  Future<bool?> _confirmLogout(BuildContext sheetCtx) {
+    final unsynced = NoteCache.instance.notifier.value
+        .where((n) => n.syncStatus != SyncStatus.synced)
+        .length;
+    return showDialog<bool>(
+      context: sheetCtx,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Log out?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Logging out removes the notes stored on this device. '
+              'Synced notes can be restored from your relays next time you log in.',
+            ),
+            if (unsynced > 0) ...[
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded,
+                      color: Colors.red, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'You have $unsynced unsynced '
+                      '${unsynced == 1 ? 'note' : 'notes'} — '
+                      'they will be lost.',
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.black),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showProfileSheet() {
     final npub = Nip19.encodePubKey(widget.user.pubkey);
     var localAdditional = List<String>.from(widget.additionalRelays);
@@ -1056,13 +1111,36 @@ class _NotesScreenState extends State<NotesScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 24),
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
+              SizedBox(
+                height: 24,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Align(
+                      alignment: Alignment.topCenter,
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[300],
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: -12,
+                      right: -12,
+                      child: Semantics(
+                        label: 'Close',
+                        button: true,
+                        child: IconButton(
+                          icon: Icon(Icons.close, color: Colors.grey[400]),
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               CircleAvatar(
@@ -1260,11 +1338,13 @@ class _NotesScreenState extends State<NotesScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () async {
-                    Navigator.pop(ctx);
+                    final confirmed = await _confirmLogout(ctx);
+                    if (confirmed != true) return;
+                    if (ctx.mounted) Navigator.pop(ctx);
                     await widget.onLogout();
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: accent,
+                    backgroundColor: Colors.black,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
