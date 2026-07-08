@@ -1785,17 +1785,20 @@ class _NotesScreenState extends State<NotesScreen> {
                                 ),
                         ),
                         if (_isResizableImage(_pendingFile!.mimeType)) ...[
-                          const SizedBox(width: 20),
                           Semantics(
                             label: 'Edit image',
                             button: true,
                             child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
                               onTap: (_presetBytes != null &&
                                       _originalImageBytes != null)
                                   ? _editPendingImage
                                   : null,
-                              child: Icon(Icons.crop_rotate,
-                                  size: 24, color: Colors.grey[400]),
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 20),
+                                child: Icon(Icons.crop_rotate,
+                                    size: 24, color: Colors.grey[400]),
+                              ),
                             ),
                           ),
                         ],
@@ -1812,36 +1815,45 @@ class _NotesScreenState extends State<NotesScreen> {
                                   p != ImageResizePreset.original &&
                                   pb[p]!.length < origSize);
                             }()) ...[
-                          const SizedBox(width: 20),
                           Semantics(
                             label: 'Image size settings',
                             button: true,
                             child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
                               onTap: _showImageSizeModal,
-                              child: Icon(Icons.tune,
-                                  size: 24, color: Colors.grey[400]),
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 20),
+                                child: Icon(Icons.tune,
+                                    size: 24, color: Colors.grey[400]),
+                              ),
                             ),
                           ),
                         ],
-                        const SizedBox(width: 20),
                         Semantics(
                           label: 'Remove attachment',
                           button: true,
                           child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
                             onTap: () => setState(() {
                               _pendingFile = null;
                               _originalImageBytes = null;
                               _presetBytes = null;
                             }),
-                            child: Icon(Icons.close,
-                                size: 24, color: Colors.grey[400]),
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 20),
+                              child: Icon(Icons.close,
+                                  size: 24, color: Colors.grey[400]),
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
                 Flexible(
-                  child: Padding(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _inputFocusNode.requestFocus(),
+                    child: Padding(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 32, vertical: 18),
                     child: Row(
@@ -1914,6 +1926,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                 label: isEditing ? 'Confirm edit' : 'Send',
                                 button: true,
                                 child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
                                   onTap: isEditing ? _confirmEdit : _sendNote,
                                   child: _sending
                                       ? const SizedBox(
@@ -1945,6 +1958,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                           'Take photo, long press to record video',
                                       button: true,
                                       child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
                                         onTap: _takePhoto,
                                         onLongPress: _recordVideo,
                                         child: Padding(
@@ -1961,6 +1975,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                     label: 'Attach file',
                                     button: true,
                                     child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
                                       onTap: _pickFile,
                                       child: Padding(
                                         padding:
@@ -1982,6 +1997,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         ),
                       ],
                     ),
+                  ),
                   ),
                 ),
               ],
