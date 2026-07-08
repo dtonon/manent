@@ -37,6 +37,8 @@ build_linux:
 
 build_web:
     flutter build web --release
+    tar --format zip --options zip:compression=deflate,zip:compression-level=9 -cf dist/manent-web.zip -s '|^build/web|manent-web|' build/web
+
 
 deploy_android: build_android
     @echo "\nDeploying application..."
