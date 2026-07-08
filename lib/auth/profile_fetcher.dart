@@ -21,7 +21,7 @@ class ProfileFetcher {
           ?.trim();
       final avatarUrl = content['picture'] as String?;
       return (
-        name: (name?.isNotEmpty == true) ? name! : pubkey.substring(0, 8),
+        name: (name?.isNotEmpty == true) ? name! : _truncate(pubkey),
         avatarUrl: avatarUrl,
       );
     } catch (_) {
@@ -30,5 +30,8 @@ class ProfileFetcher {
   }
 
   static ({String name, String? avatarUrl}) _fallback(String pubkey) =>
-      (name: pubkey.substring(0, 8), avatarUrl: null);
+      (name: _truncate(pubkey), avatarUrl: null);
+
+  static String _truncate(String pubkey) =>
+      pubkey.length >= 8 ? pubkey.substring(0, 8) : pubkey;
 }

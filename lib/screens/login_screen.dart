@@ -73,24 +73,35 @@ class LoginScreen extends StatelessWidget {
       );
       return;
     }
-    final result = await amber.getPublicKey(permissions: [
-      const Permission(type: 'sign_event'),
-      const Permission(type: 'nip44_encrypt'),
-      const Permission(type: 'nip44_decrypt'),
-    ]);
-    final npub = result['signature'] as String? ?? '';
-    if (npub.isEmpty || !context.mounted) return;
-    final pubkey = Nip19.decode(npub);
-    final signer = AmberEventSigner(pubkey: pubkey);
-    SignerSession.set(signer);
-    NostrClient().ndk.accounts.loginExternalSigner(signer: signer);
-    final profile = await ProfileFetcher.fetch(pubkey);
-    await onLogin(AuthUser(
-      pubkey: pubkey,
-      name: profile.name,
-      avatarUrl: profile.avatarUrl,
-      signingMethod: SigningMethod.androidSigner,
-    ));
+    try {
+      final result = await amber.getPublicKey(permissions: [
+        const Permission(type: 'sign_event'),
+        const Permission(type: 'nip44_encrypt'),
+        const Permission(type: 'nip44_decrypt'),
+      ]);
+      final returned = (result['signature'] as String? ?? '').trim();
+      if (returned.isEmpty || !context.mounted) return;
+      // Amber may return either an npub or a raw hex pubkey
+      final pubkey = returned.startsWith('npub') ? Nip19.decode(returned) : returned;
+      if (pubkey.length != 64) {
+        throw Exception('Amber returned an invalid public key');
+      }
+      final signer = AmberEventSigner(pubkey: pubkey);
+      SignerSession.set(signer);
+      NostrClient().ndk.accounts.loginExternalSigner(signer: signer);
+      final profile = await ProfileFetcher.fetch(pubkey);
+      await onLogin(AuthUser(
+        pubkey: pubkey,
+        name: profile.name,
+        avatarUrl: profile.avatarUrl,
+        signingMethod: SigningMethod.androidSigner,
+      ));
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Android signer login failed: $e')),
+      );
+    }
   }
 
   @override
