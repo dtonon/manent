@@ -1469,9 +1469,8 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   AppBar _buildSelectionAppBar() {
+    // Background and elevation come from appBarTheme
     return AppBar(
-      backgroundColor: accent,
-      elevation: 0,
       automaticallyImplyLeading: false,
       centerTitle: true,
       title: const Text(

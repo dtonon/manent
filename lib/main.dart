@@ -320,6 +320,20 @@ ThemeData _buildTheme(Brightness brightness, ManentColors mc) {
     ),
     scaffoldBackgroundColor: mc.surface,
     extensions: [mc],
+    appBarTheme: AppBarThemeData(
+      backgroundColor: mc.appBarBg,
+      foregroundColor: Colors.white,
+      titleTextStyle: TextStyle(color: mc.appBarTitle),
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      surfaceTintColor: Colors.transparent,
+      // White status bar icons read on both the pink and dark-gray bar
+      systemOverlayStyle: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+      ),
+    ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: mc.card,
       surfaceTintColor: Colors.transparent,

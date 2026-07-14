@@ -10,6 +10,8 @@ const textSelectionColor = Color(0x44FFEE58);
 // overlay badges) stay literal at the call site and are not tokens here.
 @immutable
 class ManentColors extends ThemeExtension<ManentColors> {
+  final Color appBarBg; // top app bar — pink in light, dark gray in dark
+  final Color appBarTitle; // MANENT title — white on pink, soft grey on dark
   final Color surface; // scaffold background
   final Color card; // raised surfaces: note cards, dialogs, sheets, input bar
   final Color cardDim; // dimmed/inactive card, chips, image placeholder bg
@@ -24,6 +26,8 @@ class ManentColors extends ThemeExtension<ManentColors> {
   final Color strongButtonFg;
 
   const ManentColors({
+    required this.appBarBg,
+    required this.appBarTitle,
     required this.surface,
     required this.card,
     required this.cardDim,
@@ -39,6 +43,8 @@ class ManentColors extends ThemeExtension<ManentColors> {
   });
 
   static const light = ManentColors(
+    appBarBg: accent,
+    appBarTitle: Color(0xFFFFFFFF),
     surface: Color(0xFFF5F5F5),
     card: Color(0xFFFFFFFF),
     cardDim: Color(0xFFEEEEEE),
@@ -54,6 +60,8 @@ class ManentColors extends ThemeExtension<ManentColors> {
   );
 
   static const dark = ManentColors(
+    appBarBg: Color(0xFF1E1E1E),
+    appBarTitle: Color(0xFFB0B0B0),
     surface: Color(0xFF121212),
     card: Color(0xFF1E1E1E),
     cardDim: Color(0xFF2A2A2A),
@@ -70,6 +78,8 @@ class ManentColors extends ThemeExtension<ManentColors> {
 
   @override
   ManentColors copyWith({
+    Color? appBarBg,
+    Color? appBarTitle,
     Color? surface,
     Color? card,
     Color? cardDim,
@@ -84,6 +94,8 @@ class ManentColors extends ThemeExtension<ManentColors> {
     Color? strongButtonFg,
   }) {
     return ManentColors(
+      appBarBg: appBarBg ?? this.appBarBg,
+      appBarTitle: appBarTitle ?? this.appBarTitle,
       surface: surface ?? this.surface,
       card: card ?? this.card,
       cardDim: cardDim ?? this.cardDim,
@@ -103,6 +115,8 @@ class ManentColors extends ThemeExtension<ManentColors> {
   ManentColors lerp(ThemeExtension<ManentColors>? other, double t) {
     if (other is! ManentColors) return this;
     return ManentColors(
+      appBarBg: Color.lerp(appBarBg, other.appBarBg, t)!,
+      appBarTitle: Color.lerp(appBarTitle, other.appBarTitle, t)!,
       surface: Color.lerp(surface, other.surface, t)!,
       card: Color.lerp(card, other.card, t)!,
       cardDim: Color.lerp(cardDim, other.cardDim, t)!,
