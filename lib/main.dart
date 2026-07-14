@@ -278,8 +278,11 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
               )
             : child!;
         if (kIsWeb) {
+          final gutter = Theme.of(context).brightness == Brightness.dark
+              ? const Color(0xFF0A0A0A)
+              : const Color(0xFFAAAAAA);
           result = ColoredBox(
-            color: const Color(0xFFAAAAAA),
+            color: gutter,
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 800),
@@ -290,20 +293,9 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
         }
         return result;
       },
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: accent,
-        ),
-        useMaterial3: true,
-        bottomSheetTheme: const BottomSheetThemeData(
-          backgroundColor: Colors.white,
-          surfaceTintColor: Colors.transparent,
-        ),
-        dialogTheme: const DialogThemeData(
-          backgroundColor: Colors.white,
-          surfaceTintColor: Colors.transparent,
-        ),
-      ),
+      theme: _buildTheme(Brightness.light, ManentColors.light),
+      darkTheme: _buildTheme(Brightness.dark, ManentColors.dark),
+      themeMode: ThemeMode.system,
       home: _user == null
           ? LoginScreen(onLogin: _onLogin)
           : NotesScreen(
@@ -316,6 +308,27 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
             ),
     );
   }
+}
+
+ThemeData _buildTheme(Brightness brightness, ManentColors mc) {
+  return ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: accent,
+      brightness: brightness,
+    ),
+    scaffoldBackgroundColor: mc.surface,
+    extensions: [mc],
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: mc.card,
+      surfaceTintColor: Colors.transparent,
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: mc.card,
+      surfaceTintColor: Colors.transparent,
+    ),
+  );
 }
 
 class _ImageViewerApp extends StatefulWidget {
