@@ -146,14 +146,17 @@ class _NotesScreenState extends State<NotesScreen> {
   bool _onHardwareKey(KeyEvent event) {
     if (!mounted) return false;
     if (event is! KeyDownEvent) return false;
-    // Paste image from clipboard — works even when the input is unfocused,
-    // but not while editing (there the paste is a plain text edit).
+    // Paste from clipboard — works even when the input is unfocused, but not
+    // while editing (there the paste is a plain text edit).
     if (event.logicalKey == LogicalKeyboardKey.keyV &&
         (HardwareKeyboard.instance.isMetaPressed ||
             HardwareKeyboard.instance.isControlPressed) &&
         _editingNoteId == null) {
+      // A focused text field pastes text itself; only take over when none is
+      final focusedEditable =
+          FocusManager.instance.primaryFocus?.context?.widget is EditableText;
       // Fire and forget; return false so a text paste still reaches the field
-      _pasteImageFromClipboard();
+      _pasteFromClipboard(allowText: !focusedEditable);
       return false;
     }
     if (event.logicalKey != LogicalKeyboardKey.arrowUp) return false;
@@ -162,9 +165,15 @@ class _NotesScreenState extends State<NotesScreen> {
     return true;
   }
 
-  Future<void> _pasteImageFromClipboard() async {
+  Future<void> _pasteFromClipboard({required bool allowText}) async {
     final clipboard = SystemClipboard.instance;
-    if (clipboard == null) return;
+    if (clipboard == null) {
+      if (allowText) {
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        _appendToInput(data?.text);
+      }
+      return;
+    }
     final reader = await clipboard.read();
     const candidates = <(SimpleFileFormat, String, String)>[
       (Formats.png, 'png', 'image/png'),
@@ -184,6 +193,23 @@ class _NotesScreenState extends State<NotesScreen> {
       });
       return;
     }
+    if (!allowText) return;
+    if (reader.canProvide(Formats.plainText)) {
+      _appendToInput(await reader.readValue(Formats.plainText));
+    }
+  }
+
+  // Paste landing in the input while it is unfocused: append and focus it
+  void _appendToInput(String? text) {
+    if (text == null || text.isEmpty || !mounted) return;
+    if (_editingNoteId != null) return;
+    final newText = _textController.text + text;
+    setState(() {
+      _textController.text = newText;
+      _textController.selection =
+          TextSelection.collapsed(offset: newText.length);
+    });
+    _inputFocusNode.requestFocus();
   }
 
   // Drag & drop is a desktop/web concept — the whole window is the target
