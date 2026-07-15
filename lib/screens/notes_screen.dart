@@ -795,6 +795,7 @@ class _NotesScreenState extends State<NotesScreen> {
     var selected = visiblePresets.contains(_currentPreset)
         ? _currentPreset
         : visiblePresets.last;
+    final mc = context.mc;
     final confirmed = await showDialog<ImageResizePreset>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -837,7 +838,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         ),
                         child: Container(
                           width: double.infinity,
-                          color: const Color(0xFFEEEEEE),
+                          color: mc.cardDim,
                           child: Image.memory(
                             original,
                             fit: BoxFit.contain,
@@ -864,9 +865,7 @@ class _NotesScreenState extends State<NotesScreen> {
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
-                                color: isSelected
-                                    ? accent
-                                    : const Color(0xFFE0E0E0),
+                                color: isSelected ? accent : mc.border,
                                 width: isSelected ? 2 : 1,
                               ),
                             ),
@@ -883,7 +882,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                   Text(
                                     _formatFileSize(sizes[preset]!),
                                     style: TextStyle(
-                                        fontSize: 12, color: Colors.grey[600]),
+                                        fontSize: 12, color: mc.secondaryText),
                                   ),
                                 ],
                               ),
@@ -1103,7 +1102,8 @@ class _NotesScreenState extends State<NotesScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.black),
+            style: TextButton.styleFrom(
+                foregroundColor: dialogCtx.mc.primaryText),
             child: const Text('Log out'),
           ),
         ],
@@ -1112,6 +1112,7 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   void _showProfileSheet() {
+    final mc = context.mc;
     final npub = Nip19.encodePubKey(widget.user.pubkey);
     var localAdditional = List<String>.from(widget.additionalRelays);
     // kind:10063 servers fetched from relay (read-only); snapshot at open time
@@ -1148,7 +1149,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         width: 40,
                         height: 4,
                         decoration: BoxDecoration(
-                          color: Colors.grey[300],
+                          color: mc.border,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
@@ -1160,7 +1161,7 @@ class _NotesScreenState extends State<NotesScreen> {
                         label: 'Close',
                         button: true,
                         child: IconButton(
-                          icon: Icon(Icons.close, color: Colors.grey[400]),
+                          icon: Icon(Icons.close, color: mc.iconMuted),
                           tooltip: 'Close',
                           onPressed: () => Navigator.pop(ctx),
                         ),
@@ -1196,7 +1197,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 '${npub.substring(0, 8)}...${npub.substring(npub.length - 8)}',
                 style: TextStyle(
                   fontSize: 14,
-                  color: Colors.grey[500],
+                  color: mc.secondaryText,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -1205,7 +1206,7 @@ class _NotesScreenState extends State<NotesScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.grey[200],
+                  color: mc.cardDim,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -1217,7 +1218,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   }}",
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
+                    color: mc.secondaryText,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -1229,7 +1230,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: Colors.grey[600],
+                    color: mc.secondaryText,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1240,7 +1241,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       url,
                       style: TextStyle(
                         fontSize: 14,
-                        color: Colors.grey[700],
+                        color: mc.secondaryText,
                       ),
                       textAlign: TextAlign.center,
                       overflow: TextOverflow.ellipsis,
@@ -1255,7 +1256,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: Colors.grey[600],
+                    color: mc.secondaryText,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1271,7 +1272,7 @@ class _NotesScreenState extends State<NotesScreen> {
                               url,
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.grey[700],
+                                color: mc.secondaryText,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -1304,7 +1305,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: Colors.grey[600],
+                    color: mc.secondaryText,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1314,7 +1315,7 @@ class _NotesScreenState extends State<NotesScreen> {
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Text(
                       url,
-                      style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                      style: TextStyle(fontSize: 14, color: mc.secondaryText),
                       textAlign: TextAlign.center,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1333,7 +1334,7 @@ class _NotesScreenState extends State<NotesScreen> {
                               url,
                               style: TextStyle(
                                 fontSize: 14,
-                                color: Colors.grey[700],
+                                color: mc.secondaryText,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -1370,8 +1371,8 @@ class _NotesScreenState extends State<NotesScreen> {
                     await widget.onLogout();
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    foregroundColor: Colors.white,
+                    backgroundColor: mc.strongButtonBg,
+                    foregroundColor: mc.strongButtonFg,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
@@ -1416,7 +1417,8 @@ class _NotesScreenState extends State<NotesScreen> {
             ),
             const SizedBox(height: 4),
             if (version.isNotEmpty)
-              Text('v.$version', style: const TextStyle(color: Colors.grey)),
+              Text('v.$version',
+                  style: TextStyle(color: ctx.mc.secondaryText)),
             const SizedBox(height: 16),
             GestureDetector(
               onTap: () => launchUrl(
@@ -1467,9 +1469,8 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   AppBar _buildSelectionAppBar() {
+    // Background and elevation come from appBarTheme
     return AppBar(
-      backgroundColor: accent,
-      elevation: 0,
       automaticallyImplyLeading: false,
       centerTitle: true,
       title: const Text(
@@ -1515,7 +1516,7 @@ class _NotesScreenState extends State<NotesScreen> {
             }
           },
           child: Scaffold(
-            backgroundColor: background,
+            backgroundColor: context.mc.surface,
             appBar: inSelection
                 ? _buildSelectionAppBar()
                 : manentAppBar(
@@ -1581,11 +1582,12 @@ class _NotesScreenState extends State<NotesScreen> {
                               valueListenable: NoteCache.instance.notifier,
                               builder: (context, notes, _) {
                                 if (notes.isEmpty) {
-                                  return const Center(
+                                  return Center(
                                     child: Text(
                                       'No notes yet',
                                       style: TextStyle(
-                                          color: Colors.grey, fontSize: 14),
+                                          color: context.mc.secondaryText,
+                                          fontSize: 14),
                                     ),
                                   );
                                 }
@@ -1751,6 +1753,7 @@ class _NotesScreenState extends State<NotesScreen> {
   }
 
   Widget _buildInputBar(BuildContext context) {
+    final mc = context.mc;
     final isMobile = defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.android;
     final bottomInset = isMobile ? MediaQuery.of(context).padding.bottom : 0.0;
@@ -1767,10 +1770,10 @@ class _NotesScreenState extends State<NotesScreen> {
           constraints: BoxConstraints(maxHeight: maxHeight),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: mc.card,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
+                  color: mc.shadow,
                   offset: const Offset(0, -1),
                   blurRadius: 4,
                 ),
@@ -1784,12 +1787,13 @@ class _NotesScreenState extends State<NotesScreen> {
                     padding: const EdgeInsets.fromLTRB(32, 12, 35, 0),
                     child: Row(
                       children: [
-                        const Icon(Icons.edit, size: 14, color: Colors.grey),
+                        Icon(Icons.edit, size: 14, color: mc.secondaryText),
                         const SizedBox(width: 6),
-                        const Expanded(
+                        Expanded(
                           child: Text(
                             'Editing',
-                            style: TextStyle(fontSize: 13, color: Colors.grey),
+                            style: TextStyle(
+                                fontSize: 13, color: mc.secondaryText),
                           ),
                         ),
                         Semantics(
@@ -1797,8 +1801,8 @@ class _NotesScreenState extends State<NotesScreen> {
                           button: true,
                           child: GestureDetector(
                             onTap: _cancelEdit,
-                            child: const Icon(Icons.close,
-                                size: 18, color: Colors.grey),
+                            child: Icon(Icons.close,
+                                size: 18, color: mc.secondaryText),
                           ),
                         ),
                       ],
@@ -1809,14 +1813,14 @@ class _NotesScreenState extends State<NotesScreen> {
                     padding: const EdgeInsets.fromLTRB(32, 6, 35, 0),
                     child: Row(
                       children: [
-                        const Icon(Icons.attach_file,
-                            size: 14, color: Colors.grey),
+                        Icon(Icons.attach_file,
+                            size: 14, color: mc.secondaryText),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
                             editingFileAttachment.filename,
-                            style: const TextStyle(
-                                fontSize: 13, color: Colors.grey),
+                            style: TextStyle(
+                                fontSize: 13, color: mc.secondaryText),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -1860,22 +1864,22 @@ class _NotesScreenState extends State<NotesScreen> {
                                           _presetBytes != null
                                               ? '${_currentPreset.label} — ${_formatFileSize(_pendingFile!.bytes.length)}'
                                               : '${_currentPreset.label} — ',
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                               fontSize: 14,
                                               fontWeight: FontWeight.bold,
-                                              color: Colors.black87),
+                                              color: mc.primaryText),
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                       if (_presetBytes == null)
-                                        const SizedBox(
+                                        SizedBox(
                                           width: 14,
                                           height: 14,
                                           child: CircularProgressIndicator(
                                             strokeWidth: 2,
                                             valueColor:
                                                 AlwaysStoppedAnimation<Color>(
-                                                    Colors.black45),
+                                                    mc.iconMuted),
                                           ),
                                         ),
                                     ],
@@ -1883,10 +1887,10 @@ class _NotesScreenState extends State<NotesScreen> {
                                 )
                               : Text(
                                   '${_pendingFile!.name} — ${_formatFileSize(_pendingFile!.bytes.length)}',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.black87),
+                                      color: mc.primaryText),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                         ),
@@ -1903,7 +1907,7 @@ class _NotesScreenState extends State<NotesScreen> {
                               child: Padding(
                                 padding: const EdgeInsets.only(left: 20),
                                 child: Icon(Icons.crop_rotate,
-                                    size: 24, color: Colors.grey[400]),
+                                    size: 24, color: mc.iconMuted),
                               ),
                             ),
                           ),
@@ -1930,7 +1934,7 @@ class _NotesScreenState extends State<NotesScreen> {
                               child: Padding(
                                 padding: const EdgeInsets.only(left: 20),
                                 child: Icon(Icons.tune,
-                                    size: 24, color: Colors.grey[400]),
+                                    size: 24, color: mc.iconMuted),
                               ),
                             ),
                           ),
@@ -1948,7 +1952,7 @@ class _NotesScreenState extends State<NotesScreen> {
                             child: Padding(
                               padding: const EdgeInsets.only(left: 20),
                               child: Icon(Icons.close,
-                                  size: 24, color: Colors.grey[400]),
+                                  size: 24, color: mc.iconMuted),
                             ),
                           ),
                         ),
@@ -2007,8 +2011,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                   border: InputBorder.none,
                                   isDense: true,
                                   contentPadding: EdgeInsets.zero,
-                                  hintStyle: const TextStyle(
-                                    color: Colors.grey,
+                                  hintStyle: TextStyle(
+                                    color: mc.hintText,
                                     fontSize: 14,
                                   ),
                                 ),
@@ -2072,7 +2076,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                               const EdgeInsets.only(right: 20),
                                           child: Icon(Icons.camera_alt_outlined,
                                               size: 24,
-                                              color: Colors.grey[400]),
+                                              color: mc.iconMuted),
                                         ),
                                       ),
                                     ),
@@ -2090,7 +2094,7 @@ class _NotesScreenState extends State<NotesScreen> {
                                           angle: 0.55,
                                           child: Icon(Icons.attach_file,
                                               size: 24,
-                                              color: Colors.grey[400]),
+                                              color: mc.iconMuted),
                                         ),
                                       ),
                                     ),
@@ -2113,7 +2117,7 @@ class _NotesScreenState extends State<NotesScreen> {
         if (bottomInset > 0)
           Container(
             height: bottomInset,
-            color: const Color(0xFFEEEEEE),
+            color: mc.cardDim,
           ),
       ],
     );
@@ -2553,8 +2557,9 @@ class LinkedText extends StatefulWidget {
   const LinkedText({
     super.key,
     required this.text,
-    this.style =
-        const TextStyle(fontSize: 14, height: 1.3, color: Colors.black87),
+    // No color — inherits the ambient DefaultTextStyle (onSurface), so note
+    // body text adapts to light/dark automatically. Link spans set accent.
+    this.style = const TextStyle(fontSize: 14, height: 1.3),
     this.selectionMode = false,
     this.selectionAreaKey,
     this.onSelectionChanged,
@@ -2756,7 +2761,7 @@ class _NoteCardState extends State<_NoteCard>
       case SyncStatus.synced:
         return Semantics(
           label: 'Synced to relay',
-          child: Icon(Icons.check, size: 14, color: Colors.grey[400]),
+          child: Icon(Icons.check, size: 14, color: context.mc.faintText),
         );
       case SyncStatus.failed:
         return Semantics(
@@ -2766,7 +2771,8 @@ class _NoteCardState extends State<_NoteCard>
       case SyncStatus.pending:
         return Semantics(
           label: 'Sync pending',
-          child: Icon(Icons.access_time, size: 14, color: Colors.grey[400]),
+          child:
+              Icon(Icons.access_time, size: 14, color: context.mc.faintText),
         );
     }
   }
@@ -2802,11 +2808,11 @@ class _NoteCardState extends State<_NoteCard>
           child: SingleChildScrollView(
             child: SelectableText(
               json,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 12,
                   fontFamily: 'monospace',
                   height: 1.5,
-                  color: Colors.black87),
+                  color: ctx.mc.primaryText),
             ),
           ),
         ),
@@ -3008,10 +3014,11 @@ class _NoteCardState extends State<_NoteCard>
         final isActiveSelection = selectionId == widget.note.id;
         final inAnyMode = menuId != null || selectionId != null;
 
+        final mc = context.mc;
         final color =
             (!inAnyMode || menuId == widget.note.id || isActiveSelection)
-                ? Colors.white
-                : const Color(0xFFEEEEEE);
+                ? mc.card
+                : mc.cardDim;
 
         void Function(TapDownDetails)? onTapDown;
         void Function()? onTap;
@@ -3269,6 +3276,7 @@ class _NoteCardState extends State<_NoteCard>
   }
 
   Widget _buildContent([bool inSelectionMode = false]) {
+    final mc = context.mc;
     if (widget.note.kind == NoteKind.file && widget.note.error == null) {
       return _FileNoteContent(
         note: widget.note,
@@ -3296,14 +3304,14 @@ class _NoteCardState extends State<_NoteCard>
           ),
           Text(
             widget.note.error!,
-            style: const TextStyle(
-                fontSize: 14, height: 1.3, color: Colors.black87),
+            style: TextStyle(
+                fontSize: 14, height: 1.3, color: mc.primaryText),
           ),
           if (widget.note.nostrId != null)
             Text(
               'Event ID: ${widget.note.nostrId}',
-              style: const TextStyle(
-                  fontSize: 14, height: 1.3, color: Colors.black87),
+              style: TextStyle(
+                  fontSize: 14, height: 1.3, color: mc.primaryText),
             ),
           Align(
             alignment: Alignment.centerRight,
@@ -3312,7 +3320,7 @@ class _NoteCardState extends State<_NoteCard>
               children: [
                 Text(
                   _formatTime(widget.note.createdAt),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                  style: TextStyle(fontSize: 12, color: mc.faintText),
                 ),
                 const SizedBox(width: 4),
                 _buildSyncIcon(),
@@ -3341,8 +3349,8 @@ class _NoteCardState extends State<_NoteCard>
                     imageFilter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                     child: Text(
                       preview,
-                      style: const TextStyle(
-                          fontSize: 14, height: 1.3, color: Colors.black87),
+                      style: TextStyle(
+                          fontSize: 14, height: 1.3, color: mc.primaryText),
                     ),
                   ),
                   Positioned.fill(
@@ -3353,8 +3361,8 @@ class _NoteCardState extends State<_NoteCard>
                         child: ElevatedButton(
                           onPressed: () => setState(() => _isRevealed = true),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            foregroundColor: Colors.black87,
+                            backgroundColor: mc.card,
+                            foregroundColor: mc.primaryText,
                             elevation: 2,
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 20, vertical: 8),
@@ -3387,7 +3395,7 @@ class _NoteCardState extends State<_NoteCard>
                 const SizedBox(width: 4),
                 Text(
                   _formatTime(widget.note.createdAt),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                  style: TextStyle(fontSize: 12, color: mc.faintText),
                 ),
               ],
             ),
@@ -3424,19 +3432,19 @@ class _NoteCardState extends State<_NoteCard>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEEEEEE),
+                      color: mc.cardDim,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.visibility_off_outlined,
-                            size: 12, color: Colors.grey[600]),
+                            size: 12, color: mc.secondaryText),
                         const SizedBox(width: 4),
                         Text(
                           'Hide',
                           style:
-                              TextStyle(fontSize: 11, color: Colors.grey[600]),
+                              TextStyle(fontSize: 11, color: mc.secondaryText),
                         ),
                       ],
                     ),
@@ -3452,7 +3460,7 @@ class _NoteCardState extends State<_NoteCard>
                 const SizedBox(width: 4),
                 Text(
                   _formatTime(widget.note.createdAt),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                  style: TextStyle(fontSize: 12, color: mc.faintText),
                 ),
               ],
             ),
@@ -3503,23 +3511,24 @@ class _FileNoteContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mc = context.mc;
     final attachment = note.attachment;
     if (attachment == null) return const SizedBox.shrink();
 
     if (note.sensitive && !isRevealed) {
-      return _buildSensitivePlaceholder(attachment);
+      return _buildSensitivePlaceholder(mc, attachment);
     }
 
     if (attachment.isImage) {
       return _buildImageContent(attachment);
     }
     if (attachment.isVideo) {
-      return _buildVideoContent(attachment);
+      return _buildVideoContent(mc, attachment);
     }
-    return _buildFileContent(attachment);
+    return _buildFileContent(mc, attachment);
   }
 
-  Widget _buildVideoContent(NoteAttachment attachment) {
+  Widget _buildVideoContent(ManentColors mc, NoteAttachment attachment) {
     Widget badge(Widget child) => Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(
@@ -3628,7 +3637,7 @@ class _FileNoteContent extends StatelessWidget {
               Text(
                 '${attachment.filename} - ${_formatFileSize(attachment.size)}',
                 style: TextStyle(
-                    fontSize: 14, height: 1.3, color: Colors.grey[600]),
+                    fontSize: 14, height: 1.3, color: mc.secondaryText),
                 overflow: TextOverflow.ellipsis,
               ),
               if (attachment.caption != null) ...[
@@ -3642,22 +3651,25 @@ class _FileNoteContent extends StatelessWidget {
     );
   }
 
-  static final _showButtonStyle = ElevatedButton.styleFrom(
-    backgroundColor: Colors.white,
-    foregroundColor: Colors.black87,
-    elevation: 2,
-    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-  );
+  static ButtonStyle _showButtonStyle(ManentColors mc) =>
+      ElevatedButton.styleFrom(
+        backgroundColor: mc.card,
+        foregroundColor: mc.primaryText,
+        elevation: 2,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      );
 
-  Widget _buildSensitivePlaceholder(NoteAttachment attachment) {
+  Widget _buildSensitivePlaceholder(
+      ManentColors mc, NoteAttachment attachment) {
     if (attachment.isImage) {
-      return _buildImageSensitivePlaceholder(attachment);
+      return _buildImageSensitivePlaceholder(mc, attachment);
     }
-    return _buildFileSensitivePlaceholder(attachment);
+    return _buildFileSensitivePlaceholder(mc, attachment);
   }
 
-  Widget _buildImageSensitivePlaceholder(NoteAttachment attachment) {
+  Widget _buildImageSensitivePlaceholder(
+      ManentColors mc, NoteAttachment attachment) {
     final Widget bg;
     if (attachment.thumbhash != null) {
       bg = _ThumbhashImage(
@@ -3665,9 +3677,9 @@ class _FileNoteContent extends StatelessWidget {
         filename: attachment.filename,
       );
     } else {
-      bg = const AspectRatio(
+      bg = AspectRatio(
         aspectRatio: 16 / 9,
-        child: ColoredBox(color: Color(0xFFEEEEEE)),
+        child: ColoredBox(color: mc.cardDim),
       );
     }
 
@@ -3705,7 +3717,7 @@ class _FileNoteContent extends StatelessWidget {
                 button: true,
                 child: ElevatedButton(
                   onPressed: onReveal,
-                  style: _showButtonStyle,
+                  style: _showButtonStyle(mc),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -3723,7 +3735,8 @@ class _FileNoteContent extends StatelessWidget {
     );
   }
 
-  Widget _buildFileSensitivePlaceholder(NoteAttachment attachment) {
+  Widget _buildFileSensitivePlaceholder(
+      ManentColors mc, NoteAttachment attachment) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3758,7 +3771,7 @@ class _FileNoteContent extends StatelessWidget {
                               Text(
                                 _formatFileSize(attachment.size),
                                 style: TextStyle(
-                                    fontSize: 12, color: Colors.grey[500]),
+                                    fontSize: 12, color: mc.secondaryText),
                               ),
                             ],
                           ),
@@ -3774,7 +3787,7 @@ class _FileNoteContent extends StatelessWidget {
                       button: true,
                       child: ElevatedButton(
                         onPressed: onReveal,
-                        style: _showButtonStyle,
+                        style: _showButtonStyle(mc),
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -3929,7 +3942,7 @@ class _FileNoteContent extends StatelessWidget {
     );
   }
 
-  Widget _buildFileContent(NoteAttachment attachment) {
+  Widget _buildFileContent(ManentColors mc, NoteAttachment attachment) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3957,7 +3970,7 @@ class _FileNoteContent extends StatelessWidget {
                   ),
                   Text(
                     _formatFileSize(attachment.size),
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 12, color: mc.secondaryText),
                   ),
                 ],
               ),
@@ -3983,19 +3996,19 @@ class _FileNoteContent extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEEEEEE),
+                      color: mc.cardDim,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(Icons.visibility_off_outlined,
-                            size: 12, color: Colors.grey[600]),
+                            size: 12, color: mc.secondaryText),
                         const SizedBox(width: 4),
                         Text(
                           'Hide',
                           style:
-                              TextStyle(fontSize: 11, color: Colors.grey[600]),
+                              TextStyle(fontSize: 11, color: mc.secondaryText),
                         ),
                       ],
                     ),
@@ -4011,7 +4024,7 @@ class _FileNoteContent extends StatelessWidget {
                 const SizedBox(width: 4),
                 Text(
                   formatTime(note.createdAt),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                  style: TextStyle(fontSize: 12, color: mc.faintText),
                 ),
               ],
             ),
@@ -4265,8 +4278,8 @@ class _NoteMenuOverlay extends StatelessWidget {
     return 'Edited ${dt.day} ${months[dt.month - 1]} $time';
   }
 
-  Widget _menuItem(String action, String label,
-      {Color color = Colors.black87}) {
+  // color null inherits the menu's DefaultTextStyle (primaryText) so it adapts
+  Widget _menuItem(String action, String label, {Color? color}) {
     return InkWell(
       onTap: () => onSelect(action),
       child: Padding(
@@ -4278,6 +4291,7 @@ class _NoteMenuOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mc = context.mc;
     // Menu actions in display order; dividers are interposed only between items
     // so none ever touches the top or bottom edge of the menu.
     final items = <Widget>[
@@ -4296,7 +4310,7 @@ class _NoteMenuOverlay extends StatelessWidget {
             isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
       _menuItem('delete', 'Delete', color: Colors.red),
       if (showDebugJson)
-        _menuItem('show_json', 'Show raw data', color: Colors.black54),
+        _menuItem('show_json', 'Show raw data', color: mc.secondaryText),
       if (fileSize != null || editedAt != null)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -4306,19 +4320,19 @@ class _NoteMenuOverlay extends StatelessWidget {
               if (fileSize != null)
                 Text(
                   'Size: ${_formatFileSize(fileSize!)}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  style: TextStyle(fontSize: 12, color: mc.secondaryText),
                 ),
               if (dim != null)
                 Text(
                   'Dimensions: $dim',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  style: TextStyle(fontSize: 12, color: mc.secondaryText),
                 ),
               if ((fileSize != null || dim != null) && editedAt != null)
                 const SizedBox(height: 6),
               if (editedAt != null)
                 Text(
                   _formatEditedAt(editedAt!),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  style: TextStyle(fontSize: 12, color: mc.secondaryText),
                 ),
             ],
           ),
@@ -4328,7 +4342,7 @@ class _NoteMenuOverlay extends StatelessWidget {
     final children = <Widget>[];
     for (final item in items) {
       if (children.isNotEmpty) {
-        children.add(const Divider(height: 1, color: Color(0xFFE0E0E0)));
+        children.add(Divider(height: 1, color: mc.border));
       }
       children.add(item);
     }
@@ -4348,15 +4362,15 @@ class _NoteMenuOverlay extends StatelessWidget {
               keyboardHeight: MediaQuery.of(context).viewInsets.bottom),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: mc.card,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFE0E0E0)),
-              boxShadow: const [
+              border: Border.all(color: mc.border),
+              boxShadow: [
                 BoxShadow(
-                  color: Color(0x14000000),
+                  color: mc.shadow,
                   blurRadius: 24,
                   spreadRadius: 0,
-                  offset: Offset(0, 6),
+                  offset: const Offset(0, 6),
                 ),
               ],
             ),
@@ -4364,11 +4378,14 @@ class _NoteMenuOverlay extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
               child: Material(
                 color: Colors.transparent,
-                child: IntrinsicWidth(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: children,
+                child: DefaultTextStyle.merge(
+                  style: TextStyle(color: mc.primaryText),
+                  child: IntrinsicWidth(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: children,
+                    ),
                   ),
                 ),
               ),

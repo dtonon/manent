@@ -293,8 +293,9 @@ class _BunkerScreenState extends State<BunkerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mc = context.mc;
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: mc.surface,
       appBar: manentAppBar(),
       body: SafeArea(
         child: LayoutBuilder(
@@ -308,14 +309,15 @@ class _BunkerScreenState extends State<BunkerScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
+                      Text(
                         'Scan the QR Code with your signer app or enter a bunker URL',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            fontSize: 16, height: 1.3, color: Colors.black87),
+                            fontSize: 16, height: 1.3, color: mc.primaryText),
                       ),
                       const SizedBox(height: 32),
                       Container(
+                        // QR keeps a white backdrop so it stays scannable in dark mode
                         color: Colors.white,
                         padding: const EdgeInsets.all(12),
                         child: Semantics(
@@ -330,9 +332,9 @@ class _BunkerScreenState extends State<BunkerScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         'Waiting for signer to scan…',
-                        style: TextStyle(fontSize: 13, color: Colors.black54),
+                        style: TextStyle(fontSize: 13, color: mc.secondaryText),
                       ),
                       const SizedBox(height: 24),
                       MiddleClickPaste(
@@ -343,9 +345,9 @@ class _BunkerScreenState extends State<BunkerScreen> {
                           enableSuggestions: false,
                           decoration: InputDecoration(
                             hintText: 'bunker://....',
-                            hintStyle: TextStyle(color: Colors.grey[400]),
+                            hintStyle: TextStyle(color: mc.hintText),
                             filled: true,
-                            fillColor: Colors.white,
+                            fillColor: mc.card,
                             hoverColor: Colors.transparent,
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
@@ -398,11 +400,11 @@ class _BunkerScreenState extends State<BunkerScreen> {
                         button: true,
                         child: GestureDetector(
                           onTap: () => Navigator.pop(context),
-                          child: const Text(
+                          child: Text(
                             'Go back to the login screen',
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.black87,
+                              color: mc.primaryText,
                               decoration: TextDecoration.underline,
                             ),
                           ),

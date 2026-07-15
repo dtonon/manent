@@ -106,8 +106,9 @@ class LoginScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mc = context.mc;
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: mc.surface,
       appBar: manentAppBar(),
       body: SafeArea(
         child: Padding(
@@ -115,15 +116,15 @@ class LoginScreen extends StatelessWidget {
           child: Column(
             children: [
               const Spacer(),
-              const Text(
+              Text(
                 'Manent allows you to share notes, securely encrypted, across your devices.\nKeep your ideas flow!',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, height: 1.3, color: Colors.black87),
+                style: TextStyle(fontSize: 16, height: 1.3, color: mc.primaryText),
               ),
               const SizedBox(height: 48),
-              const Text(
+              Text(
                 'Login with your Nostr account:',
-                style: TextStyle(fontSize: 16, color: Colors.black87),
+                style: TextStyle(fontSize: 16, color: mc.primaryText),
               ),
               const SizedBox(height: 24),
               if (kIsWeb && nip07Available()) ...[
@@ -155,11 +156,11 @@ class LoginScreen extends StatelessWidget {
                     context,
                     MaterialPageRoute(builder: (_) => NsecScreen(onLogin: onLogin)),
                   ),
-                  child: const Text(
+                  child: Text(
                     'Or use your nsec',
                     style: TextStyle(
                       fontSize: 16,
-                      color: Colors.black87,
+                      color: mc.primaryText,
                       decoration: TextDecoration.underline,
                     ),
                   ),
@@ -169,7 +170,7 @@ class LoginScreen extends StatelessWidget {
               RichText(
                 textAlign: TextAlign.center,
                 text: TextSpan(
-                  style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.3),
+                  style: TextStyle(fontSize: 14, color: mc.primaryText, height: 1.3),
                   children: [
                     const TextSpan(text: 'Are you new to Nostr? '),
                     TextSpan(

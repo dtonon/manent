@@ -69,8 +69,9 @@ class _NsecScreenState extends State<NsecScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mc = context.mc;
     return Scaffold(
-      backgroundColor: background,
+      backgroundColor: mc.surface,
       appBar: manentAppBar(),
       body: SafeArea(
         child: Padding(
@@ -79,10 +80,10 @@ class _NsecScreenState extends State<NsecScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const Spacer(),
-              const Text(
+              Text(
                 'Enter your nsec\nNote: this option is not suggested, using a bunker or a signer is the preferred solution',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.black87),
+                style: TextStyle(fontSize: 16, color: mc.primaryText),
               ),
               const SizedBox(height: 32),
               MiddleClickPaste(
@@ -95,9 +96,9 @@ class _NsecScreenState extends State<NsecScreen> {
                   enableSuggestions: false,
                   decoration: InputDecoration(
                     hintText: 'nsec1....',
-                    hintStyle: TextStyle(color: Colors.grey[400]),
+                    hintStyle: TextStyle(color: mc.hintText),
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: mc.card,
                     hoverColor: Colors.transparent,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -147,11 +148,11 @@ class _NsecScreenState extends State<NsecScreen> {
                 button: true,
                 child: GestureDetector(
                   onTap: () => Navigator.pop(context),
-                  child: const Text(
+                  child: Text(
                     'Go back to the login screen',
                     style: TextStyle(
                       fontSize: 14,
-                      color: Colors.black87,
+                      color: mc.primaryText,
                       decoration: TextDecoration.underline,
                     ),
                   ),
