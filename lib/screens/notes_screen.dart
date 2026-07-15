@@ -2277,6 +2277,10 @@ class _ImageEditorScreenState extends State<_ImageEditorScreen> {
                         key: ValueKey(_revision),
                         controller: _controller,
                         image: _current,
+                        // Default the selection to the whole image, so a
+                        // rotate-only edit needs no manual resize
+                        initialRectBuilder: InitialRectBuilder.withBuilder(
+                            (viewportRect, imageRect) => imageRect),
                         // Force lossless PNG output — compression happens once, later
                         imageCropper: const _PngCropper(),
                         baseColor: Colors.black,
