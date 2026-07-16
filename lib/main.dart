@@ -65,6 +65,15 @@ void main(List<String> args) async {
   // Needed by the notes screen to grow the window when the search panel opens
   if (!kIsWeb && (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
     await windowManager.ensureInitialized();
+    // Pin the start width: the OS restores the last frame, which would carry
+    // over the extra width the search panel adds if it was open on quit.
+    await windowManager.waitUntilReadyToShow(null, () async {
+      final bounds = await windowManager.getBounds();
+      await windowManager.setBounds(
+        Rect.fromLTWH(bounds.left, bounds.top, 450, bounds.height),
+      );
+      await windowManager.show();
+    });
   }
 
   NostrClient().init();
