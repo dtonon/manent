@@ -38,6 +38,7 @@ import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
 import '../search/note_filter.dart';
 import '../search/note_search.dart';
+import '../search/note_tags.dart';
 import '../search/search_ui.dart';
 import '../theme.dart';
 import '../widgets/gif_player.dart';
@@ -111,13 +112,20 @@ class _NotesScreenState extends State<NotesScreen> {
   // How much the search panel grew / moved the window, to undo on close
   double _panelWindowGrowth = 0;
   double _panelWindowShift = 0;
+  // Tag autocomplete: the `#…` token under the caret and what to offer for it
+  List<String> _tagSuggestions = const [];
+  int _tagSuggestionIndex = 0;
+  int? _tagTokenStart;
 
   @override
   void initState() {
     super.initState();
     NoteCache.instance.notifier.addListener(_onNotesChanged);
     NoteSearch.instance.open.addListener(_onSearchOpenChanged);
-    _textController.addListener(() => _lastInteractionTime = DateTime.now());
+    _textController.addListener(() {
+      _lastInteractionTime = DateTime.now();
+      _refreshTagSuggestions();
+    });
     NoteCache.instance.promptFallbackRelays
         .addListener(_onFallbackRelaysPrompt);
     if (NoteCache.instance.promptFallbackRelays.value) {
@@ -127,8 +135,29 @@ class _NotesScreenState extends State<NotesScreen> {
     final initialNotes = NoteCache.instance.notifier.value;
     _newestNoteId = initialNotes.isEmpty ? null : initialNotes.last.id;
     _inputFocusNode.onKeyEvent = (_, event) {
-      if (event is KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.escape &&
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      // Tag suggestions claim these keys only while the popup is open. Enter is
+      // deliberately left alone — it inserts a newline in a note.
+      if (_tagSuggestions.isNotEmpty) {
+        switch (event.logicalKey) {
+          case LogicalKeyboardKey.tab:
+            _acceptTagSuggestion(_tagSuggestions[_tagSuggestionIndex]);
+            return KeyEventResult.handled;
+          case LogicalKeyboardKey.arrowDown:
+            setState(() => _tagSuggestionIndex =
+                (_tagSuggestionIndex + 1) % _tagSuggestions.length);
+            return KeyEventResult.handled;
+          case LogicalKeyboardKey.arrowUp:
+            setState(() => _tagSuggestionIndex =
+                (_tagSuggestionIndex - 1 + _tagSuggestions.length) %
+                    _tagSuggestions.length);
+            return KeyEventResult.handled;
+          case LogicalKeyboardKey.escape:
+            _dismissTagSuggestions();
+            return KeyEventResult.handled;
+        }
+      }
+      if (event.logicalKey == LogicalKeyboardKey.escape &&
           _editingNoteId != null) {
         _cancelEdit();
         return KeyEventResult.handled;
@@ -1536,6 +1565,81 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
+  // Boundary chars that may precede a `#`, mirroring the tag regex
+  static final _tagBoundary = RegExp(r'''[\s(\[{"']''');
+  static final _tagBody = RegExp(r'^[\p{L}\p{N}_-]*$', unicode: true);
+
+  // The `#…` token the caret currently sits inside, if any
+  ({int start, String prefix})? _activeTagToken() {
+    final sel = _textController.selection;
+    if (!sel.isValid || !sel.isCollapsed) return null;
+    final text = _textController.text;
+    final caret = sel.baseOffset;
+    if (caret <= 0 || caret > text.length) return null;
+
+    for (var i = caret - 1; i >= 0; i--) {
+      final ch = text[i];
+      if (ch == '#') {
+        if (i > 0 && !_tagBoundary.hasMatch(text[i - 1])) return null;
+        final prefix = text.substring(i + 1, caret);
+        if (!_tagBody.hasMatch(prefix)) return null;
+        return (start: i, prefix: prefix.toLowerCase());
+      }
+      // A tag can't contain whitespace, so stop looking at the word boundary
+      if (RegExp(r'\s').hasMatch(ch)) return null;
+    }
+    return null;
+  }
+
+  void _refreshTagSuggestions() {
+    final token = _activeTagToken();
+    final next = token == null
+        ? const <String>[]
+        : suggestTags(NoteCache.instance.notifier.value, token.prefix);
+    if (next.length == _tagSuggestions.length &&
+        next.isEmpty == _tagSuggestions.isEmpty &&
+        token?.start == _tagTokenStart &&
+        _listEquals(next, _tagSuggestions)) {
+      return;
+    }
+    setState(() {
+      _tagSuggestions = next;
+      _tagTokenStart = token?.start;
+      _tagSuggestionIndex = 0;
+    });
+  }
+
+  static bool _listEquals(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  void _dismissTagSuggestions() {
+    if (_tagSuggestions.isEmpty) return;
+    setState(() {
+      _tagSuggestions = const [];
+      _tagTokenStart = null;
+    });
+  }
+
+  // Replaces the typed token with the chosen tag and a trailing space
+  void _acceptTagSuggestion(String tag) {
+    final start = _tagTokenStart;
+    if (start == null) return;
+    final caret = _textController.selection.baseOffset;
+    if (caret < start) return;
+    final text = _textController.text;
+    final replacement = '#$tag ';
+    _textController.value = TextEditingValue(
+      text: text.replaceRange(start, caret, replacement),
+      selection: TextSelection.collapsed(offset: start + replacement.length),
+    );
+    _dismissTagSuggestions();
+  }
+
   void _exitSelection() {
     _NoteCardState._selectionModeId.value = null;
     _inputFocusNode.unfocus();
@@ -2044,6 +2148,59 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
+  // Sits directly above the composer. Kept to a single scrolling row so it
+  // stays usable in the sliver of space left above a phone keyboard.
+  Widget _buildTagSuggestions(ManentColors mc) {
+    final knownTags = tagCounts(NoteCache.instance.notifier.value);
+    return Container(
+      decoration: BoxDecoration(
+        color: mc.card,
+        border: Border(top: BorderSide(color: mc.border)),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: SizedBox(
+        height: 30,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: _tagSuggestions.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (context, i) {
+            final tag = _tagSuggestions[i];
+            final count = knownTags[tag] ?? 0;
+            final highlighted = i == _tagSuggestionIndex;
+            return Semantics(
+              label: count > 0
+                  ? 'Tag $tag, used $count times'
+                  : 'Tag $tag, not used yet',
+              button: true,
+              child: GestureDetector(
+                onTap: () => _acceptTagSuggestion(tag),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: highlighted ? mc.selectedFill : mc.cardDim,
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: Text(
+                    // Unused defaults show no count rather than a bare 0
+                    count > 0 ? '#$tag  $count' : '#$tag',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: highlighted ? Colors.white : mc.secondaryText,
+                      fontWeight:
+                          highlighted ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildInputBar(BuildContext context) {
     final mc = context.mc;
     // When the bar is docked at the bottom it owns the safe-area inset
@@ -2058,6 +2215,7 @@ class _NotesScreenState extends State<NotesScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (_tagSuggestions.isNotEmpty) _buildTagSuggestions(mc),
         ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxHeight),
           child: Container(
@@ -2298,8 +2456,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                 decoration: InputDecoration(
                                   hintText: hasPendingFile ||
                                           editingFileAttachment != null
-                                      ? 'Add a caption...'
-                                      : 'Memo...',
+                                      ? 'Add a caption...  |  Press # to tag'
+                                      : 'Memo...  |  Press # to tag',
                                   border: InputBorder.none,
                                   isDense: true,
                                   contentPadding: EdgeInsets.zero,
@@ -2917,14 +3075,39 @@ class _LinkedTextState extends State<LinkedText> {
     super.dispose();
   }
 
+  // Everything that isn't a URL gets a second pass for #tags. URLs are matched
+  // first so a fragment like example.com/page#section stays one link.
+  void _addWithTags(
+      List<InlineSpan> spans, String text, TextStyle baseStyle) {
+    int last = 0;
+    for (final m in tagMatches(text)) {
+      if (m.start > last) {
+        spans.add(
+            TextSpan(text: text.substring(last, m.start), style: baseStyle));
+      }
+      final recognizer = TapGestureRecognizer()
+        ..onTap = () => NoteSearch.instance.openWithTag(m.tag);
+      _recognizers.add(recognizer);
+      spans.add(TextSpan(
+        text: text.substring(m.start, m.end),
+        // Accent but not underlined, so tags read differently from links
+        style: baseStyle.copyWith(color: accent, fontWeight: FontWeight.w600),
+        recognizer: recognizer,
+      ));
+      last = m.end;
+    }
+    if (last < text.length) {
+      spans.add(TextSpan(text: text.substring(last), style: baseStyle));
+    }
+  }
+
   List<InlineSpan> _buildSpans(String text, TextStyle baseStyle) {
     final spans = <InlineSpan>[];
     int lastEnd = 0;
 
     for (final match in _urlRegex.allMatches(text)) {
       if (match.start > lastEnd) {
-        spans.add(TextSpan(
-            text: text.substring(lastEnd, match.start), style: baseStyle));
+        _addWithTags(spans, text.substring(lastEnd, match.start), baseStyle);
       }
 
       String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
@@ -2947,7 +3130,7 @@ class _LinkedTextState extends State<LinkedText> {
     }
 
     if (lastEnd < text.length) {
-      spans.add(TextSpan(text: text.substring(lastEnd), style: baseStyle));
+      _addWithTags(spans, text.substring(lastEnd), baseStyle);
     }
 
     return spans;

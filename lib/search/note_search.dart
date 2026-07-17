@@ -22,6 +22,27 @@ class NoteSearch {
   void setKind(NoteKindFilter kind) =>
       filter.value = filter.value.copyWith(kind: kind);
 
+  // Selecting a tag consumes any `#…` the user typed to reach it
+  void toggleTag(String tag) {
+    final next = {...filter.value.tags};
+    if (!next.remove(tag)) next.add(tag);
+    final clearsPrefix = filter.value.tagPrefix != null;
+    if (clearsPrefix) queryController.clear();
+    filter.value = filter.value.copyWith(
+      tags: next,
+      query: clearsPrefix ? '' : null,
+    );
+  }
+
+  void clearTags() => filter.value = filter.value.copyWith(tags: const {});
+
+  // Tapping a tag inside a note jumps straight to that filter
+  void openWithTag(String tag) {
+    queryController.clear();
+    filter.value = NoteFilter(tags: {tag});
+    open.value = true;
+  }
+
   void toggle() => open.value ? close() : openSearch();
 
   void openSearch() {

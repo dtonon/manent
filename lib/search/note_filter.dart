@@ -1,4 +1,5 @@
 import '../notes/note.dart';
+import 'note_tags.dart';
 
 // Facets derived from data we already store — no write-path changes needed.
 enum NoteKindFilter { all, text, images, videos, files }
@@ -30,20 +31,45 @@ extension NoteKindFilterExt on NoteKindFilter {
 class NoteFilter {
   final String query;
   final NoteKindFilter kind;
+  final Set<String> tags;
 
-  const NoteFilter({this.query = '', this.kind = NoteKindFilter.all});
+  const NoteFilter({
+    this.query = '',
+    this.kind = NoteKindFilter.all,
+    this.tags = const {},
+  });
 
-  bool get isActive => query.trim().isNotEmpty || kind != NoteKindFilter.all;
+  bool get isActive =>
+      query.trim().isNotEmpty || kind != NoteKindFilter.all || tags.isNotEmpty;
 
-  NoteFilter copyWith({String? query, NoteKindFilter? kind}) =>
-      NoteFilter(query: query ?? this.query, kind: kind ?? this.kind);
+  // A query of "#wo" narrows to tags starting with "wo" rather than searching
+  // note text — it is how you reach a tag from the keyboard.
+  String? get tagPrefix {
+    final q = query.trim();
+    return q.startsWith('#') ? q.substring(1).toLowerCase() : null;
+  }
+
+  NoteFilter copyWith({
+    String? query,
+    NoteKindFilter? kind,
+    Set<String>? tags,
+  }) =>
+      NoteFilter(
+        query: query ?? this.query,
+        kind: kind ?? this.kind,
+        tags: tags ?? this.tags,
+      );
 
   @override
   bool operator ==(Object other) =>
-      other is NoteFilter && other.query == query && other.kind == kind;
+      other is NoteFilter &&
+      other.query == query &&
+      other.kind == kind &&
+      other.tags.length == tags.length &&
+      other.tags.containsAll(tags);
 
   @override
-  int get hashCode => Object.hash(query, kind);
+  int get hashCode => Object.hash(query, kind, Object.hashAllUnordered(tags));
 }
 
 // Text notes match on their body; file notes carry their text in the
@@ -57,20 +83,39 @@ bool noteMatchesQuery(DecryptedNote note, String needle) {
       a.filename.toLowerCase().contains(needle);
 }
 
+// The text half of the filter: either a tag prefix or a plain substring
+bool _matchesQuery(DecryptedNote note, NoteFilter filter) {
+  final prefix = filter.tagPrefix;
+  if (prefix != null) {
+    if (prefix.isEmpty) return true;
+    return tagsOf(note).any((t) => t.startsWith(prefix));
+  }
+  return noteMatchesQuery(note, filter.query.trim().toLowerCase());
+}
+
+// Selected tags are OR'd with each other, then AND'd with the other facets
+bool _matchesTags(DecryptedNote note, NoteFilter filter) {
+  if (filter.tags.isEmpty) return true;
+  final noteTags = tagsOf(note);
+  return filter.tags.any(noteTags.contains);
+}
+
 List<DecryptedNote> filterNotes(List<DecryptedNote> notes, NoteFilter filter) {
   if (!filter.isActive) return notes;
-  final needle = filter.query.trim().toLowerCase();
   return notes
-      .where((n) => filter.kind.matches(n) && noteMatchesQuery(n, needle))
+      .where((n) =>
+          filter.kind.matches(n) &&
+          _matchesQuery(n, filter) &&
+          _matchesTags(n, filter))
       .toList();
 }
 
-// Counts respect the active query, so each number is what switching to that
-// facet would actually show.
-Map<NoteKindFilter, int> kindCounts(List<DecryptedNote> notes, String query) {
-  final needle = query.trim().toLowerCase();
+// Counts respect the active query and tags, so each number is what switching
+// to that facet would actually show.
+Map<NoteKindFilter, int> kindCounts(
+    List<DecryptedNote> notes, NoteFilter filter) {
   final matching =
-      needle.isEmpty ? notes : notes.where((n) => noteMatchesQuery(n, needle));
+      notes.where((n) => _matchesQuery(n, filter) && _matchesTags(n, filter));
   final counts = {for (final k in NoteKindFilter.values) k: 0};
   for (final note in matching) {
     for (final k in NoteKindFilter.values) {
@@ -79,3 +124,11 @@ Map<NoteKindFilter, int> kindCounts(List<DecryptedNote> notes, String query) {
   }
   return counts;
 }
+
+// Tag counts ignore the current tag selection (they are OR'd, so each number
+// is that tag's own contribution) but respect kind and query.
+List<DecryptedNote> notesForTagCounts(
+        List<DecryptedNote> notes, NoteFilter filter) =>
+    notes
+        .where((n) => filter.kind.matches(n) && _matchesQuery(n, filter))
+        .toList();
