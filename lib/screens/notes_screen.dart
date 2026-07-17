@@ -116,6 +116,8 @@ class _NotesScreenState extends State<NotesScreen> {
   List<String> _tagSuggestions = const [];
   int _tagSuggestionIndex = 0;
   int? _tagTokenStart;
+  // Inherited tags the user removed for the note being composed
+  Set<String> _droppedInheritedTags = const {};
 
   @override
   void initState() {
@@ -433,6 +435,37 @@ class _NotesScreenState extends State<NotesScreen> {
     });
   }
 
+  // Tags carried over from the active filter, minus any the user waved off
+  Set<String> get _inheritedTags {
+    if (_editingNoteId != null) return const {};
+    if (!NoteSearch.instance.open.value) return const {};
+    return NoteSearch.instance.inheritedTags
+        .difference(_droppedInheritedTags);
+  }
+
+  // Appends the inherited tags the text doesn't already carry
+  String _withInheritedTags(String text) {
+    final inherited = _inheritedTags;
+    if (inherited.isEmpty) return text;
+    final present = extractTags(text);
+    final missing = inherited.where((t) => !present.contains(t));
+    if (missing.isEmpty) return text;
+    final suffix = missing.map((t) => '#$t').join(' ');
+    return text.isEmpty ? suffix : '$text $suffix';
+  }
+
+  // Keeps a just-sent note on screen when the active filter would hide it
+  void _trackIfFilteredOut(String? id) {
+    final search = NoteSearch.instance;
+    if (id == null || !search.open.value) return;
+    final filter = search.filter.value;
+    if (!filter.isActive) return;
+    final note =
+        NoteCache.instance.notifier.value.where((n) => n.id == id).firstOrNull;
+    if (note == null) return;
+    if (filterNotes([note], filter).isEmpty) search.justAdded.value = id;
+  }
+
   Future<void> _sendNote() async {
     if (_sending) return;
     final file = _pendingFile;
@@ -443,26 +476,37 @@ class _NotesScreenState extends State<NotesScreen> {
         final added = await _showFallbackBlossomDialog();
         if (!added) return;
       }
-      final caption = _textController.text.trim();
+      // Inherited tags land in the caption, which is where a file note's
+      // tags live — even if the caption would otherwise be empty
+      final caption = _withInheritedTags(_textController.text.trim());
       setState(() {
         _sending = true;
         _pendingFile = null;
       });
       _textController.clear();
-      await NoteCache.instance.addFile(
+      _clearInheritedTagOverrides();
+      final id = await NoteCache.instance.addFile(
         file.bytes,
         file.name,
         caption: caption.isEmpty ? null : caption,
       );
+      _trackIfFilteredOut(id);
       if (mounted) setState(() => _sending = false);
       return;
     }
-    final text = _textController.text.trim();
+    final text = _withInheritedTags(_textController.text.trim());
     if (text.isEmpty) return;
     setState(() => _sending = true);
     _textController.clear();
-    await NoteCache.instance.add(text);
+    _clearInheritedTagOverrides();
+    final id = await NoteCache.instance.add(text);
+    _trackIfFilteredOut(id);
     if (mounted) setState(() => _sending = false);
+  }
+
+  void _clearInheritedTagOverrides() {
+    if (_droppedInheritedTags.isEmpty) return;
+    setState(() => _droppedInheritedTags = const {});
   }
 
   Future<bool> _showFallbackBlossomDialog() async {
@@ -1936,8 +1980,14 @@ class _NotesScreenState extends State<NotesScreen> {
                                 return ValueListenableBuilder<NoteFilter>(
                                   valueListenable: NoteSearch.instance.filter,
                                   builder: (context, activeFilter, _) {
-                                final notes =
-                                    filterNotes(allNotes, activeFilter);
+                                return ValueListenableBuilder<String?>(
+                                  valueListenable:
+                                      NoteSearch.instance.justAdded,
+                                  builder: (context, justAddedId, _) {
+                                final notes = _withJustAdded(
+                                    filterNotes(allNotes, activeFilter),
+                                    allNotes,
+                                    justAddedId);
                                 if (notes.isEmpty) {
                                   return Center(
                                     child: Text(
@@ -2008,6 +2058,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                 );
                                   },
                                 );
+                                  },
+                                );
                               },
                             );
                           },
@@ -2024,7 +2076,12 @@ class _NotesScreenState extends State<NotesScreen> {
                           InlineSearchBar(allNotes: allNotes),
                     )
                   else
-                    _buildInputBar(context),
+                    // Rebuilds on filter changes so the "will tag" strip
+                    // appears the moment a tag is selected
+                    ValueListenableBuilder<NoteFilter>(
+                      valueListenable: NoteSearch.instance.filter,
+                      builder: (context, _, __) => _buildInputBar(context),
+                    ),
                 ],
               ),
                   ),
@@ -2058,6 +2115,20 @@ class _NotesScreenState extends State<NotesScreen> {
         );
       },
     );
+  }
+
+  // Notes are oldest-first here, so appending puts the exempt note at the
+  // visual bottom — where a newly sent note is expected to land.
+  List<DecryptedNote> _withJustAdded(
+    List<DecryptedNote> visible,
+    List<DecryptedNote> all,
+    String? justAddedId,
+  ) {
+    if (justAddedId == null) return visible;
+    if (visible.any((n) => n.id == justAddedId)) return visible;
+    final note = all.where((n) => n.id == justAddedId).firstOrNull;
+    if (note == null) return visible;
+    return [...visible, note];
   }
 
   List<Widget> _buildNoteItems(List<DecryptedNote> notes,
@@ -2097,6 +2168,9 @@ class _NotesScreenState extends State<NotesScreen> {
       } else {
         items.add(const SizedBox(height: 12));
       }
+      if (note.id == NoteSearch.instance.justAdded.value) {
+        items.add(_buildOutsideFilterLabel());
+      }
       items.add(_NoteCard(
           key: ValueKey(note.id), note: note, onEdit: () => _startEdit(note)));
       currentDate = noteDate;
@@ -2128,6 +2202,24 @@ class _NotesScreenState extends State<NotesScreen> {
       'December',
     ];
     return '${dt.day} ${months[dt.month - 1]}';
+  }
+
+  // Explains why a note is on screen that the active filter would exclude
+  Widget _buildOutsideFilterLabel() {
+    return const Padding(
+      padding: EdgeInsets.only(bottom: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.add, size: 12, color: accent),
+          SizedBox(width: 4),
+          Text(
+            'Added — outside the current filter',
+            style: TextStyle(fontSize: 11, color: accent),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildDateSeparator(String date) {
@@ -2201,6 +2293,74 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
+  // Shown while a tag filter is active: the note being written will carry
+  // these, so it stays visible in the list you wrote it in. Each is removable
+  // for this note without touching the filter.
+  Widget _buildInheritedTags(ManentColors mc) {
+    final inherited = _inheritedTags.toList()..sort();
+    return Container(
+      decoration: BoxDecoration(
+        color: mc.card,
+        border: Border(top: BorderSide(color: mc.border)),
+      ),
+      // Matches the composer's 32px horizontal padding so "will tag" lines up
+      // with the text you are about to type
+      padding: const EdgeInsets.fromLTRB(32, 8, 32, 8),
+      child: Row(
+        children: [
+          Text(
+            'will tag',
+            style: TextStyle(fontSize: 12, color: mc.secondaryText),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                for (final tag in inherited)
+                  Semantics(
+                    label: 'Do not tag with $tag',
+                    button: true,
+                    child: GestureDetector(
+                      onTap: () => setState(
+                          () => _droppedInheritedTags = {
+                                ..._droppedInheritedTags,
+                                tag
+                              }),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: mc.cardDim,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '#$tag',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: accent,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(Icons.close, size: 12, color: mc.iconMuted),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInputBar(BuildContext context) {
     final mc = context.mc;
     // When the bar is docked at the bottom it owns the safe-area inset
@@ -2216,6 +2376,8 @@ class _NotesScreenState extends State<NotesScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (_tagSuggestions.isNotEmpty) _buildTagSuggestions(mc),
+        if (_tagSuggestions.isEmpty && _inheritedTags.isNotEmpty)
+          _buildInheritedTags(mc),
         ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxHeight),
           child: Container(

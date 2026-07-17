@@ -6,11 +6,19 @@ import 'note_filter.dart';
 // panel (desktop) are two presentations of this one object; main.dart also
 // listens to `open` to widen the web layout constraint.
 class NoteSearch {
-  NoteSearch._();
+  NoteSearch._() {
+    // Any change to the filter is a deliberate move by the user, so the
+    // just-added exemption has served its purpose by then.
+    filter.addListener(() => justAdded.value = null);
+  }
   static final instance = NoteSearch._();
 
   final open = ValueNotifier<bool>(false);
   final filter = ValueNotifier<NoteFilter>(const NoteFilter());
+
+  // A note added while a filter was active that the filter would otherwise
+  // hide. Kept visible so sending never looks like it did nothing.
+  final justAdded = ValueNotifier<String?>(null);
 
   // App-lifetime, never disposed — the screen is rebuilt on login/logout
   final queryController = TextEditingController();
@@ -52,8 +60,14 @@ class NoteSearch {
 
   void close() {
     open.value = false;
+    justAdded.value = null;
     reset();
   }
+
+  // Tags the composer will apply to a new note, so it stays visible under the
+  // filter it was written in. Only tags can be inherited — a text query or a
+  // kind filter can't be satisfied by construction.
+  Set<String> get inheritedTags => filter.value.tags;
 
   void clearQuery() {
     queryController.clear();
