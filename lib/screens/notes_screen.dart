@@ -294,6 +294,7 @@ class _NotesScreenState extends State<NotesScreen> {
         _originalImageBytes = null;
         _presetBytes = null;
       });
+      _focusCaption();
     }
   }
 
@@ -509,6 +510,12 @@ class _NotesScreenState extends State<NotesScreen> {
     setState(() => _droppedInheritedTags = const {});
   }
 
+  // A caption is the next thing you want to type after attaching something
+  void _focusCaption() {
+    if (!mounted || _pendingFile == null) return;
+    _inputFocusNode.requestFocus();
+  }
+
   Future<bool> _showFallbackBlossomDialog() async {
     final accepted = await showDialog<bool>(
       context: context,
@@ -571,6 +578,7 @@ class _NotesScreenState extends State<NotesScreen> {
         _originalImageBytes = null;
         _presetBytes = null;
       });
+      _focusCaption();
     }
   }
 
@@ -597,6 +605,7 @@ class _NotesScreenState extends State<NotesScreen> {
       _originalImageBytes = null;
       _presetBytes = null;
     });
+    _focusCaption();
   }
 
   // Raster image that can be resized/cropped — excludes GIFs, whose animation
@@ -614,6 +623,7 @@ class _NotesScreenState extends State<NotesScreen> {
         _currentPreset = ImageResizePreset.original;
         _pendingFile = (bytes: bytes, name: name, mimeType: mimeType);
       });
+      _focusCaption();
       return;
     }
     // Preserve the source format through resizing: JPEG stays JPEG, everything
@@ -634,6 +644,7 @@ class _NotesScreenState extends State<NotesScreen> {
       _currentPreset = ImageResizePreset.original;
       _pendingFile = (bytes: bytes, name: name, mimeType: mimeType);
     });
+    _focusCaption();
     // Yield to let the UI update (preview + spinner) before heavy work
     await Future.delayed(Duration.zero);
 
@@ -1091,6 +1102,7 @@ class _NotesScreenState extends State<NotesScreen> {
         } else {
           setState(() =>
               _pendingFile = (bytes: bytes, name: name, mimeType: mimeType));
+          _focusCaption();
         }
       }
     } catch (_) {}
