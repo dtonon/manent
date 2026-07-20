@@ -74,6 +74,12 @@ class NoteSearch {
     setQuery('');
   }
 
+  // Resets every facet but leaves the panel open and the field focusable
+  void clearAll() {
+    queryController.clear();
+    filter.value = const NoteFilter();
+  }
+
   void reset() {
     queryController.clear();
     filter.value = const NoteFilter();

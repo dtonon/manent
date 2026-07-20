@@ -407,15 +407,17 @@ class SearchSidePanel extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Semantics(
-                    label: 'Close search',
-                    button: true,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: NoteSearch.instance.close,
-                      child: Icon(Icons.close, size: 18, color: mc.iconMuted),
+                  // Clears every facet; closing the panel is the toolbar lens
+                  if (filter.isActive)
+                    Semantics(
+                      label: 'Clear all filters',
+                      button: true,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: NoteSearch.instance.clearAll,
+                        child: Icon(Icons.close, size: 18, color: mc.iconMuted),
+                      ),
                     ),
-                  ),
                 ],
               ),
               const SizedBox(height: 12),
