@@ -1750,8 +1750,18 @@ class _NotesScreenState extends State<NotesScreen> {
   bool get _canResizeWindowForPanel => !kIsWeb && !_useBottomBar;
 
   void _onSearchOpenChanged() {
+    final isOpen = NoteSearch.instance.open.value;
+    if (!isOpen) {
+      // On mobile the composer replaces the search field, so it has to be
+      // rebuilt before it can take focus — hence the post-frame hop.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !NoteSearch.instance.open.value) {
+          _inputFocusNode.requestFocus();
+        }
+      });
+    }
     if (!_canResizeWindowForPanel) return;
-    if (NoteSearch.instance.open.value) {
+    if (isOpen) {
       _growWindowForPanel();
     } else {
       _shrinkWindowAfterPanel();
