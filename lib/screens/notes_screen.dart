@@ -81,7 +81,8 @@ class NotesScreen extends StatefulWidget {
   State<NotesScreen> createState() => _NotesScreenState();
 }
 
-class _NotesScreenState extends State<NotesScreen> {
+class _NotesScreenState extends State<NotesScreen>
+    with WidgetsBindingObserver {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _inputFocusNode = FocusNode();
@@ -124,6 +125,10 @@ class _NotesScreenState extends State<NotesScreen> {
     super.initState();
     NoteCache.instance.notifier.addListener(_onNotesChanged);
     NoteSearch.instance.open.addListener(_onSearchOpenChanged);
+    WidgetsBinding.instance.addObserver(this);
+    // Manent is a capture app — the composer is where you land
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _focusComposerIfDesktop());
     _textController.addListener(() {
       _lastInteractionTime = DateTime.now();
       _refreshTagSuggestions();
@@ -1749,16 +1754,35 @@ class _NotesScreenState extends State<NotesScreen> {
   // the panel shares the width instead (the half-width clamp in build()).
   bool get _canResizeWindowForPanel => !kIsWeb && !_useBottomBar;
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _focusComposerIfDesktop();
+  }
+
+  // On mobile, focusing a field *is* opening the keyboard — there is no way to
+  // have one without the other that survives contact with real IMEs. So focus
+  // arrives unprompted only where it costs nothing.
+  void _focusComposerIfDesktop() {
+    if (_useBottomBar) return;
+    _focusComposer();
+  }
+
+  // Puts the caret back in the composer, unless the user is somewhere that
+  // owns focus for a reason.
+  void _focusComposer() {
+    if (!mounted) return;
+    if (NoteSearch.instance.open.value) return;
+    if (_NoteCardState._selectionModeId.value != null) return;
+    _inputFocusNode.requestFocus();
+  }
+
   void _onSearchOpenChanged() {
     final isOpen = NoteSearch.instance.open.value;
     if (!isOpen) {
       // On mobile the composer replaces the search field, so it has to be
       // rebuilt before it can take focus — hence the post-frame hop.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !NoteSearch.instance.open.value) {
-          _inputFocusNode.requestFocus();
-        }
-      });
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _focusComposerIfDesktop());
     }
     if (!_canResizeWindowForPanel) return;
     if (isOpen) {
@@ -2763,6 +2787,7 @@ class _NotesScreenState extends State<NotesScreen> {
     _NoteCardState._selectionModeId.value = null;
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
     NoteSearch.instance.open.removeListener(_onSearchOpenChanged);
+    WidgetsBinding.instance.removeObserver(this);
     NoteCache.instance.promptFallbackRelays
         .removeListener(_onFallbackRelaysPrompt);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
