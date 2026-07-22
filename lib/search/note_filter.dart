@@ -93,11 +93,12 @@ bool _matchesQuery(DecryptedNote note, NoteFilter filter) {
   return noteMatchesQuery(note, filter.query.trim().toLowerCase());
 }
 
-// Selected tags are OR'd with each other, then AND'd with the other facets
+// Selected tags are AND'd with each other and with the other facets, so each
+// tag added narrows the result further
 bool _matchesTags(DecryptedNote note, NoteFilter filter) {
   if (filter.tags.isEmpty) return true;
   final noteTags = tagsOf(note);
-  return filter.tags.any(noteTags.contains);
+  return filter.tags.every(noteTags.contains);
 }
 
 List<DecryptedNote> filterNotes(List<DecryptedNote> notes, NoteFilter filter) {
@@ -125,10 +126,9 @@ Map<NoteKindFilter, int> kindCounts(
   return counts;
 }
 
-// Tag counts ignore the current tag selection (they are OR'd, so each number
-// is that tag's own contribution) but respect kind and query.
+// Under AND a tag's count is what you would get by adding it to the current
+// selection, so counts respect every active facet — tags that would leave
+// nothing drop out of the list instead of offering a dead end.
 List<DecryptedNote> notesForTagCounts(
         List<DecryptedNote> notes, NoteFilter filter) =>
-    notes
-        .where((n) => filter.kind.matches(n) && _matchesQuery(n, filter))
-        .toList();
+    filterNotes(notes, filter);

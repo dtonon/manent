@@ -261,7 +261,7 @@ class _KindRows extends StatelessWidget {
   }
 }
 
-// Vertical tag list for the side panel — multi-select, OR'd together
+// Vertical tag list for the side panel — multi-select, AND'd together
 class _TagRows extends StatelessWidget {
   final List<({String tag, int count})> tags;
   final Set<String> selected;
@@ -466,10 +466,10 @@ class SearchSidePanel extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Only worth saying once the OR actually applies
+                    // Only worth saying once the AND actually applies
                     if (filter.tags.length > 1)
                       Text(
-                        'any of',
+                        'all of',
                         style: TextStyle(fontSize: 11, color: mc.faintText),
                       ),
                     if (filter.tags.isNotEmpty) ...[
