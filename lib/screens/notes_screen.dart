@@ -2295,7 +2295,8 @@ class _NotesScreenState extends State<NotesScreen>
         color: mc.card,
         border: Border(top: BorderSide(color: mc.border)),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      // Aligned with the composer text it sits under
+      padding: const EdgeInsets.fromLTRB(32, 8, 32, 10),
       child: SizedBox(
         height: 30,
         child: ListView.separated(
@@ -2421,9 +2422,7 @@ class _NotesScreenState extends State<NotesScreen>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (_tagSuggestions.isNotEmpty) _buildTagSuggestions(mc),
-        if (_tagSuggestions.isEmpty && _inheritedTags.isNotEmpty)
-          _buildInheritedTags(mc),
+        if (_inheritedTags.isNotEmpty) _buildInheritedTags(mc),
         ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxHeight),
           child: Container(
@@ -2768,6 +2767,7 @@ class _NotesScreenState extends State<NotesScreen>
                   ),
                   ),
                 ),
+                if (_tagSuggestions.isNotEmpty) _buildTagSuggestions(mc),
               ],
             ),
           ),
