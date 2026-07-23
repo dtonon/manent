@@ -2,7 +2,7 @@ import '../notes/note.dart';
 import 'note_tags.dart';
 
 // Facets derived from data we already store — no write-path changes needed.
-enum NoteKindFilter { all, text, images, videos, files }
+enum NoteKindFilter { all, text, images, videos, files, sensitive }
 
 extension NoteKindFilterExt on NoteKindFilter {
   String get label => switch (this) {
@@ -11,10 +11,13 @@ extension NoteKindFilterExt on NoteKindFilter {
         NoteKindFilter.images => 'Images',
         NoteKindFilter.videos => 'Videos',
         NoteKindFilter.files => 'Files',
+        NoteKindFilter.sensitive => 'Sensitive',
       };
 
   bool matches(DecryptedNote note) {
     if (this == NoteKindFilter.all) return true;
+    // Cuts across the media kinds rather than being one of them
+    if (this == NoteKindFilter.sensitive) return note.sensitive;
     final a = note.attachment;
     if (note.kind == NoteKind.text || a == null) {
       return this == NoteKindFilter.text;
