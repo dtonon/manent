@@ -119,6 +119,7 @@ class _NotesScreenState extends State<NotesScreen>
   int? _tagTokenStart;
   // Inherited tags the user removed for the note being composed
   Set<String> _droppedInheritedTags = const {};
+  bool _justAddedIsEdit = false;
 
   @override
   void initState() {
@@ -460,8 +461,9 @@ class _NotesScreenState extends State<NotesScreen>
     return text.isEmpty ? suffix : '$text $suffix';
   }
 
-  // Keeps a just-sent note on screen when the active filter would hide it
-  void _trackIfFilteredOut(String? id) {
+  // Keeps a just-sent or just-edited note on screen when the active filter
+  // would hide it
+  void _trackIfFilteredOut(String? id, {bool edited = false}) {
     final search = NoteSearch.instance;
     if (id == null || !search.open.value) return;
     final filter = search.filter.value;
@@ -469,7 +471,10 @@ class _NotesScreenState extends State<NotesScreen>
     final note =
         NoteCache.instance.notifier.value.where((n) => n.id == id).firstOrNull;
     if (note == null) return;
-    if (filterNotes([note], filter).isEmpty) search.justAdded.value = id;
+    if (filterNotes([note], filter).isEmpty) {
+      _justAddedIsEdit = edited;
+      search.justAdded.value = id;
+    }
   }
 
   Future<void> _sendNote() async {
@@ -1165,6 +1170,8 @@ class _NotesScreenState extends State<NotesScreen>
     await NoteCache.instance.update(id, text);
     if (mounted) {
       setState(() => _sending = false);
+      // An edit can remove the very tag the filter matched on
+      _trackIfFilteredOut(id, edited: true);
       final notes = NoteCache.instance.notifier.value;
       if (notes.isNotEmpty && notes.last.id == id) _scrollToBottom();
     }
@@ -2115,7 +2122,9 @@ class _NotesScreenState extends State<NotesScreen>
                   ),
                   // The search field takes the composer's slot rather than
                   // stacking below it — only one text field is ever focusable.
-                  if (searchOpen && !useSidePanel)
+                  // Editing needs that slot back; the filter stays applied and
+                  // the search field returns when the edit ends.
+                  if (searchOpen && !useSidePanel && _editingNoteId == null)
                     ValueListenableBuilder<List<DecryptedNote>>(
                       valueListenable: NoteCache.instance.notifier,
                       builder: (context, allNotes, _) =>
@@ -2163,8 +2172,9 @@ class _NotesScreenState extends State<NotesScreen>
     );
   }
 
-  // Notes are oldest-first here, so appending puts the exempt note at the
-  // visual bottom — where a newly sent note is expected to land.
+  // Notes are oldest-first here. Re-inserting by date puts a newly sent note
+  // at the visual bottom where it is expected, and leaves an edited one where
+  // it already was instead of making it jump to the end.
   List<DecryptedNote> _withJustAdded(
     List<DecryptedNote> visible,
     List<DecryptedNote> all,
@@ -2174,7 +2184,9 @@ class _NotesScreenState extends State<NotesScreen>
     if (visible.any((n) => n.id == justAddedId)) return visible;
     final note = all.where((n) => n.id == justAddedId).firstOrNull;
     if (note == null) return visible;
-    return [...visible, note];
+    final at = visible.indexWhere((n) => n.createdAt.isAfter(note.createdAt));
+    if (at < 0) return [...visible, note];
+    return [...visible.take(at), note, ...visible.skip(at)];
   }
 
   List<Widget> _buildNoteItems(List<DecryptedNote> notes,
@@ -2252,16 +2264,19 @@ class _NotesScreenState extends State<NotesScreen>
 
   // Explains why a note is on screen that the active filter would exclude
   Widget _buildOutsideFilterLabel() {
-    return const Padding(
-      padding: EdgeInsets.only(bottom: 6),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.add, size: 12, color: accent),
-          SizedBox(width: 4),
+          Icon(_justAddedIsEdit ? Icons.edit : Icons.add,
+              size: 12, color: accent),
+          const SizedBox(width: 4),
           Text(
-            'Added — outside the current filter',
-            style: TextStyle(fontSize: 11, color: accent),
+            _justAddedIsEdit
+                ? 'Edited — outside the current filter'
+                : 'Added — outside the current filter',
+            style: const TextStyle(fontSize: 11, color: accent),
           ),
         ],
       ),
