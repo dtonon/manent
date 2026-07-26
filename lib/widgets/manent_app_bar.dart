@@ -2,15 +2,21 @@ import 'package:flutter/material.dart';
 
 import '../theme.dart';
 
+// Slimmer than Flutter's 56 default — the bar is a title strip, not a nav bar
+const manentToolbarHeight = 48.0;
+
 AppBar manentAppBar({
   List<Widget>? actions,
   VoidCallback? onTitleTap,
   Widget? leading,
+  double? leadingWidth,
 }) {
   // Background, elevation and status bar style come from appBarTheme
   return AppBar(
     automaticallyImplyLeading: false,
+    toolbarHeight: manentToolbarHeight,
     leading: leading,
+    leadingWidth: leadingWidth,
     centerTitle: true,
     title: GestureDetector(
       onTap: onTitleTap,
@@ -18,7 +24,7 @@ AppBar manentAppBar({
         // Color comes from appBarTheme.titleTextStyle (theme-aware)
         'MANENT',
         style: TextStyle(
-          fontSize: 24,
+          fontSize: 20,
           fontWeight: FontWeight.w500,
           letterSpacing: 2,
         ),
@@ -63,9 +69,14 @@ class ManentBottomBar extends StatelessWidget {
         height: _barHeight,
         child: Row(
           children: [
+            // Slots align outward; each caller pads its own button so the
+            // icon lines up with the content edge, not the tap target.
             SizedBox(
               width: _slotWidth,
-              child: Center(child: leading ?? const SizedBox.shrink()),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: leading ?? const SizedBox.shrink(),
+              ),
             ),
             Expanded(
               child: Center(
@@ -75,7 +86,9 @@ class ManentBottomBar extends StatelessWidget {
                     title,
                     style: TextStyle(
                       color: mc.appBarTitle,
-                      fontSize: compactTitle ? 18 : 24,
+                      // Smaller than the desktop bar's 24 — mobile also applies
+                      // a 1.2 text scaler on top
+                      fontSize: compactTitle ? 16 : 19,
                       fontWeight: FontWeight.w500,
                       letterSpacing: compactTitle ? 0 : 2,
                     ),
@@ -85,7 +98,10 @@ class ManentBottomBar extends StatelessWidget {
             ),
             SizedBox(
               width: _slotWidth,
-              child: Center(child: trailing ?? const SizedBox.shrink()),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: trailing ?? const SizedBox.shrink(),
+              ),
             ),
           ],
         ),

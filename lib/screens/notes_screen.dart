@@ -1499,14 +1499,23 @@ class _NotesScreenState extends State<NotesScreen> {
       defaultTargetPlatform == TargetPlatform.iOS ||
       defaultTargetPlatform == TargetPlatform.android;
 
+  // Bar buttons draw their circle but claim 8px more of hit area, so the
+  // visible edge can sit on the 16px content line without shrinking the target.
+  static const _barButtonHitPad = 4.0;
+  // Smaller on desktop, where there is no touch target to satisfy
+  double get _barButtonSize => _useBottomBar ? 36.0 : 30.0;
+
   Widget _buildAvatar() {
     return Semantics(
       label: 'Profile: ${widget.user.name}',
       button: true,
       child: GestureDetector(
         onTap: _showProfileSheet,
-        child: CircleAvatar(
-          radius: 18,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.all(_barButtonHitPad),
+          child: CircleAvatar(
+          radius: _barButtonSize / 2,
           backgroundImage: widget.user.avatarUrl != null
               ? NetworkImage(widget.user.avatarUrl!)
               : null,
@@ -1516,9 +1525,12 @@ class _NotesScreenState extends State<NotesScreen> {
                   widget.user.name.isNotEmpty
                       ? widget.user.name[0].toUpperCase()
                       : '?',
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: _useBottomBar ? 14 : 12),
                 )
               : null,
+          ),
         ),
       ),
     );
@@ -1540,14 +1552,30 @@ class _NotesScreenState extends State<NotesScreen> {
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: _toggleSearch,
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: open ? Colors.white24 : Colors.transparent,
+            child: Padding(
+              padding: const EdgeInsets.all(_barButtonHitPad),
+              child: Container(
+                // Matches the avatar's diameter so both bar buttons align.
+                // The circle is always drawn — open state is carried by the
+                // icon instead, so nothing shifts when search toggles.
+                width: _barButtonSize,
+                height: _barButtonSize,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white24,
+                ),
+                child: Icon(
+                  // Points the way the search UI dismisses: down toward the
+                  // bottom bar on mobile, back toward the list on desktop
+                  open
+                      ? (_useBottomBar
+                          ? Icons.arrow_downward
+                          : Icons.arrow_back)
+                      : Icons.search,
+                  size: _useBottomBar ? 24 : 20,
+                  color: context.mc.appBarTitle,
+                ),
               ),
-              child: Icon(Icons.search, color: context.mc.appBarTitle),
             ),
           ),
         );
@@ -1654,20 +1682,30 @@ class _NotesScreenState extends State<NotesScreen> {
       return ManentBottomBar(
         title: 'Selection mode',
         compactTitle: true,
-        trailing: Semantics(
-          label: 'Exit selection mode',
-          button: true,
-          child: IconButton(
-            icon: Icon(Icons.close, color: context.mc.appBarTitle),
-            onPressed: _exitSelection,
+        trailing: Padding(
+          // IconButton is 48 wide around a 24 icon — 4 + 12 puts it at 16
+          padding: const EdgeInsets.only(right: 4),
+          child: Semantics(
+            label: 'Exit selection mode',
+            button: true,
+            child: IconButton(
+              icon: Icon(Icons.close, color: context.mc.appBarTitle),
+              onPressed: _exitSelection,
+            ),
           ),
         ),
       );
     }
     return ManentBottomBar(
       onTitleTap: _showAbout,
-      leading: _buildSearchButton(),
-      trailing: _buildAvatar(),
+      leading: Padding(
+        padding: const EdgeInsets.only(left: 12),
+        child: _buildSearchButton(),
+      ),
+      trailing: Padding(
+        padding: const EdgeInsets.only(right: 12),
+        child: _buildAvatar(),
+      ),
     );
   }
 
@@ -1675,6 +1713,7 @@ class _NotesScreenState extends State<NotesScreen> {
     // Background and elevation come from appBarTheme
     return AppBar(
       automaticallyImplyLeading: false,
+      toolbarHeight: manentToolbarHeight,
       centerTitle: true,
       title: const Text(
         'Selection mode',
@@ -1731,7 +1770,14 @@ class _NotesScreenState extends State<NotesScreen> {
                     ? _buildSelectionAppBar()
                     : manentAppBar(
                         onTitleTap: _showAbout,
-                        leading: Center(child: _buildAvatar()),
+                        // 12 + the button's own 4 hit pad puts the visible
+                        // circle on the 16px content line
+                        leadingWidth:
+                            12 + _barButtonSize + _barButtonHitPad * 2,
+                        leading: Padding(
+                          padding: const EdgeInsets.only(left: 12),
+                          child: Center(child: _buildAvatar()),
+                        ),
                         actions: [
                           Padding(
                             padding: const EdgeInsets.only(right: 12),
