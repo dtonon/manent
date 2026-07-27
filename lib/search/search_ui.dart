@@ -130,8 +130,27 @@ class _Chip extends StatelessWidget {
   }
 }
 
-// Compact facets for the inline layout: kinds, then tags, in one scrolling
-// row — a second row would not survive the keyboard on a small phone.
+// One horizontally scrolling row of chips
+class _ChipRow extends StatelessWidget {
+  final List<Widget> children;
+  const _ChipRow({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 32,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: children.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, i) => children[i],
+      ),
+    );
+  }
+}
+
+// Compact facets for the inline layout. Kinds and tags get a row each —
+// sharing one row pushed the tags off the right edge, where they went unseen.
 class _FacetChips extends StatelessWidget {
   final Map<NoteKindFilter, int> counts;
   final NoteFilter filter;
@@ -145,9 +164,8 @@ class _FacetChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mc = context.mc;
     final search = NoteSearch.instance;
-    // While typing `#…` the row is a tag picker, so the kinds step aside
+    // While typing `#…` the picker is all tags, so the kinds step aside
     final showKinds = filter.tagPrefix == null;
     final kinds = NoteKindFilter.values
         .where((k) =>
@@ -160,42 +178,36 @@ class _FacetChips extends StatelessWidget {
       ...tags.where((t) => !filter.tags.contains(t.tag)),
     ];
 
-    final children = <Widget>[
-      if (showKinds) ...[
-        for (final kind in kinds)
-          _Chip(
-            label: kind.label,
-            count: counts[kind] ?? 0,
-            selected: kind == filter.kind,
-            onTap: () => search.setKind(kind),
-            semanticLabel: '${kind.label}, ${counts[kind] ?? 0} notes',
-          ),
+    // Tags sit closest to the field, so a typed `#…` and the chips it narrows
+    // stay together — and the tag row holds its place when the kinds hide.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (showKinds) ...[
+          _ChipRow(children: [
+            for (final kind in kinds)
+              _Chip(
+                label: kind.label,
+                count: counts[kind] ?? 0,
+                selected: kind == filter.kind,
+                onTap: () => search.setKind(kind),
+                semanticLabel: '${kind.label}, ${counts[kind] ?? 0} notes',
+              ),
+          ]),
+          if (orderedTags.isNotEmpty) const SizedBox(height: 8),
+        ],
         if (orderedTags.isNotEmpty)
-          Container(
-            width: 1,
-            height: 18,
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            color: mc.border,
-          ),
+          _ChipRow(children: [
+            for (final t in orderedTags)
+              _Chip(
+                label: '#${t.tag}',
+                count: t.count,
+                selected: filter.tags.contains(t.tag),
+                onTap: () => search.toggleTag(t.tag),
+                semanticLabel: 'Tag ${t.tag}, ${t.count} notes',
+              ),
+          ]),
       ],
-      for (final t in orderedTags)
-        _Chip(
-          label: '#${t.tag}',
-          count: t.count,
-          selected: filter.tags.contains(t.tag),
-          onTap: () => search.toggleTag(t.tag),
-          semanticLabel: 'Tag ${t.tag}, ${t.count} notes',
-        ),
-    ];
-
-    return SizedBox(
-      height: 32,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: children.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, i) => children[i],
-      ),
     );
   }
 }
