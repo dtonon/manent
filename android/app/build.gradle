@@ -22,6 +22,14 @@ if (flutterVersionName == null) {
     flutterVersionName = '1.0'
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withReader('UTF-8') { reader ->
+        keystoreProperties.load(reader)
+    }
+}
+
 android {
     namespace "com.dtonon.manent"
     compileSdk flutter.compileSdkVersion
@@ -51,14 +59,32 @@ android {
         versionName flutterVersionName
     }
 
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                storeType keystoreProperties['storeType'] ?: 'PKCS12'
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix ".dev"
         }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig signingConfigs.debug
+            // Releases must be signed with the key linked to the Nostr identity
+            // proof on Zapstore; without key.properties the build falls back to
+            // the debug key and the published proof will not verify.
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            } else {
+                logger.warn("WARNING: android/key.properties not found — signing release with the DEBUG key. Do not publish this build.")
+                signingConfig signingConfigs.debug
+            }
             minifyEnabled true
             shrinkResources true
         }
