@@ -53,6 +53,10 @@ class NoteCache {
   // In-memory decrypted file bytes keyed by sha256
   final _fileCache = <String, Uint8List>{};
 
+  // Servers that refused our content outright; skipped for the rest of the
+  // session so every file does not pay for a guaranteed rejection
+  final _refusingServers = <String>{};
+
   // Limit concurrent Blossom downloads to avoid flooding on large feeds
   static const _maxConcurrentDownloads = 3;
   int _activeDownloads = 0;
@@ -409,7 +413,12 @@ class NoteCache {
         'mime=${attachment.mimeType}, servers=$_blossomServers');
     String? url;
     String? uploadedTo;
+    final failedHere = <String>{};
     for (final server in _blossomServers) {
+      if (_refusingServers.contains(server)) {
+        _diag(localId, '$server skipped: refused our content earlier');
+        continue;
+      }
       final result = await BlossomClient.upload(
         server: server,
         data: encryptedBytes,
@@ -423,6 +432,8 @@ class NoteCache {
         uploadedTo = server;
         break;
       }
+      failedHere.add(server);
+      if (result.rejected) _refusingServers.add(server);
     }
 
     if (url == null) {
@@ -439,8 +450,8 @@ class NoteCache {
     }
 
     // One copy is enough to publish; the others are filled in behind the note
-    _mirrorToOtherServers(
-        localId, url, uploadedTo!, attachment.sha256, encryptedBytes);
+    _mirrorToOtherServers(localId, url, attachment.sha256, encryptedBytes,
+        skip: {uploadedTo!, ...failedHere});
 
     final updated = attachment.copyWith(url: url);
 
@@ -741,10 +752,12 @@ class NoteCache {
 
   // Copies an uploaded blob to the remaining servers so a file stays reachable
   // if one of them drops it. Best-effort: failures never affect sync status.
-  Future<void> _mirrorToOtherServers(String localId, String url,
-      String uploadedTo, String sha256, Uint8List encryptedBytes) async {
+  // `skip` holds the server that already has it plus any that just failed it.
+  Future<void> _mirrorToOtherServers(
+      String localId, String url, String sha256, Uint8List encryptedBytes,
+      {required Set<String> skip}) async {
     for (final server in _blossomServers) {
-      if (server == uploadedTo) continue;
+      if (skip.contains(server) || _refusingServers.contains(server)) continue;
       if (_signer == null) return;
       var ok = await BlossomClient.mirror(
         server: server,
@@ -761,6 +774,7 @@ class NoteCache {
           signer: _signer!,
         );
         ok = result.url != null;
+        if (result.rejected) _refusingServers.add(server);
       }
       _diag(localId, ok ? 'mirrored to $server' : 'mirror to $server failed');
     }
@@ -1423,6 +1437,7 @@ class NoteCache {
     _writeRelays = [];
     _localKey = null;
     _fileCache.clear();
+    _refusingServers.clear();
     _map.clear();
     _pendingDeletions.clear();
     notifier.value = [];

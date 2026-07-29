@@ -39,7 +39,9 @@ class BlossomClient {
 
   // Uploads encrypted bytes to a Blossom server using BUD-01 auth.
   // Returns the blob URL on success, or the failure reason on error.
-  static Future<({String? url, String? error})> upload({
+  // `rejected` marks a server that refuses this kind of content outright, so
+  // the caller can stop sending it anything.
+  static Future<({String? url, String? error, bool rejected})> upload({
     required String server,
     required Uint8List data,
     required String sha256,
@@ -60,25 +62,39 @@ class BlossomClient {
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final url = _urlFromBody(response.body);
-        if (url != null) return (url: url, error: null);
+        if (url != null) return (url: url, error: null, rejected: false);
         return (
           url: null,
           error: 'HTTP ${response.statusCode} but no usable "url" in body: '
-              '${SyncDiagnostics.detail(response.body)}'
+              '${SyncDiagnostics.detail(response.body)}',
+          rejected: false
         );
       }
       // Blossom servers put the rejection detail in X-Reason (BUD-01)
       final reason = response.headers['x-reason'] ?? response.body;
       return (
         url: null,
-        error: 'HTTP ${response.statusCode} ${SyncDiagnostics.detail(reason)}'
+        error: 'HTTP ${response.statusCode} ${SyncDiagnostics.detail(reason)}',
+        rejected: _refusesContent(response.statusCode, reason)
       );
     } catch (e) {
       return (
         url: null,
-        error: '${e.runtimeType}: ${SyncDiagnostics.detail(e)}'
+        error: '${e.runtimeType}: ${SyncDiagnostics.detail(e)}',
+        rejected: false
       );
     }
+  }
+
+  static final _mediaTypeComplaint =
+      RegExp(r'media type|content type|file type|not allowed', caseSensitive: false);
+
+  // True when a server rejects what we send rather than this particular
+  // request. Auth, payment, size and rate limits are all left out: those are
+  // fixable or file specific, so the server is still worth trying next time.
+  static bool _refusesContent(int statusCode, String reason) {
+    if (statusCode == 415) return true;
+    return statusCode == 400 && _mediaTypeComplaint.hasMatch(reason);
   }
 
   // Asks a server to pull an existing blob from another one (BUD-04), which
