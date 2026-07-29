@@ -152,9 +152,12 @@ class _NotesScreenState extends State<NotesScreen> {
         (HardwareKeyboard.instance.isMetaPressed ||
             HardwareKeyboard.instance.isControlPressed) &&
         _editingNoteId == null) {
-      // A focused text field pastes text itself; only take over when none is
-      final focusedEditable =
-          FocusManager.instance.primaryFocus?.context?.widget is EditableText;
+      // A focused text field pastes text itself; only take over when none is.
+      // The focused node belongs to the Focus widget *inside* EditableText,
+      // so the check must look up the tree.
+      final focusContext = FocusManager.instance.primaryFocus?.context;
+      final focusedEditable = focusContext != null &&
+          focusContext.findAncestorWidgetOfExactType<EditableText>() != null;
       // Fire and forget; return false so a text paste still reaches the field
       _pasteFromClipboard(allowText: !focusedEditable);
       return false;
