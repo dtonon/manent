@@ -117,6 +117,8 @@ class _NotesScreenState extends State<NotesScreen> {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _onFallbackRelaysPrompt());
     }
+    NoteCache.instance.promptFallbackBlossom
+        .addListener(_onFallbackBlossomPrompt);
     final initialNotes = NoteCache.instance.notifier.value;
     _newestNoteId = initialNotes.isEmpty ? null : initialNotes.last.id;
     _inputFocusNode.onKeyEvent = (_, event) {
@@ -414,6 +416,52 @@ class _NotesScreenState extends State<NotesScreen> {
     _textController.clear();
     await NoteCache.instance.add(text);
     if (mounted) setState(() => _sending = false);
+  }
+
+  void _onFallbackBlossomPrompt() {
+    if (!NoteCache.instance.promptFallbackBlossom.value) return;
+    NoteCache.instance.promptFallbackBlossom.value = false;
+    // Nothing to suggest if the working servers are already in use
+    final inUse = NoteCache.instance.blossomServers;
+    if (fallbackBlossomServers.every(inUse.contains)) return;
+    _showRejectedBlossomDialog();
+  }
+
+  Future<void> _showRejectedBlossomDialog() async {
+    final shown = await AuthService.getBlossomPromptShown();
+    if (shown || !mounted) return;
+    await AuthService.setBlossomPromptShown();
+    if (!mounted) return;
+    final suggested =
+        fallbackBlossomServers.map(_hostOf).join(' and ');
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Upload refused'),
+        content: Text(
+          'Your Blossom servers refused the upload — many of them only accept '
+          'recognizable media, and Manent encrypts files before sending them. '
+          'Would you like to add $suggested? '
+          'They are only used locally (no kind:10063 update) and you can '
+          'remove them anytime in the profile page.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No thanks'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Add servers'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true) return;
+    // Keep the existing servers: they may still hold previously uploaded blobs
+    final merged = <String>{...widget.blossomServers, ...fallbackBlossomServers};
+    await widget.onBlossomServersChanged(merged.toList());
+    NoteCache.instance.retryAllFailed();
   }
 
   Future<bool> _showFallbackBlossomDialog() async {
@@ -2138,6 +2186,8 @@ class _NotesScreenState extends State<NotesScreen> {
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
     NoteCache.instance.promptFallbackRelays
         .removeListener(_onFallbackRelaysPrompt);
+    NoteCache.instance.promptFallbackBlossom
+        .removeListener(_onFallbackBlossomPrompt);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     _sharingMediaSub?.cancel();
     _textController.dispose();

@@ -124,6 +124,7 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
   AuthUser? _user;
   List<String> _additionalRelays = [];
   List<String> _blossomServers = [];
+  List<String> _fetchedBlossomServers = [];
 
   @override
   void initState() {
@@ -216,10 +217,8 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
     final relays = await relaysFuture;
     final fetchedBlossom = await blossomFuture;
     // Both futures run concurrently since we started them before awaiting
-    // Prefer kind:10063 servers; fall back to user-saved servers
-    final effectiveBlossom =
-        fetchedBlossom.isNotEmpty ? fetchedBlossom : _blossomServers;
-    NoteCache.instance.updateBlossomServers(effectiveBlossom);
+    NoteCache.instance.updateBlossomServers(_effectiveBlossom(fetchedBlossom));
+    _fetchedBlossomServers = fetchedBlossom;
     if (!mounted || _user == null) return;
     if (relays.isEmpty) {
       if (user.writeRelays.isEmpty && _additionalRelays.isEmpty) {
@@ -244,10 +243,16 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
     if (mounted) setState(() => _user = updated);
   }
 
+  // kind:10063 servers plus the locally added ones, mirroring how additional
+  // relays extend the NIP-65 list rather than replacing it
+  List<String> _effectiveBlossom(List<String> fetched) =>
+      <String>{...fetched, ..._blossomServers}.toList();
+
   Future<void> _onBlossomServersChanged(List<String> servers) async {
     setState(() => _blossomServers = servers);
     await AuthService.saveBlossomServers(servers);
-    NoteCache.instance.updateBlossomServers(servers);
+    NoteCache.instance
+        .updateBlossomServers(_effectiveBlossom(_fetchedBlossomServers));
   }
 
   Future<void> _onLogout() async {
@@ -258,6 +263,7 @@ class _ManentAppState extends State<ManentApp> with WidgetsBindingObserver {
       _user = null;
       _additionalRelays = [];
       _blossomServers = [];
+      _fetchedBlossomServers = [];
     });
     await AuthService.clear();
   }

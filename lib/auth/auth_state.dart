@@ -30,6 +30,7 @@ class AuthService {
   static final _kWriteRelays         = '${_p}write_relays';
   static final _kAdditionalRelays    = '${_p}additional_write_relays';
   static final _kFallbackPromptShown = '${_p}fallback_relay_prompt_shown';
+  static final _kBlossomPromptShown  = '${_p}fallback_blossom_prompt_shown';
   static final _kBlossomServers      = '${_p}blossom_servers';
   static final _kImageResizePreset   = '${_p}image_resize_preset';
 
@@ -89,6 +90,16 @@ class AuthService {
   static Future<void> setFallbackPromptShown() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kFallbackPromptShown, true);
+  }
+
+  static Future<bool> getBlossomPromptShown() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kBlossomPromptShown) ?? false;
+  }
+
+  static Future<void> setBlossomPromptShown() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kBlossomPromptShown, true);
   }
 
   static Future<String?> getImageResizePreset() async {

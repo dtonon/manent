@@ -36,6 +36,8 @@ class NoteCache {
   final loadingOlder = ValueNotifier<bool>(false);
   // Fires true when a publish attempt finds zero accepting relays
   final promptFallbackRelays = ValueNotifier<bool>(false);
+  // Fires true when an upload is refused by every configured Blossom server
+  final promptFallbackBlossom = ValueNotifier<bool>(false);
 
   static const _olderHistoryCompleteKey = 'older_history_complete';
   static const _olderHistoryBatchSize = 250;
@@ -425,6 +427,7 @@ class NoteCache {
 
     if (url == null) {
       _diag(localId, 'all ${_blossomServers.length} server(s) failed');
+      promptFallbackBlossom.value = true;
       if (_db != null)
         await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
@@ -1426,6 +1429,7 @@ class NoteCache {
     loading.value = false;
     loadingOlder.value = false;
     promptFallbackRelays.value = false;
+    promptFallbackBlossom.value = false;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_olderHistoryCompleteKey);
   }
