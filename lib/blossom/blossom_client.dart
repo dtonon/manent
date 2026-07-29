@@ -47,28 +47,11 @@ class BlossomClient {
   }) async {
     final uri = _upgradeScheme(Uri.parse('$server/upload'));
     try {
-      final expiration =
-          (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 3600;
-      final authEvent = Nip01Event(
-        pubKey: signer.getPublicKey(),
-        kind: 24242,
-        tags: [
-          ['t', 'upload'],
-          ['x', sha256],
-          ['expiration', expiration.toString()],
-        ],
-        content: 'Upload blob',
-        createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      );
-      final signed = await signer.sign(authEvent);
-      final eventJson = jsonEncode(Nip01EventModel.fromEntity(signed).toJson());
-      final authHeader = 'Nostr ${base64Encode(utf8.encode(eventJson))}';
-
       final response = await _sendFollowingRedirects(
         'PUT',
         uri,
         {
-          'Authorization': authHeader,
+          'Authorization': await _authHeader(signer, 'upload', sha256),
           'Content-Type': 'application/octet-stream',
         },
         data,
@@ -98,6 +81,52 @@ class BlossomClient {
     }
   }
 
+  // Asks a server to pull an existing blob from another one (BUD-04), which
+  // avoids re-sending the bytes. Best-effort: not every server implements it.
+  static Future<bool> mirror({
+    required String server,
+    required String sourceUrl,
+    required String sha256,
+    required EventSigner signer,
+  }) async {
+    final uri = _upgradeScheme(Uri.parse('$server/mirror'));
+    try {
+      final response = await _sendFollowingRedirects(
+        'PUT',
+        uri,
+        {
+          'Authorization': await _authHeader(signer, 'upload', sha256),
+          'Content-Type': 'application/json',
+        },
+        Uint8List.fromList(utf8.encode(jsonEncode({'url': sourceUrl}))),
+        const Duration(seconds: 60),
+      );
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Builds the base64 kind:24242 authorization event required by BUD-01
+  static Future<String> _authHeader(
+      EventSigner signer, String verb, String sha256) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final event = Nip01Event(
+      pubKey: signer.getPublicKey(),
+      kind: 24242,
+      tags: [
+        ['t', verb],
+        ['x', sha256],
+        ['expiration', (now + 3600).toString()],
+      ],
+      content: '${verb[0].toUpperCase()}${verb.substring(1)} blob',
+      createdAt: now,
+    );
+    final signed = await signer.sign(event);
+    final json = jsonEncode(Nip01EventModel.fromEntity(signed).toJson());
+    return 'Nostr ${base64Encode(utf8.encode(json))}';
+  }
+
   static String? _urlFromBody(String body) {
     try {
       final json = jsonDecode(body) as Map<String, dynamic>;
@@ -115,27 +144,10 @@ class BlossomClient {
   }) async {
     final uri = _upgradeScheme(Uri.parse('$server/$sha256'));
     try {
-      final expiration =
-          (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 3600;
-      final authEvent = Nip01Event(
-        pubKey: signer.getPublicKey(),
-        kind: 24242,
-        tags: [
-          ['t', 'delete'],
-          ['x', sha256],
-          ['expiration', expiration.toString()],
-        ],
-        content: 'Delete blob',
-        createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      );
-      final signed = await signer.sign(authEvent);
-      final eventJson = jsonEncode(Nip01EventModel.fromEntity(signed).toJson());
-      final authHeader = 'Nostr ${base64Encode(utf8.encode(eventJson))}';
-
       await _sendFollowingRedirects(
         'DELETE',
         uri,
-        {'Authorization': authHeader},
+        {'Authorization': await _authHeader(signer, 'delete', sha256)},
         null,
         const Duration(seconds: 30),
       );

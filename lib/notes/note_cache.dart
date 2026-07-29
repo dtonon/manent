@@ -337,12 +337,21 @@ class NoteCache {
       }
     }
 
-    // Download from Blossom (rate-limited)
-    if (attachment.url == null) return null;
+    // Download from Blossom (rate-limited). Blobs are content addressed, so any
+    // configured server can serve one; the stored url is only the first guess.
+    final candidates = <String>{
+      if (attachment.url != null) attachment.url!,
+      for (final s in _blossomServers) '$s/${attachment.sha256}',
+    };
+    if (candidates.isEmpty) return null;
+
+    Uint8List? encBytes;
     await _acquireDownloadSlot();
-    final Uint8List? encBytes;
     try {
-      encBytes = await BlossomClient.download(attachment.url!);
+      for (final url in candidates) {
+        encBytes = await BlossomClient.download(url);
+        if (encBytes != null) break;
+      }
     } finally {
       _releaseDownloadSlot();
     }
@@ -397,6 +406,7 @@ class NoteCache {
         'upload start: ${encryptedBytes.length} encrypted bytes, '
         'mime=${attachment.mimeType}, servers=$_blossomServers');
     String? url;
+    String? uploadedTo;
     for (final server in _blossomServers) {
       final result = await BlossomClient.upload(
         server: server,
@@ -407,7 +417,10 @@ class NoteCache {
       url = result.url;
       _diag(localId,
           url != null ? '$server OK → $url' : '$server failed: ${result.error}');
-      if (url != null) break;
+      if (url != null) {
+        uploadedTo = server;
+        break;
+      }
     }
 
     if (url == null) {
@@ -421,6 +434,10 @@ class NoteCache {
       }
       return;
     }
+
+    // One copy is enough to publish; the others are filled in behind the note
+    _mirrorToOtherServers(
+        localId, url, uploadedTo!, attachment.sha256, encryptedBytes);
 
     final updated = attachment.copyWith(url: url);
 
@@ -716,6 +733,33 @@ class NoteCache {
         _map[localId] = _withSyncStatus(existing, SyncStatus.failed);
         _emit();
       }
+    }
+  }
+
+  // Copies an uploaded blob to the remaining servers so a file stays reachable
+  // if one of them drops it. Best-effort: failures never affect sync status.
+  Future<void> _mirrorToOtherServers(String localId, String url,
+      String uploadedTo, String sha256, Uint8List encryptedBytes) async {
+    for (final server in _blossomServers) {
+      if (server == uploadedTo) continue;
+      if (_signer == null) return;
+      var ok = await BlossomClient.mirror(
+        server: server,
+        sourceUrl: url,
+        sha256: sha256,
+        signer: _signer!,
+      );
+      // Not every server implements /mirror, or it may fail to reach the source
+      if (!ok) {
+        final result = await BlossomClient.upload(
+          server: server,
+          data: encryptedBytes,
+          sha256: sha256,
+          signer: _signer!,
+        );
+        ok = result.url != null;
+      }
+      _diag(localId, ok ? 'mirrored to $server' : 'mirror to $server failed');
     }
   }
 

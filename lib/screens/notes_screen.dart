@@ -31,6 +31,7 @@ import 'package:ndk/ndk.dart';
 
 import '../auth/auth_state.dart';
 import '../auth/relay_constants.dart';
+import '../blossom/blossom_constants.dart';
 import '../notes/note.dart';
 import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
@@ -420,10 +421,11 @@ class _NotesScreenState extends State<NotesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('No Blossom servers'),
-        content: const Text(
+        content: Text(
           'File uploads larger than 32KB require a Blossom server. '
-          "Your account has none configured — would you like to use blossom.primal.net? "
-          'You can see, and eventually remove it, in the profile page.',
+          'Your account has none configured — would you like to use '
+          '${fallbackBlossomServers.map(_hostOf).join(' and ')}? '
+          'You can see, and eventually remove them, in the profile page.',
         ),
         actions: [
           TextButton(
@@ -438,11 +440,13 @@ class _NotesScreenState extends State<NotesScreen> {
       ),
     );
     if (accepted == true) {
-      await widget.onBlossomServersChanged(['https://blossom.primal.net']);
+      await widget.onBlossomServersChanged(List.of(fallbackBlossomServers));
       return true;
     }
     return false;
   }
+
+  String _hostOf(String server) => Uri.parse(server).host;
 
   Future<void> _pickFile() async {
     _inputFocusNode.unfocus();
