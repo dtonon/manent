@@ -1901,11 +1901,11 @@ class _NotesScreenState extends State<NotesScreen>
       onTitleTap: _showAbout,
       leading: Padding(
         padding: const EdgeInsets.only(left: 12),
-        child: _buildSearchButton(),
+        child: _buildAvatar(),
       ),
       trailing: Padding(
         padding: const EdgeInsets.only(right: 12),
-        child: _buildAvatar(),
+        child: _buildSearchButton(),
       ),
     );
   }
