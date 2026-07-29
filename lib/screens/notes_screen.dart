@@ -34,6 +34,7 @@ import '../auth/relay_constants.dart';
 import '../notes/note.dart';
 import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
+import '../notes/sync_diagnostics.dart';
 import '../theme.dart';
 import '../widgets/gif_player.dart';
 import '../widgets/inline_web_video.dart';
@@ -2791,7 +2792,10 @@ class _NoteCardState extends State<_NoteCard>
   }
 
   void _showJsonModal(DecryptedNote note) {
-    final json = note.toDebugJson();
+    final diagnostics = SyncDiagnostics.instance.forNote(note.id);
+    final json = diagnostics.isEmpty
+        ? note.toDebugJson()
+        : '${note.toDebugJson()}\n\n--- sync log ---\n${diagnostics.join('\n')}';
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2926,7 +2930,9 @@ class _NoteCardState extends State<_NoteCard>
               isFileNote && widget.note.attachment?.caption != null,
           showSensitive: widget.note.error == null,
           isSensitive: widget.note.sensitive,
-          showDebugJson: kDebugMode,
+          // Kept in release for failed notes so they can report the sync log
+          showDebugJson:
+              kDebugMode || widget.note.syncStatus == SyncStatus.failed,
           editedAt: widget.note.editedAt,
           fileSize: widget.note.attachment?.size,
           dim: widget.note.attachment?.dim,

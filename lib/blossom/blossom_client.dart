@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:ndk/ndk.dart';
 
+import '../notes/sync_diagnostics.dart';
+
 class BlossomClient {
   // Follows 3xx redirects for a body-carrying request, re-sending method +
   // body + headers (dart:io does not resend the body on 307/308 by default,
@@ -36,8 +38,8 @@ class BlossomClient {
   }
 
   // Uploads encrypted bytes to a Blossom server using BUD-01 auth.
-  // Returns the blob URL on success, null on failure.
-  static Future<String?> upload({
+  // Returns the blob URL on success, or the failure reason on error.
+  static Future<({String? url, String? error})> upload({
     required String server,
     required Uint8List data,
     required String sha256,
@@ -74,15 +76,33 @@ class BlossomClient {
       );
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        final json = jsonDecode(response.body) as Map<String, dynamic>;
-        return json['url'] as String?;
+        final url = _urlFromBody(response.body);
+        if (url != null) return (url: url, error: null);
+        return (
+          url: null,
+          error: 'HTTP ${response.statusCode} but no usable "url" in body: '
+              '${SyncDiagnostics.detail(response.body)}'
+        );
       }
-      // ignore: avoid_print
-      print('[Blossom] upload to $server failed: HTTP ${response.statusCode} — ${response.body}');
-      return null;
+      // Blossom servers put the rejection detail in X-Reason (BUD-01)
+      final reason = response.headers['x-reason'] ?? response.body;
+      return (
+        url: null,
+        error: 'HTTP ${response.statusCode} ${SyncDiagnostics.detail(reason)}'
+      );
     } catch (e) {
-      // ignore: avoid_print
-      print('[Blossom] upload to $server exception: $e');
+      return (
+        url: null,
+        error: '${e.runtimeType}: ${SyncDiagnostics.detail(e)}'
+      );
+    }
+  }
+
+  static String? _urlFromBody(String body) {
+    try {
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      return json['url'] as String?;
+    } catch (_) {
       return null;
     }
   }

@@ -67,10 +67,18 @@ class DecryptedNote {
       if (editedAt != null) 'edited_at': editedAt!.toIso8601String(),
       'sync_status': syncStatus.name,
       if (error != null) 'error': error,
-      if (attachment != null) 'attachment': attachment!.toJson(),
+      if (attachment != null) 'attachment': _attachmentDebugJson(attachment!),
       if (kind == NoteKind.text) 'text': text,
     };
     const encoder = JsonEncoder.withIndent('  ');
     return encoder.convert(map);
+  }
+
+  // Inline base64 payloads would make the report uncopyable, so summarize them
+  static Map<String, dynamic> _attachmentDebugJson(NoteAttachment a) {
+    final json = a.toJson();
+    final data = json['data'];
+    if (data is String) json['data'] = '<${data.length} base64 chars>';
+    return json;
   }
 }

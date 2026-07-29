@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ndk/data_layer/repositories/verifiers/bip340_event_verifier.dart';
+import 'package:ndk/domain_layer/entities/broadcast_state.dart';
 import 'package:ndk/domain_layer/entities/filter.dart';
 import 'package:ndk/domain_layer/entities/nip_01_event.dart';
 import 'package:ndk/domain_layer/repositories/event_signer.dart';
@@ -23,6 +24,7 @@ import 'local_key_store.dart';
 import 'note.dart';
 import 'note_attachment.dart';
 import 'notes_database.dart';
+import 'sync_diagnostics.dart';
 
 class NoteCache {
   NoteCache._();
@@ -366,11 +368,16 @@ class NoteCache {
     try {
       final dir = await getApplicationSupportDirectory();
       final file = File(p.join(dir.path, 'files', '${attachment.sha256}.enc'));
-      if (!await file.exists()) return;
+      if (!await file.exists()) {
+        _diag(localId, 'retry aborted: cache file missing at ${file.path}');
+        return;
+      }
       final encryptedBytes = await file.readAsBytes();
       await _uploadFileAndPublish(
           localId, attachment, encryptedBytes, createdAt);
-    } catch (_) {}
+    } catch (e) {
+      _diag(localId, 'retry threw ${SyncDiagnostics.detail(e)}');
+    }
   }
 
   Future<void> _uploadFileAndPublish(
@@ -380,29 +387,31 @@ class NoteCache {
     int createdAt,
   ) async {
     if (_signer == null || _blossomServers.isEmpty) {
-      // ignore: avoid_print
-      print(
-          '[Blossom] upload skipped: signer=${_signer != null}, servers=$_blossomServers');
+      _diag(localId,
+          'upload skipped: signer=${_signer != null}, servers=$_blossomServers');
       return;
     }
 
-    // ignore: avoid_print
-    print(
-        '[Blossom] uploading ${attachment.sha256} to ${_blossomServers.length} server(s): $_blossomServers');
+    _diag(
+        localId,
+        'upload start: ${encryptedBytes.length} encrypted bytes, '
+        'mime=${attachment.mimeType}, servers=$_blossomServers');
     String? url;
     for (final server in _blossomServers) {
-      url = await BlossomClient.upload(
+      final result = await BlossomClient.upload(
         server: server,
         data: encryptedBytes,
         sha256: attachment.sha256,
         signer: _signer!,
       );
+      url = result.url;
+      _diag(localId,
+          url != null ? '$server OK → $url' : '$server failed: ${result.error}');
       if (url != null) break;
     }
 
     if (url == null) {
-      // ignore: avoid_print
-      print('[Blossom] all servers failed for ${attachment.sha256}');
+      _diag(localId, 'all ${_blossomServers.length} server(s) failed');
       if (_db != null)
         await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
@@ -446,12 +455,17 @@ class NoteCache {
     int createdAt,
   ) async {
     if (_signer == null) {
+      _diag(localId, 'publish aborted: no signer');
       await _markSyncFailed(localId);
       return;
     }
     // Never publish a remote file note that hasn't been uploaded yet
-    if (!attachment.isInline && attachment.url == null) return;
+    if (!attachment.isInline && attachment.url == null) {
+      _diag(localId, 'publish skipped: not inline and url is null');
+      return;
+    }
     if (_writeRelays.isEmpty) {
+      _diag(localId, 'publish aborted: no write relays');
       promptFallbackRelays.value = true;
       if (_db != null)
         await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
@@ -469,9 +483,15 @@ class NoteCache {
         recipientPubKey: _signer!.getPublicKey(),
       );
       if (encrypted == null) {
+        _diag(localId, 'publish aborted: NIP-44 encryption returned null');
         await _markSyncFailed(localId);
         return;
       }
+
+      _diag(
+          localId,
+          'publish: inline=${attachment.isInline} url=${attachment.url ?? "-"} '
+          'nip44_payload=${encrypted.length} chars');
 
       if (_db != null) {
         await _db!.updateEncryptedContent(
@@ -512,6 +532,8 @@ class NoteCache {
           .broadcast(nostrEvent: signed, specificRelays: _writeRelays)
           .broadcastDoneFuture;
 
+      _recordRelayResponses(localId, signed, responses);
+
       final newStatus = responses.any((r) => r.broadcastSuccessful)
           ? SyncStatus.synced
           : SyncStatus.failed;
@@ -528,7 +550,8 @@ class NoteCache {
       }
 
       _retryPendingDecryptions();
-    } catch (_) {
+    } catch (e) {
+      _diag(localId, 'publish threw ${SyncDiagnostics.detail(e)}');
       if (_db != null)
         await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
@@ -666,6 +689,8 @@ class NoteCache {
           .broadcast(nostrEvent: signed, specificRelays: _writeRelays)
           .broadcastDoneFuture;
 
+      _recordRelayResponses(localId, signed, responses);
+
       final newStatus = responses.any((r) => r.broadcastSuccessful)
           ? SyncStatus.synced
           : SyncStatus.failed;
@@ -682,7 +707,8 @@ class NoteCache {
       }
 
       _retryPendingDecryptions();
-    } catch (_) {
+    } catch (e) {
+      _diag(localId, 'publish threw ${SyncDiagnostics.detail(e)}');
       if (_db != null)
         await _db!.updateSyncStatus(localId, SyncStatus.failed.value);
       final existing = _map[localId];
@@ -693,9 +719,30 @@ class NoteCache {
     }
   }
 
+  void _diag(String localId, String message) =>
+      SyncDiagnostics.instance.record(localId, message);
+
+  void _recordRelayResponses(String localId, Nip01Event signed,
+      List<RelayBroadcastResponse> responses) {
+    _diag(localId,
+        'broadcast kind ${signed.kind} id=${signed.id} created_at=${signed.createdAt}');
+    for (final r in responses) {
+      _diag(
+          localId,
+          '  ${r.relayUrl}: success=${r.broadcastSuccessful} '
+          'msg="${SyncDiagnostics.detail(r.msg)}"');
+    }
+    String norm(String u) => u.replaceAll(RegExp(r'/+$'), '');
+    final answered = responses.map((r) => norm(r.relayUrl)).toSet();
+    for (final u in _writeRelays.where((u) => !answered.contains(norm(u)))) {
+      _diag(localId, '  $u: no response');
+    }
+  }
+
   Future<void> retrySync(String id) async {
     final existing = _map[id];
     if (existing == null || existing.error != null) return;
+    _diag(id, '--- manual retry ---');
 
     if (_db != null) await _db!.updateSyncStatus(id, SyncStatus.pending.value);
     _map[id] = _withSyncStatus(existing, SyncStatus.pending);
