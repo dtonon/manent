@@ -14,7 +14,9 @@ Think of it as your personal "Saved Messages": write notes, attach images and fi
 - **Video** - Play video files and gifs
 - **Camera** - Capture photo and video from the app
 - **End-to-end encrypted** — Everything (notes, files, metadata) is encrypted with NIP-44 before leaving your device
-- **Synced via Nostr** — Your data lives on your own relays; files (larger than 32KB) are stored on Blossom servers
+- **Tags** - Organize your notes with inline tags
+- **Search** - Search and filter your notes by tags
+- **Sync via Nostr** — Your data lives on your own relays; files (larger than 32KB) are stored on Blossom servers
 - **Multi-platform** — Web, Android, Linux, macOS (iOS and Windows builds untested)
 
 ## Login methods
