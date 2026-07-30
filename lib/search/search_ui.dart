@@ -116,13 +116,29 @@ class _Chip extends StatelessWidget {
             color: selected ? mc.selectedFill : mc.cardDim,
             borderRadius: BorderRadius.circular(16),
           ),
-          child: Text(
-            '$label  $count',
-            style: TextStyle(
-              fontSize: 13,
-              color: selected ? Colors.white : mc.secondaryText,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+          // Label carries the meaning, so it gets full-strength text; the
+          // count is stepped down but stays above the AA threshold
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: label,
+                  style: TextStyle(
+                    color: selected ? Colors.white : mc.primaryText,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                ),
+                TextSpan(
+                  text: '  $count',
+                  style: TextStyle(
+                    color: selected
+                        ? Colors.white.withValues(alpha: 0.85)
+                        : mc.primaryText.withValues(alpha: 0.7),
+                  ),
+                ),
+              ],
             ),
+            style: const TextStyle(fontSize: 13),
           ),
         ),
       ),
@@ -260,7 +276,9 @@ class _KindRows extends StatelessWidget {
                       '${counts[kind] ?? 0}',
                       style: TextStyle(
                         fontSize: 13,
-                        color: kind == selected ? Colors.white70 : mc.faintText,
+                        color: kind == selected
+                            ? Colors.white.withValues(alpha: 0.85)
+                            : mc.primaryText.withValues(alpha: 0.7),
                       ),
                     ),
                   ],
@@ -325,8 +343,8 @@ class _TagRows extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 13,
                         color: selected.contains(t.tag)
-                            ? Colors.white70
-                            : mc.faintText,
+                            ? Colors.white.withValues(alpha: 0.85)
+                            : mc.primaryText.withValues(alpha: 0.7),
                       ),
                     ),
                   ],
