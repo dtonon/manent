@@ -1578,7 +1578,7 @@ class _NotesScreenState extends State<NotesScreen>
   Future<String> _readVersion() async {
     final yaml = await rootBundle.loadString('pubspec.yaml');
     final match =
-        RegExp(r'^version:\s+(\S+)', multiLine: true).firstMatch(yaml);
+        RegExp(r'^version:\s+([^\s+]+)', multiLine: true).firstMatch(yaml);
     return match?.group(1) ?? '';
   }
 
