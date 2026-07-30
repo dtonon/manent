@@ -200,8 +200,9 @@ class NoteCache {
     }
   }
 
-  Future<void> add(String text) async {
-    if (_localKey == null) return;
+  // Returns the local id of the new note so callers can track it
+  Future<String?> add(String text) async {
+    if (_localKey == null) return null;
 
     final localContent = await LocalCrypto.encrypt(_localKey!, text);
     final id = _generateId();
@@ -224,11 +225,12 @@ class NoteCache {
     _emit();
 
     _publishToRelays(id, text, now.millisecondsSinceEpoch ~/ 1000);
+    return id;
   }
 
-  Future<void> addFile(Uint8List bytes, String filename,
+  Future<String?> addFile(Uint8List bytes, String filename,
       {String? caption}) async {
-    if (_localKey == null) return;
+    if (_localKey == null) return null;
 
     filename = p.basename(filename);
     final mimeType = lookupMimeType(filename) ?? 'application/octet-stream';
@@ -313,6 +315,7 @@ class NoteCache {
       _uploadFileAndPublish(
           id, attachment, encryptedBytes, now.millisecondsSinceEpoch ~/ 1000);
     }
+    return id;
   }
 
   // Returns decrypted file bytes for an attachment.

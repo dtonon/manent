@@ -21,7 +21,9 @@ import 'package:flutter/rendering.dart' show SelectedContent;
 import 'package:flutter/services.dart';
 import 'package:thumbhash/thumbhash.dart' hide Image;
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../utils/web_download.dart';
 import '../utils/web_image_resize.dart';
@@ -36,6 +38,10 @@ import '../notes/note.dart';
 import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
 import '../notes/sync_diagnostics.dart';
+import '../search/note_filter.dart';
+import '../search/note_search.dart';
+import '../search/note_tags.dart';
+import '../search/search_ui.dart';
 import '../theme.dart';
 import '../widgets/gif_player.dart';
 import '../widgets/inline_web_video.dart';
@@ -77,7 +83,8 @@ class NotesScreen extends StatefulWidget {
   State<NotesScreen> createState() => _NotesScreenState();
 }
 
-class _NotesScreenState extends State<NotesScreen> {
+class _NotesScreenState extends State<NotesScreen>
+    with WidgetsBindingObserver {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _inputFocusNode = FocusNode();
@@ -105,12 +112,30 @@ class _NotesScreenState extends State<NotesScreen> {
   Map<ImageResizePreset, Uint8List>? _presetBytes;
   // Guards against opening the crop editor twice on a rapid double-tap
   bool _openingEditor = false;
+  // How much the search panel grew / moved the window, to undo on close
+  double _panelWindowGrowth = 0;
+  double _panelWindowShift = 0;
+  // Tag autocomplete: the `#…` token under the caret and what to offer for it
+  List<String> _tagSuggestions = const [];
+  int _tagSuggestionIndex = 0;
+  int? _tagTokenStart;
+  // Inherited tags the user removed for the note being composed
+  Set<String> _droppedInheritedTags = const {};
+  bool _justAddedIsEdit = false;
 
   @override
   void initState() {
     super.initState();
     NoteCache.instance.notifier.addListener(_onNotesChanged);
-    _textController.addListener(() => _lastInteractionTime = DateTime.now());
+    NoteSearch.instance.open.addListener(_onSearchOpenChanged);
+    WidgetsBinding.instance.addObserver(this);
+    // Manent is a capture app — the composer is where you land
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _focusComposerIfDesktop());
+    _textController.addListener(() {
+      _lastInteractionTime = DateTime.now();
+      _refreshTagSuggestions();
+    });
     NoteCache.instance.promptFallbackRelays
         .addListener(_onFallbackRelaysPrompt);
     if (NoteCache.instance.promptFallbackRelays.value) {
@@ -122,8 +147,29 @@ class _NotesScreenState extends State<NotesScreen> {
     final initialNotes = NoteCache.instance.notifier.value;
     _newestNoteId = initialNotes.isEmpty ? null : initialNotes.last.id;
     _inputFocusNode.onKeyEvent = (_, event) {
-      if (event is KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.escape &&
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      // Tag suggestions claim these keys only while the popup is open. Enter is
+      // deliberately left alone — it inserts a newline in a note.
+      if (_tagSuggestions.isNotEmpty) {
+        switch (event.logicalKey) {
+          case LogicalKeyboardKey.tab:
+            _acceptTagSuggestion(_tagSuggestions[_tagSuggestionIndex]);
+            return KeyEventResult.handled;
+          case LogicalKeyboardKey.arrowDown:
+            setState(() => _tagSuggestionIndex =
+                (_tagSuggestionIndex + 1) % _tagSuggestions.length);
+            return KeyEventResult.handled;
+          case LogicalKeyboardKey.arrowUp:
+            setState(() => _tagSuggestionIndex =
+                (_tagSuggestionIndex - 1 + _tagSuggestions.length) %
+                    _tagSuggestions.length);
+            return KeyEventResult.handled;
+          case LogicalKeyboardKey.escape:
+            _dismissTagSuggestions();
+            return KeyEventResult.handled;
+        }
+      }
+      if (event.logicalKey == LogicalKeyboardKey.escape &&
           _editingNoteId != null) {
         _cancelEdit();
         return KeyEventResult.handled;
@@ -150,6 +196,22 @@ class _NotesScreenState extends State<NotesScreen> {
   bool _onHardwareKey(KeyEvent event) {
     if (!mounted) return false;
     if (event is! KeyDownEvent) return false;
+    if (event.logicalKey == LogicalKeyboardKey.keyF &&
+        (HardwareKeyboard.instance.isMetaPressed ||
+            HardwareKeyboard.instance.isControlPressed)) {
+      if (!NoteSearch.instance.open.value) {
+        _inputFocusNode.unfocus();
+        NoteSearch.instance.openSearch();
+      } else {
+        NoteSearch.instance.queryFocus.requestFocus();
+      }
+      return true;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape &&
+        NoteSearch.instance.open.value) {
+      NoteSearch.instance.close();
+      return true;
+    }
     // Paste from clipboard — works even when the input is unfocused, but not
     // while editing (there the paste is a plain text edit).
     if (event.logicalKey == LogicalKeyboardKey.keyV &&
@@ -245,6 +307,7 @@ class _NotesScreenState extends State<NotesScreen> {
         _originalImageBytes = null;
         _presetBytes = null;
       });
+      _focusCaption();
     }
   }
 
@@ -386,6 +449,41 @@ class _NotesScreenState extends State<NotesScreen> {
     });
   }
 
+  // Tags carried over from the active filter, minus any the user waved off
+  Set<String> get _inheritedTags {
+    if (_editingNoteId != null) return const {};
+    if (!NoteSearch.instance.open.value) return const {};
+    return NoteSearch.instance.inheritedTags
+        .difference(_droppedInheritedTags);
+  }
+
+  // Appends the inherited tags the text doesn't already carry
+  String _withInheritedTags(String text) {
+    final inherited = _inheritedTags;
+    if (inherited.isEmpty) return text;
+    final present = extractTags(text);
+    final missing = inherited.where((t) => !present.contains(t));
+    if (missing.isEmpty) return text;
+    final suffix = missing.map((t) => '#$t').join(' ');
+    return text.isEmpty ? suffix : '$text $suffix';
+  }
+
+  // Keeps a just-sent or just-edited note on screen when the active filter
+  // would hide it
+  void _trackIfFilteredOut(String? id, {bool edited = false}) {
+    final search = NoteSearch.instance;
+    if (id == null || !search.open.value) return;
+    final filter = search.filter.value;
+    if (!filter.isActive) return;
+    final note =
+        NoteCache.instance.notifier.value.where((n) => n.id == id).firstOrNull;
+    if (note == null) return;
+    if (filterNotes([note], filter).isEmpty) {
+      _justAddedIsEdit = edited;
+      search.justAdded.value = id;
+    }
+  }
+
   Future<void> _sendNote() async {
     if (_sending) return;
     final file = _pendingFile;
@@ -396,25 +494,31 @@ class _NotesScreenState extends State<NotesScreen> {
         final added = await _showFallbackBlossomDialog();
         if (!added) return;
       }
-      final caption = _textController.text.trim();
+      // Inherited tags land in the caption, which is where a file note's
+      // tags live — even if the caption would otherwise be empty
+      final caption = _withInheritedTags(_textController.text.trim());
       setState(() {
         _sending = true;
         _pendingFile = null;
       });
       _textController.clear();
-      await NoteCache.instance.addFile(
+      _clearInheritedTagOverrides();
+      final id = await NoteCache.instance.addFile(
         file.bytes,
         file.name,
         caption: caption.isEmpty ? null : caption,
       );
+      _trackIfFilteredOut(id);
       if (mounted) setState(() => _sending = false);
       return;
     }
-    final text = _textController.text.trim();
+    final text = _withInheritedTags(_textController.text.trim());
     if (text.isEmpty) return;
     setState(() => _sending = true);
     _textController.clear();
-    await NoteCache.instance.add(text);
+    _clearInheritedTagOverrides();
+    final id = await NoteCache.instance.add(text);
+    _trackIfFilteredOut(id);
     if (mounted) setState(() => _sending = false);
   }
 
@@ -462,6 +566,17 @@ class _NotesScreenState extends State<NotesScreen> {
     final merged = <String>{...widget.blossomServers, ...fallbackBlossomServers};
     await widget.onBlossomServersChanged(merged.toList());
     NoteCache.instance.retryAllFailed();
+  }
+
+  void _clearInheritedTagOverrides() {
+    if (_droppedInheritedTags.isEmpty) return;
+    setState(() => _droppedInheritedTags = const {});
+  }
+
+  // A caption is the next thing you want to type after attaching something
+  void _focusCaption() {
+    if (!mounted || _pendingFile == null) return;
+    _inputFocusNode.requestFocus();
   }
 
   Future<bool> _showFallbackBlossomDialog() async {
@@ -529,6 +644,7 @@ class _NotesScreenState extends State<NotesScreen> {
         _originalImageBytes = null;
         _presetBytes = null;
       });
+      _focusCaption();
     }
   }
 
@@ -555,6 +671,7 @@ class _NotesScreenState extends State<NotesScreen> {
       _originalImageBytes = null;
       _presetBytes = null;
     });
+    _focusCaption();
   }
 
   // Raster image that can be resized/cropped — excludes GIFs, whose animation
@@ -572,6 +689,7 @@ class _NotesScreenState extends State<NotesScreen> {
         _currentPreset = ImageResizePreset.original;
         _pendingFile = (bytes: bytes, name: name, mimeType: mimeType);
       });
+      _focusCaption();
       return;
     }
     // Preserve the source format through resizing: JPEG stays JPEG, everything
@@ -592,6 +710,7 @@ class _NotesScreenState extends State<NotesScreen> {
       _currentPreset = ImageResizePreset.original;
       _pendingFile = (bytes: bytes, name: name, mimeType: mimeType);
     });
+    _focusCaption();
     // Yield to let the UI update (preview + spinner) before heavy work
     await Future.delayed(Duration.zero);
 
@@ -1014,8 +1133,16 @@ class _NotesScreenState extends State<NotesScreen> {
     });
   }
 
+  // Shared content lands in the composer, and on mobile the inline search sits
+  // in its slot — close the search or the user never sees what arrived.
+  void _closeSearchForIncoming() {
+    if (!_useBottomBar) return;
+    if (NoteSearch.instance.open.value) NoteSearch.instance.close();
+  }
+
   void _handleSharedText(String text) {
     if (!mounted || text.isEmpty) return;
+    _closeSearchForIncoming();
     final current = _textController.text;
     final normalized = text.endsWith('\n') ? text : '$text\n';
     final newText = current.isEmpty ? normalized : '$current\n$normalized';
@@ -1032,6 +1159,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
   Future<void> _handleSharedMedia(List<SharedMediaFile> media) async {
     if (media.isEmpty || !mounted) return;
+    _closeSearchForIncoming();
     final item = media.first;
     if (item.type == SharedMediaType.text || item.type == SharedMediaType.url) {
       _handleSharedText(item.path);
@@ -1049,6 +1177,7 @@ class _NotesScreenState extends State<NotesScreen> {
         } else {
           setState(() =>
               _pendingFile = (bytes: bytes, name: name, mimeType: mimeType));
+          _focusCaption();
         }
       }
     } catch (_) {}
@@ -1106,6 +1235,8 @@ class _NotesScreenState extends State<NotesScreen> {
     await NoteCache.instance.update(id, text);
     if (mounted) {
       setState(() => _sending = false);
+      // An edit can remove the very tag the filter matched on
+      _trackIfFilteredOut(id, edited: true);
       final notes = NoteCache.instance.notifier.value;
       if (notes.isNotEmpty && notes.last.id == id) _scrollToBottom();
     }
@@ -1524,10 +1655,331 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
+  // The bar docks at the bottom on mobile (thumb reach) and stays on top
+  // elsewhere, where a bottom bar is not the platform idiom.
+  bool get _useBottomBar =>
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.android;
+
+  // Bar buttons draw their circle but claim 8px more of hit area, so the
+  // visible edge can sit on the 16px content line without shrinking the target.
+  static const _barButtonHitPad = 4.0;
+  // Smaller on desktop, where there is no touch target to satisfy
+  double get _barButtonSize => _useBottomBar ? 36.0 : 30.0;
+
+  Widget _buildAvatar() {
+    return Semantics(
+      label: 'Profile: ${widget.user.name}',
+      button: true,
+      child: GestureDetector(
+        onTap: _showProfileSheet,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.all(_barButtonHitPad),
+          child: CircleAvatar(
+          radius: _barButtonSize / 2,
+          backgroundImage: widget.user.avatarUrl != null
+              ? NetworkImage(widget.user.avatarUrl!)
+              : null,
+          backgroundColor: accent,
+          child: widget.user.avatarUrl == null
+              ? Text(
+                  widget.user.name.isNotEmpty
+                      ? widget.user.name[0].toUpperCase()
+                      : '?',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: _useBottomBar ? 14 : 12),
+                )
+              : null,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Boundary chars that may precede a `#`, mirroring the tag regex
+  static final _tagBoundary = RegExp(r'''[\s(\[{"']''');
+  static final _tagBody = RegExp(r'^[\p{L}\p{N}_-]*$', unicode: true);
+
+  // The `#…` token the caret currently sits inside, if any
+  ({int start, String prefix})? _activeTagToken() {
+    final sel = _textController.selection;
+    if (!sel.isValid || !sel.isCollapsed) return null;
+    final text = _textController.text;
+    final caret = sel.baseOffset;
+    if (caret <= 0 || caret > text.length) return null;
+
+    for (var i = caret - 1; i >= 0; i--) {
+      final ch = text[i];
+      if (ch == '#') {
+        if (i > 0 && !_tagBoundary.hasMatch(text[i - 1])) return null;
+        final prefix = text.substring(i + 1, caret);
+        if (!_tagBody.hasMatch(prefix)) return null;
+        return (start: i, prefix: prefix.toLowerCase());
+      }
+      // A tag can't contain whitespace, so stop looking at the word boundary
+      if (RegExp(r'\s').hasMatch(ch)) return null;
+    }
+    return null;
+  }
+
+  void _refreshTagSuggestions() {
+    final token = _activeTagToken();
+    final next = token == null
+        ? const <String>[]
+        : suggestTags(NoteCache.instance.notifier.value, token.prefix);
+    if (next.length == _tagSuggestions.length &&
+        next.isEmpty == _tagSuggestions.isEmpty &&
+        token?.start == _tagTokenStart &&
+        _listEquals(next, _tagSuggestions)) {
+      return;
+    }
+    setState(() {
+      _tagSuggestions = next;
+      _tagTokenStart = token?.start;
+      _tagSuggestionIndex = 0;
+    });
+  }
+
+  static bool _listEquals(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  void _dismissTagSuggestions() {
+    if (_tagSuggestions.isEmpty) return;
+    setState(() {
+      _tagSuggestions = const [];
+      _tagTokenStart = null;
+    });
+  }
+
+  // Replaces the typed token with the chosen tag and a trailing space
+  void _acceptTagSuggestion(String tag) {
+    final start = _tagTokenStart;
+    if (start == null) return;
+    final caret = _textController.selection.baseOffset;
+    if (caret < start) return;
+    final text = _textController.text;
+    final replacement = '#$tag ';
+    _textController.value = TextEditingValue(
+      text: text.replaceRange(start, caret, replacement),
+      selection: TextSelection.collapsed(offset: start + replacement.length),
+    );
+    _dismissTagSuggestions();
+  }
+
+  void _exitSelection() {
+    _NoteCardState._selectionModeId.value = null;
+    _inputFocusNode.unfocus();
+  }
+
+  // The lens lives opposite the profile in both bars
+  Widget _buildSearchButton() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: NoteSearch.instance.open,
+      builder: (context, open, _) {
+        return Semantics(
+          label: open ? 'Close search' : 'Search notes',
+          button: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleSearch,
+            child: Padding(
+              padding: const EdgeInsets.all(_barButtonHitPad),
+              child: Container(
+                // Matches the avatar's diameter so both bar buttons align.
+                // The circle is always drawn — open state is carried by the
+                // icon instead, so nothing shifts when search toggles.
+                width: _barButtonSize,
+                height: _barButtonSize,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white24,
+                ),
+                child: Icon(
+                  // Points the way the search UI dismisses: down toward the
+                  // bottom bar on mobile, back toward the list on desktop
+                  open
+                      ? (_useBottomBar
+                          ? Icons.arrow_downward
+                          : Icons.arrow_back)
+                      : Icons.search,
+                  size: _useBottomBar ? 24 : 20,
+                  color: context.mc.appBarTitle,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Opening the panel widens the window instead of narrowing the list. It grows
+  // to the right when there is room, otherwise leftward with its distance from
+  // the right edge preserved. If the display can't fit the wider window at all,
+  // the panel shares the width instead (the half-width clamp in build()).
+  bool get _canResizeWindowForPanel => !kIsWeb && !_useBottomBar;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _focusComposerIfDesktop();
+  }
+
+  // On mobile, focusing a field *is* opening the keyboard — there is no way to
+  // have one without the other that survives contact with real IMEs. So focus
+  // arrives unprompted only where it costs nothing.
+  void _focusComposerIfDesktop() {
+    if (_useBottomBar) return;
+    _focusComposer();
+  }
+
+  // Puts the caret back in the composer, unless the user is somewhere that
+  // owns focus for a reason.
+  void _focusComposer() {
+    if (!mounted) return;
+    if (NoteSearch.instance.open.value) return;
+    if (_NoteCardState._selectionModeId.value != null) return;
+    _inputFocusNode.requestFocus();
+  }
+
+  void _onSearchOpenChanged() {
+    final isOpen = NoteSearch.instance.open.value;
+    if (!isOpen) {
+      // On mobile the composer replaces the search field, so it has to be
+      // rebuilt before it can take focus — hence the post-frame hop.
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _focusComposerIfDesktop());
+    }
+    if (!_canResizeWindowForPanel) return;
+    if (isOpen) {
+      _growWindowForPanel();
+    } else {
+      _shrinkWindowAfterPanel();
+    }
+  }
+
+  Future<Display> _displayForWindow(Rect bounds) async {
+    final displays = await screenRetriever.getAllDisplays();
+    final center = bounds.center;
+    for (final d in displays) {
+      final pos = d.visiblePosition ?? Offset.zero;
+      final size = d.visibleSize ?? d.size;
+      if (center.dx >= pos.dx &&
+          center.dx < pos.dx + size.width &&
+          center.dy >= pos.dy &&
+          center.dy < pos.dy + size.height) {
+        return d;
+      }
+    }
+    return screenRetriever.getPrimaryDisplay();
+  }
+
+  Future<void> _growWindowForPanel() async {
+    try {
+      if (await windowManager.isMaximized() ||
+          await windowManager.isFullScreen()) {
+        return;
+      }
+      final bounds = await windowManager.getBounds();
+      final display = await _displayForWindow(bounds);
+      final origin = display.visiblePosition ?? Offset.zero;
+      final area = display.visibleSize ?? display.size;
+      final targetWidth = bounds.width + searchPanelWidth;
+      // Not enough room even flush against the left edge — keep the window put
+      if (targetWidth > area.width) return;
+
+      var left = bounds.left;
+      final screenRight = origin.dx + area.width;
+      if (left + targetWidth > screenRight) {
+        // Not enough room on the right: grow leftward instead, keeping the gap
+        // the window already had from the right edge rather than going flush.
+        final rightGap = screenRight - (bounds.left + bounds.width);
+        left = screenRight - (rightGap < 0 ? 0 : rightGap) - targetWidth;
+        if (left < origin.dx) left = origin.dx;
+      }
+
+      _panelWindowShift = bounds.left - left;
+      _panelWindowGrowth = searchPanelWidth;
+      await windowManager.setBounds(
+        Rect.fromLTWH(left, bounds.top, targetWidth, bounds.height),
+      );
+    } catch (_) {
+      _panelWindowShift = 0;
+      _panelWindowGrowth = 0;
+    }
+  }
+
+  Future<void> _shrinkWindowAfterPanel() async {
+    if (_panelWindowGrowth == 0) return;
+    final growth = _panelWindowGrowth;
+    final shift = _panelWindowShift;
+    _panelWindowGrowth = 0;
+    _panelWindowShift = 0;
+    try {
+      final bounds = await windowManager.getBounds();
+      // Derive from current bounds, not a snapshot, so a manual resize while
+      // the panel was open is preserved.
+      final width = bounds.width - growth;
+      if (width < 320) return;
+      await windowManager.setBounds(
+        Rect.fromLTWH(bounds.left + shift, bounds.top, width, bounds.height),
+      );
+    } catch (_) {}
+  }
+
+  void _toggleSearch() {
+    final search = NoteSearch.instance;
+    if (search.open.value) {
+      search.close();
+    } else {
+      _inputFocusNode.unfocus();
+      search.openSearch();
+    }
+  }
+
+  Widget _buildBottomBar(bool inSelection) {
+    if (inSelection) {
+      return ManentBottomBar(
+        title: 'Selection mode',
+        compactTitle: true,
+        trailing: Padding(
+          // IconButton is 48 wide around a 24 icon — 4 + 12 puts it at 16
+          padding: const EdgeInsets.only(right: 4),
+          child: Semantics(
+            label: 'Exit selection mode',
+            button: true,
+            child: IconButton(
+              icon: Icon(Icons.close, color: context.mc.appBarTitle),
+              onPressed: _exitSelection,
+            ),
+          ),
+        ),
+      );
+    }
+    return ManentBottomBar(
+      onTitleTap: _showAbout,
+      leading: Padding(
+        padding: const EdgeInsets.only(left: 12),
+        child: _buildAvatar(),
+      ),
+      trailing: Padding(
+        padding: const EdgeInsets.only(right: 12),
+        child: _buildSearchButton(),
+      ),
+    );
+  }
+
   AppBar _buildSelectionAppBar() {
     // Background and elevation come from appBarTheme
     return AppBar(
       automaticallyImplyLeading: false,
+      toolbarHeight: manentToolbarHeight,
       centerTitle: true,
       title: const Text(
         'Selection mode',
@@ -1559,12 +2011,17 @@ class _NotesScreenState extends State<NotesScreen> {
       valueListenable: _NoteCardState._selectionModeId,
       builder: (context, selectionId, _) {
         final inSelection = selectionId != null;
-        return _wrapWithDropRegion(PopScope(
-          canPop: !inSelection && _editingNoteId == null,
+        return ValueListenableBuilder<bool>(
+          valueListenable: NoteSearch.instance.open,
+          builder: (context, searchOpen, _) {
+        final content = _wrapWithDropRegion(PopScope(
+          canPop: !inSelection && _editingNoteId == null && !searchOpen,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) {
               if (_editingNoteId != null) {
                 _cancelEdit();
+              } else if (NoteSearch.instance.open.value) {
+                NoteSearch.instance.close();
               } else {
                 _NoteCardState._selectionModeId.value = null;
                 _inputFocusNode.unfocus();
@@ -1573,48 +2030,49 @@ class _NotesScreenState extends State<NotesScreen> {
           },
           child: Scaffold(
             backgroundColor: context.mc.surface,
-            appBar: inSelection
-                ? _buildSelectionAppBar()
-                : manentAppBar(
-                    onTitleTap: _showAbout,
-                    actions: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 20),
-                        child: Semantics(
-                          label: 'Profile: ${widget.user.name}',
-                          button: true,
-                          child: GestureDetector(
-                            onTap: _showProfileSheet,
-                            child: CircleAvatar(
-                              radius: 18,
-                              backgroundImage: widget.user.avatarUrl != null
-                                  ? NetworkImage(widget.user.avatarUrl!)
-                                  : null,
-                              backgroundColor: accent,
-                              child: widget.user.avatarUrl == null
-                                  ? Text(
-                                      widget.user.name.isNotEmpty
-                                          ? widget.user.name[0].toUpperCase()
-                                          : '?',
-                                      style: const TextStyle(
-                                          color: Colors.white, fontSize: 14),
-                                    )
-                                  : null,
-                            ),
-                          ),
+            appBar: _useBottomBar
+                ? null
+                : inSelection
+                    ? _buildSelectionAppBar()
+                    : manentAppBar(
+                        onTitleTap: _showAbout,
+                        // 12 + the button's own 4 hit pad puts the visible
+                        // circle on the 16px content line
+                        leadingWidth:
+                            12 + _barButtonSize + _barButtonHitPad * 2,
+                        leading: Padding(
+                          padding: const EdgeInsets.only(left: 12),
+                          child: Center(child: _buildAvatar()),
                         ),
+                        actions: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 12),
+                            child: _buildSearchButton(),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-            body: GestureDetector(
+            bottomNavigationBar:
+                _useBottomBar ? _buildBottomBar(inSelection) : null,
+            body: SafeArea(
+              // With no top bar the list would otherwise run under the status bar
+              top: _useBottomBar,
+              bottom: false,
+              child: LayoutBuilder(builder: (context, constraints) {
+                // Desktop always gets the panel — the window width is the
+                // user's choice, so never swap the layout under them. On a very
+                // narrow window the panel gives way rather than eat the list.
+                final useSidePanel = !_useBottomBar;
+                final halfWidth = constraints.maxWidth / 2;
+                final panelWidth = halfWidth < searchPanelWidth
+                    ? halfWidth
+                    : searchPanelWidth;
+                return GestureDetector(
               behavior: HitTestBehavior.translucent,
-              onTap: inSelection
-                  ? () {
-                      _NoteCardState._selectionModeId.value = null;
-                      _inputFocusNode.unfocus();
-                    }
-                  : null,
-              child: Column(
+              onTap: inSelection ? _exitSelection : null,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
                 children: [
                   Expanded(
                     child: ValueListenableBuilder<bool>(
@@ -1636,11 +2094,24 @@ class _NotesScreenState extends State<NotesScreen> {
                           builder: (context, isLoadingOlder, _) {
                             return ValueListenableBuilder<List<DecryptedNote>>(
                               valueListenable: NoteCache.instance.notifier,
-                              builder: (context, notes, _) {
+                              builder: (context, allNotes, _) {
+                                return ValueListenableBuilder<NoteFilter>(
+                                  valueListenable: NoteSearch.instance.filter,
+                                  builder: (context, activeFilter, _) {
+                                return ValueListenableBuilder<String?>(
+                                  valueListenable:
+                                      NoteSearch.instance.justAdded,
+                                  builder: (context, justAddedId, _) {
+                                final notes = _withJustAdded(
+                                    filterNotes(allNotes, activeFilter),
+                                    allNotes,
+                                    justAddedId);
                                 if (notes.isEmpty) {
                                   return Center(
                                     child: Text(
-                                      'No notes yet',
+                                      allNotes.isEmpty
+                                          ? 'No notes yet'
+                                          : 'No matching notes',
                                       style: TextStyle(
                                           color: context.mc.secondaryText,
                                           fontSize: 14),
@@ -1703,6 +2174,10 @@ class _NotesScreenState extends State<NotesScreen> {
                                       ),
                                   ],
                                 );
+                                  },
+                                );
+                                  },
+                                );
                               },
                             );
                           },
@@ -1710,14 +2185,73 @@ class _NotesScreenState extends State<NotesScreen> {
                       },
                     ),
                   ),
-                  _buildInputBar(context),
+                  // The search field takes the composer's slot rather than
+                  // stacking below it — only one text field is ever focusable.
+                  // Editing needs that slot back; the filter stays applied and
+                  // the search field returns when the edit ends.
+                  if (searchOpen && !useSidePanel && _editingNoteId == null)
+                    ValueListenableBuilder<List<DecryptedNote>>(
+                      valueListenable: NoteCache.instance.notifier,
+                      builder: (context, allNotes, _) =>
+                          InlineSearchBar(allNotes: allNotes),
+                    )
+                  else
+                    // Rebuilds on filter changes so the "will tag" strip
+                    // appears the moment a tag is selected
+                    ValueListenableBuilder<NoteFilter>(
+                      valueListenable: NoteSearch.instance.filter,
+                      builder: (context, _, __) => _buildInputBar(context),
+                    ),
                 ],
               ),
+                  ),
+                  if (searchOpen && useSidePanel)
+                    ValueListenableBuilder<List<DecryptedNote>>(
+                      valueListenable: NoteCache.instance.notifier,
+                      builder: (context, allNotes, _) =>
+                          SearchSidePanel(allNotes: allNotes, width: panelWidth),
+                    ),
+                ],
+              ),
+            );
+              }),
             ),
           ),
         ));
+        if (!_useBottomBar) return content;
+        // No top bar means no appBarTheme.systemOverlayStyle — the status bar
+        // now sits over `surface`, so drive its icons off the theme brightness.
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness:
+                isDark ? Brightness.light : Brightness.dark,
+            statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+          ),
+          child: content,
+        );
+          },
+        );
       },
     );
+  }
+
+  // Notes are oldest-first here. Re-inserting by date puts a newly sent note
+  // at the visual bottom where it is expected, and leaves an edited one where
+  // it already was instead of making it jump to the end.
+  List<DecryptedNote> _withJustAdded(
+    List<DecryptedNote> visible,
+    List<DecryptedNote> all,
+    String? justAddedId,
+  ) {
+    if (justAddedId == null) return visible;
+    if (visible.any((n) => n.id == justAddedId)) return visible;
+    final note = all.where((n) => n.id == justAddedId).firstOrNull;
+    if (note == null) return visible;
+    final at = visible.indexWhere((n) => n.createdAt.isAfter(note.createdAt));
+    if (at < 0) return [...visible, note];
+    return [...visible.take(at), note, ...visible.skip(at)];
   }
 
   List<Widget> _buildNoteItems(List<DecryptedNote> notes,
@@ -1757,6 +2291,9 @@ class _NotesScreenState extends State<NotesScreen> {
       } else {
         items.add(const SizedBox(height: 12));
       }
+      if (note.id == NoteSearch.instance.justAdded.value) {
+        items.add(_buildOutsideFilterLabel());
+      }
       items.add(_NoteCard(
           key: ValueKey(note.id), note: note, onEdit: () => _startEdit(note)));
       currentDate = noteDate;
@@ -1790,6 +2327,27 @@ class _NotesScreenState extends State<NotesScreen> {
     return '${dt.day} ${months[dt.month - 1]}';
   }
 
+  // Explains why a note is on screen that the active filter would exclude
+  Widget _buildOutsideFilterLabel() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(_justAddedIsEdit ? Icons.edit : Icons.add,
+              size: 12, color: accent),
+          const SizedBox(width: 4),
+          Text(
+            _justAddedIsEdit
+                ? 'Edited — outside the current filter'
+                : 'Added — outside the current filter',
+            style: const TextStyle(fontSize: 11, color: accent),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDateSeparator(String date) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
@@ -1808,11 +2366,133 @@ class _NotesScreenState extends State<NotesScreen> {
     );
   }
 
+  // Sits directly above the composer. Kept to a single scrolling row so it
+  // stays usable in the sliver of space left above a phone keyboard.
+  Widget _buildTagSuggestions(ManentColors mc) {
+    final knownTags = tagCounts(NoteCache.instance.notifier.value);
+    return Container(
+      decoration: BoxDecoration(
+        color: mc.card,
+        border: Border(top: BorderSide(color: mc.border)),
+      ),
+      // Aligned with the composer text it sits under
+      padding: const EdgeInsets.fromLTRB(32, 8, 32, 10),
+      child: SizedBox(
+        height: 30,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: _tagSuggestions.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (context, i) {
+            final tag = _tagSuggestions[i];
+            final count = knownTags[tag] ?? 0;
+            final highlighted = i == _tagSuggestionIndex;
+            return Semantics(
+              label: count > 0
+                  ? 'Tag $tag, used $count times'
+                  : 'Tag $tag, not used yet',
+              button: true,
+              child: GestureDetector(
+                onTap: () => _acceptTagSuggestion(tag),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: highlighted ? mc.selectedFill : mc.cardDim,
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: Text(
+                    // Unused defaults show no count rather than a bare 0
+                    count > 0 ? '#$tag  $count' : '#$tag',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: highlighted ? Colors.white : mc.secondaryText,
+                      fontWeight:
+                          highlighted ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // Shown while a tag filter is active: the note being written will carry
+  // these, so it stays visible in the list you wrote it in. Each is removable
+  // for this note without touching the filter.
+  Widget _buildInheritedTags(ManentColors mc) {
+    final inherited = _inheritedTags.toList()..sort();
+    return Container(
+      decoration: BoxDecoration(
+        color: mc.card,
+        border: Border(top: BorderSide(color: mc.border)),
+      ),
+      // Matches the composer's 32px horizontal padding so "will tag" lines up
+      // with the text you are about to type
+      padding: const EdgeInsets.fromLTRB(32, 8, 32, 8),
+      child: Row(
+        children: [
+          Text(
+            'will tag',
+            style: TextStyle(fontSize: 12, color: mc.secondaryText),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                for (final tag in inherited)
+                  Semantics(
+                    label: 'Do not tag with $tag',
+                    button: true,
+                    child: GestureDetector(
+                      onTap: () => setState(
+                          () => _droppedInheritedTags = {
+                                ..._droppedInheritedTags,
+                                tag
+                              }),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: mc.cardDim,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '#$tag',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: accent,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(Icons.close, size: 12, color: mc.iconMuted),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInputBar(BuildContext context) {
     final mc = context.mc;
-    final isMobile = defaultTargetPlatform == TargetPlatform.iOS ||
-        defaultTargetPlatform == TargetPlatform.android;
-    final bottomInset = isMobile ? MediaQuery.of(context).padding.bottom : 0.0;
+    // When the bar is docked at the bottom it owns the safe-area inset
+    final bottomInset =
+        _useBottomBar ? 0.0 : MediaQuery.of(context).padding.bottom;
     final maxHeight = MediaQuery.of(context).size.height * 0.5;
     final isEditing = _editingNoteId != null;
     final hasPendingFile = _pendingFile != null;
@@ -1822,6 +2502,7 @@ class _NotesScreenState extends State<NotesScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (_inheritedTags.isNotEmpty) _buildInheritedTags(mc),
         ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxHeight),
           child: Container(
@@ -2062,8 +2743,8 @@ class _NotesScreenState extends State<NotesScreen> {
                                 decoration: InputDecoration(
                                   hintText: hasPendingFile ||
                                           editingFileAttachment != null
-                                      ? 'Add a caption...'
-                                      : 'Memo...',
+                                      ? 'Add a caption...  |  Press # to tag'
+                                      : 'Memo...  |  Press # to tag',
                                   border: InputBorder.none,
                                   isDense: true,
                                   contentPadding: EdgeInsets.zero,
@@ -2166,6 +2847,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   ),
                   ),
                 ),
+                if (_tagSuggestions.isNotEmpty) _buildTagSuggestions(mc),
               ],
             ),
           ),
@@ -2184,6 +2866,8 @@ class _NotesScreenState extends State<NotesScreen> {
     if (kIsWeb) BrowserContextMenu.enableContextMenu();
     _NoteCardState._selectionModeId.value = null;
     NoteCache.instance.notifier.removeListener(_onNotesChanged);
+    NoteSearch.instance.open.removeListener(_onSearchOpenChanged);
+    WidgetsBinding.instance.removeObserver(this);
     NoteCache.instance.promptFallbackRelays
         .removeListener(_onFallbackRelaysPrompt);
     NoteCache.instance.promptFallbackBlossom
@@ -2682,14 +3366,39 @@ class _LinkedTextState extends State<LinkedText> {
     super.dispose();
   }
 
+  // Everything that isn't a URL gets a second pass for #tags. URLs are matched
+  // first so a fragment like example.com/page#section stays one link.
+  void _addWithTags(
+      List<InlineSpan> spans, String text, TextStyle baseStyle) {
+    int last = 0;
+    for (final m in tagMatches(text)) {
+      if (m.start > last) {
+        spans.add(
+            TextSpan(text: text.substring(last, m.start), style: baseStyle));
+      }
+      final recognizer = TapGestureRecognizer()
+        ..onTap = () => NoteSearch.instance.openWithTag(m.tag);
+      _recognizers.add(recognizer);
+      spans.add(TextSpan(
+        text: text.substring(m.start, m.end),
+        // Accent but not underlined, so tags read differently from links
+        style: baseStyle.copyWith(color: accent, fontWeight: FontWeight.w600),
+        recognizer: recognizer,
+      ));
+      last = m.end;
+    }
+    if (last < text.length) {
+      spans.add(TextSpan(text: text.substring(last), style: baseStyle));
+    }
+  }
+
   List<InlineSpan> _buildSpans(String text, TextStyle baseStyle) {
     final spans = <InlineSpan>[];
     int lastEnd = 0;
 
     for (final match in _urlRegex.allMatches(text)) {
       if (match.start > lastEnd) {
-        spans.add(TextSpan(
-            text: text.substring(lastEnd, match.start), style: baseStyle));
+        _addWithTags(spans, text.substring(lastEnd, match.start), baseStyle);
       }
 
       String url = match.group(0)!.replaceAll(RegExp(r'[.,!?;:)]+$'), '');
@@ -2712,7 +3421,7 @@ class _LinkedTextState extends State<LinkedText> {
     }
 
     if (lastEnd < text.length) {
-      spans.add(TextSpan(text: text.substring(lastEnd), style: baseStyle));
+      _addWithTags(spans, text.substring(lastEnd), baseStyle);
     }
 
     return spans;

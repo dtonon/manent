@@ -24,6 +24,7 @@ class ManentColors extends ThemeExtension<ManentColors> {
   final Color shadow; // elevation shadows
   final Color strongButtonBg; // high-contrast neutral button (e.g. log out)
   final Color strongButtonFg;
+  final Color selectedFill; // active filter chip/row — neutral, not accent
 
   const ManentColors({
     required this.appBarBg,
@@ -40,6 +41,7 @@ class ManentColors extends ThemeExtension<ManentColors> {
     required this.shadow,
     required this.strongButtonBg,
     required this.strongButtonFg,
+    required this.selectedFill,
   });
 
   static const light = ManentColors(
@@ -57,6 +59,7 @@ class ManentColors extends ThemeExtension<ManentColors> {
     shadow: Color(0x14000000),
     strongButtonBg: Color(0xFF1A1A1A),
     strongButtonFg: Color(0xFFFFFFFF),
+    selectedFill: Color(0xFF666666),
   );
 
   static const dark = ManentColors(
@@ -74,6 +77,7 @@ class ManentColors extends ThemeExtension<ManentColors> {
     shadow: Color(0x66000000),
     strongButtonBg: Color(0xFFEDEDED),
     strongButtonFg: Color(0xFF1A1A1A),
+    selectedFill: Color(0xFF4D4D4D),
   );
 
   @override
@@ -92,6 +96,7 @@ class ManentColors extends ThemeExtension<ManentColors> {
     Color? shadow,
     Color? strongButtonBg,
     Color? strongButtonFg,
+    Color? selectedFill,
   }) {
     return ManentColors(
       appBarBg: appBarBg ?? this.appBarBg,
@@ -108,6 +113,7 @@ class ManentColors extends ThemeExtension<ManentColors> {
       shadow: shadow ?? this.shadow,
       strongButtonBg: strongButtonBg ?? this.strongButtonBg,
       strongButtonFg: strongButtonFg ?? this.strongButtonFg,
+      selectedFill: selectedFill ?? this.selectedFill,
     );
   }
 
@@ -129,6 +135,7 @@ class ManentColors extends ThemeExtension<ManentColors> {
       shadow: Color.lerp(shadow, other.shadow, t)!,
       strongButtonBg: Color.lerp(strongButtonBg, other.strongButtonBg, t)!,
       strongButtonFg: Color.lerp(strongButtonFg, other.strongButtonFg, t)!,
+      selectedFill: Color.lerp(selectedFill, other.selectedFill, t)!,
     );
   }
 }

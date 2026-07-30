@@ -58,6 +58,7 @@ dependencies:
   flutter_image_compress: ^2.4.0
   desktop_multi_window: ^0.3.0
   window_manager: ^0.5.1
+  screen_retriever: ^0.2.0
   receive_sharing_intent: ^1.4.6
   super_clipboard: ^0.9.1
   desktop_drop: ^0.7.1
