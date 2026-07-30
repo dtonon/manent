@@ -1077,8 +1077,16 @@ class _NotesScreenState extends State<NotesScreen>
     });
   }
 
+  // Shared content lands in the composer, and on mobile the inline search sits
+  // in its slot — close the search or the user never sees what arrived.
+  void _closeSearchForIncoming() {
+    if (!_useBottomBar) return;
+    if (NoteSearch.instance.open.value) NoteSearch.instance.close();
+  }
+
   void _handleSharedText(String text) {
     if (!mounted || text.isEmpty) return;
+    _closeSearchForIncoming();
     final current = _textController.text;
     final normalized = text.endsWith('\n') ? text : '$text\n';
     final newText = current.isEmpty ? normalized : '$current\n$normalized';
@@ -1095,6 +1103,7 @@ class _NotesScreenState extends State<NotesScreen>
 
   Future<void> _handleSharedMedia(List<SharedMediaFile> media) async {
     if (media.isEmpty || !mounted) return;
+    _closeSearchForIncoming();
     final item = media.first;
     if (item.type == SharedMediaType.text || item.type == SharedMediaType.url) {
       _handleSharedText(item.path);
