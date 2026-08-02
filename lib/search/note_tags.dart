@@ -81,12 +81,16 @@ List<String> suggestTags(
       .toList();
 }
 
-// Most used first, then alphabetical so the order is stable between rebuilds
-List<String> sortedTags(Map<String, int> counts) {
+// Most used first, then alphabetical so the order is stable between rebuilds.
+// `byCount: false` is plain alphabetical — worth it where the whole list is on
+// screen at once, since counts shift as tags are selected and a frequency sort
+// would reshuffle the list under the pointer.
+List<String> sortedTags(Map<String, int> counts, {bool byCount = true}) {
   final tags = counts.keys.toList();
   tags.sort((a, b) {
-    final byCount = counts[b]!.compareTo(counts[a]!);
-    return byCount != 0 ? byCount : a.compareTo(b);
+    if (!byCount) return a.compareTo(b);
+    final delta = counts[b]!.compareTo(counts[a]!);
+    return delta != 0 ? delta : a.compareTo(b);
   });
   return tags;
 }

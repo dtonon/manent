@@ -73,14 +73,15 @@ class _QueryField extends StatelessWidget {
 // Tags offered right now: all of them, or — while the query is `#…` — only
 // those matching what has been typed, so the chips narrow as you type.
 List<({String tag, int count})> _visibleTags(
-    List<DecryptedNote> allNotes, NoteFilter filter) {
+    List<DecryptedNote> allNotes, NoteFilter filter,
+    {bool byCount = true}) {
   final counts = tagCounts(notesForTagCounts(allNotes, filter));
   // A selected tag stays listed even when the prefix no longer matches it
   for (final t in filter.tags) {
     counts.putIfAbsent(t, () => 0);
   }
   final prefix = filter.tagPrefix;
-  final names = sortedTags(counts)
+  final names = sortedTags(counts, byCount: byCount)
       .where((t) => prefix == null || prefix.isEmpty || t.startsWith(prefix));
   return [for (final t in names) (tag: t, count: counts[t] ?? 0)];
 }
@@ -415,7 +416,9 @@ class SearchSidePanel extends StatelessWidget {
       valueListenable: NoteSearch.instance.filter,
       builder: (context, filter, _) {
         final counts = kindCounts(allNotes, filter);
-        final tags = _visibleTags(allNotes, filter);
+        // The panel shows the whole list, so alphabetical wins: a tag keeps
+        // its place instead of moving as the counts narrow.
+        final tags = _visibleTags(allNotes, filter, byCount: false);
         return Container(
           width: width,
           decoration: BoxDecoration(
