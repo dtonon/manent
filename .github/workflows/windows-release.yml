@@ -1,0 +1,43 @@
+name: windows-release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+# Flutter publishes no Windows ARM64 SDK, so only x64 can be built.
+# ARM users run the x64 build via the built-in Prism emulation.
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.41.2
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter build windows --release
+
+      - name: Package
+        shell: bash
+        run: |
+          RELEASE_DIR=$(ls -d build/windows/*/runner/Release)
+          cd "$RELEASE_DIR"
+          7z a "$GITHUB_WORKSPACE/manent-windows-x64.zip" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manent-windows-x64
+          path: manent-windows-x64.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: manent-windows-x64.zip

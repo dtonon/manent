@@ -34,6 +34,7 @@ import 'package:ndk/ndk.dart';
 import '../auth/auth_state.dart';
 import '../auth/relay_constants.dart';
 import '../blossom/blossom_constants.dart';
+import '../notes/network_self_test.dart';
 import '../notes/note.dart';
 import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
@@ -3555,10 +3556,17 @@ class _NoteCardState extends State<_NoteCard>
   }
 
   void _showJsonModal(DecryptedNote note) {
+    // Kicks off the network self-test; results appear on next modal open
+    if (!kIsWeb) unawaited(runNetworkSelfTest());
     final diagnostics = SyncDiagnostics.instance.forNote(note.id);
-    final json = diagnostics.isEmpty
-        ? note.toDebugJson()
-        : '${note.toDebugJson()}\n\n--- sync log ---\n${diagnostics.join('\n')}';
+    final ndkTrail = SyncDiagnostics.instance.ndkTrail;
+    final selfTest = SyncDiagnostics.instance.selfTest;
+    final json = [
+      note.toDebugJson(),
+      if (diagnostics.isNotEmpty) '--- sync log ---\n${diagnostics.join('\n')}',
+      if (selfTest.isNotEmpty) '--- selftest ---\n${selfTest.join('\n')}',
+      if (ndkTrail.isNotEmpty) '--- ndk log ---\n${ndkTrail.join('\n')}',
+    ].join('\n\n');
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
