@@ -880,6 +880,51 @@ class NoteCache {
     }
 
     Future.delayed(const Duration(seconds: 10), _retryPendingDecryptions);
+
+    if (since != null) unawaited(reconcile());
+  }
+
+  bool _reconciledThisSession = false;
+
+  // The since-based subscription assumes the first drain got everything from
+  // every relay; a relay that was unreachable back then leaves events below
+  // the high-water mark that no later since-query can see. Re-pages the full
+  // author history once per session and feeds it through the dedupe path.
+  Future<void> reconcile() async {
+    if (_reconciledThisSession) return;
+    _reconciledThisSession = true;
+
+    int until = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 1;
+    while (_signer != null && _writeRelays.isNotEmpty) {
+      List<Nip01Event> events;
+      try {
+        final response = NostrClient().ndk.requests.query(
+              filter: Filter(
+                kinds: [33301, 33302, 5],
+                authors: [_signer!.getPublicKey()],
+                limit: _olderHistoryBatchSize,
+                until: until,
+              ),
+              explicitRelays: _writeRelays,
+            );
+        events = await response.future.timeout(const Duration(seconds: 20));
+      } catch (_) {
+        // Retry on a later sync; an aborted pass must not count as done
+        _reconciledThisSession = false;
+        return;
+      }
+
+      for (final event in events) {
+        if (event.kind == 5) {
+          await _onDeletionEvent(event);
+        } else {
+          await _onRelayEvent(event);
+        }
+      }
+
+      if (events.length < _olderHistoryBatchSize) break;
+      until = events.map((e) => e.createdAt).reduce(min) - 1;
+    }
   }
 
   void _clearSyncLoading() {
@@ -1434,6 +1479,7 @@ class NoteCache {
   Future<void> clear() async {
     await _cancelRelaySubscription();
     _isRetrying = false;
+    _reconciledThisSession = false;
     await _db?.deleteAll();
     _db = null;
     _signer = null;
