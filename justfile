@@ -23,6 +23,15 @@ build_macos:
     flutter build macos --release
     cp -R build/macos/Build/Products/Release/Manent.app dist/
 
+# Second isolated instance (own bundle id → own data dir/prefs), handy for sync tests
+test_instance_macos:
+    rm -rf dist/Manent-Test.app
+    cp -R build/macos/Build/Products/Release/Manent.app dist/Manent-Test.app
+    plutil -replace CFBundleIdentifier -string com.dtonon.manent.test dist/Manent-Test.app/Contents/Info.plist
+    plutil -replace CFBundleName -string Manent-Test dist/Manent-Test.app/Contents/Info.plist
+    codesign --force --deep --sign - dist/Manent-Test.app
+    open dist/Manent-Test.app
+
 build_android:
     flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols/android
     cp -R build/app/outputs/flutter-apk/* dist/
