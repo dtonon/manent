@@ -1,5 +1,7 @@
 import 'package:ndk/ndk.dart';
 
+import '../notes/ndk_log_output.dart';
+
 // Skips expensive sig verification for kinds we control:
 // - 33301: NIP-44 encryption already authenticates content
 // - 5: subscription filters by our own pubkey; deletion handler checks _map
@@ -22,6 +24,7 @@ class NostrClient {
   late final Ndk ndk;
 
   void init() {
+    Logger.log.addOutput(SyncDiagnosticsLogOutput());
     ndk = Ndk(NdkConfig(
       cache: MemCacheManager(),
       eventVerifier: _ManentEventVerifier(),

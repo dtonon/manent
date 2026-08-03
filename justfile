@@ -52,6 +52,14 @@ build_linux:
     # Runtime dependency: mpv-libs (Fedora) / libmpv2 (Debian/Ubuntu).
     ./scripts/strip_bundled_mpv.sh
 
+build_windows:
+    gh workflow run windows-release.yml --ref master
+    @echo "\nFollow the build with: gh run watch"
+
+fetch_windows:
+    gh run download $(gh run list --workflow=windows-release.yml --status success -L1 --json databaseId -q '.[0].databaseId') -p 'manent-windows-*' -D dist/
+    @echo "\nArtifacts saved in dist/manent-windows-*/"
+
 build_web:
     flutter build web --release
     tar --format zip --options zip:compression=deflate,zip:compression-level=9 -cf dist/manent-web.zip -s '|^build/web|manent-web|' build/web

@@ -34,6 +34,7 @@ import 'widgets/video_player_screen.dart';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _installBundledRoots();
   // media_kit is only used for in-app video on Linux; other platforms play via
   // video_player, so we avoid bundling/initializing libmpv there.
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
@@ -87,6 +88,20 @@ void main(List<String> args) async {
     }
   }
   runApp(ManentApp(initialUser: user));
+}
+
+// Fresh Windows installs can lack root CAs (the store self-populates only via
+// Windows' own TLS stack, which Dart bypasses), so relay TLS fails until the
+// bundled Mozilla roots are added. Additive: the system store stays trusted.
+Future<void> _installBundledRoots() async {
+  if (kIsWeb || !Platform.isWindows) return;
+  try {
+    final pem = await rootBundle.load('assets/cacert.pem');
+    SecurityContext.defaultContext
+        .setTrustedCertificatesBytes(pem.buffer.asUint8List());
+  } catch (e) {
+    debugPrint('Could not install bundled roots: $e');
+  }
 }
 
 Future<void> _restoreSession(AuthUser user) async {

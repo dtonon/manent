@@ -7,8 +7,10 @@ class SyncDiagnostics {
   static const _maxEntriesPerNote = 30;
   static const _maxNotes = 100;
   static const _maxDetailChars = 500;
+  static const _maxNdkEntries = 50;
 
   final _log = <String, List<String>>{};
+  final _ndkTrail = <String>[];
 
   void record(String noteId, String message) {
     final entries = _log.putIfAbsent(noteId, () => <String>[]);
@@ -20,7 +22,30 @@ class SyncDiagnostics {
   List<String> forNote(String noteId) =>
       List.unmodifiable(_log[noteId] ?? const <String>[]);
 
-  void clear() => _log.clear();
+  // Global trail of NDK warnings/errors, not tied to a single note
+  void recordNdk(String message) {
+    _ndkTrail.add('${DateTime.now().toIso8601String()}  $message');
+    if (_ndkTrail.length > _maxNdkEntries) _ndkTrail.removeAt(0);
+  }
+
+  List<String> get ndkTrail => List.unmodifiable(_ndkTrail);
+
+  // Network self-test results; separate from the ndk trail so connect-error
+  // floods cannot evict them
+  final _selfTest = <String>[];
+
+  void recordSelfTest(String message) {
+    _selfTest.add('${DateTime.now().toIso8601String()}  $message');
+  }
+
+  void clearSelfTest() => _selfTest.clear();
+
+  List<String> get selfTest => List.unmodifiable(_selfTest);
+
+  void clear() {
+    _log.clear();
+    _ndkTrail.clear();
+  }
 
   // Collapses whitespace and caps length so a relay or HTTP body stays readable
   static String detail(Object? value) {
