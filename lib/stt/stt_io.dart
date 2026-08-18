@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../notes/note_attachment.dart';
-import 'recorder_sheet.dart';
+import 'recorder_screen.dart';
 import 'stt_model_manager.dart';
 import 'stt_service.dart';
 import 'stt_settings_sheet.dart';
@@ -24,7 +24,7 @@ Future<({Uint8List bytes, String name})?> recordVoiceNote(
     await showSttSettingsSheet(context, explainFirstUse: true);
     if (!manager.hasDownloadedModel || !context.mounted) return null;
   }
-  return showRecorderSheet(context);
+  return showRecorderScreen(context);
 }
 
 Future<void> transcribeNote(BuildContext context, String noteId) async {

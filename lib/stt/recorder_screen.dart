@@ -1,0 +1,397 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+
+import '../theme.dart';
+
+typedef Recording = ({Uint8List bytes, String name});
+
+Future<Recording?> showRecorderScreen(BuildContext context) {
+  return Navigator.of(context).push<Recording>(
+    PageRouteBuilder<Recording>(
+      pageBuilder: (_, __, ___) => const _RecorderScreen(),
+      transitionsBuilder: (_, animation, __, child) =>
+          FadeTransition(opacity: animation, child: child),
+      transitionDuration: const Duration(milliseconds: 200),
+      reverseTransitionDuration: const Duration(milliseconds: 150),
+    ),
+  );
+}
+
+class _RecorderScreen extends StatefulWidget {
+  const _RecorderScreen();
+
+  @override
+  State<_RecorderScreen> createState() => _RecorderScreenState();
+}
+
+class _RecorderScreenState extends State<_RecorderScreen> {
+  final _recorder = AudioRecorder();
+  Timer? _ticker;
+  StreamSubscription<Amplitude>? _ampSub;
+  String? _path;
+  String? _error;
+  bool _recording = false;
+  bool _stopping = false;
+  int _elapsedSeconds = 0;
+  double _level = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _start();
+  }
+
+  Future<void> _start() async {
+    try {
+      if (!await _recorder.hasPermission()) {
+        if (mounted) {
+          setState(() => _error = 'Microphone permission denied.');
+        }
+        return;
+      }
+      final tmp = await getTemporaryDirectory();
+      final dir = Directory(p.join(tmp.path, 'manent_stt'));
+      await dir.create(recursive: true);
+      // Sweep plaintext audio left behind by a previous crash
+      for (final f in dir.listSync()) {
+        try {
+          f.deleteSync();
+        } catch (_) {}
+      }
+      _path = p.join(
+          dir.path, 'rec-${DateTime.now().millisecondsSinceEpoch}.wav');
+      // 16 kHz mono WAV is what whisper.cpp expects; no transcoding needed
+      await _recorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: _path!,
+      );
+      _ampSub = _recorder
+          .onAmplitudeChanged(const Duration(milliseconds: 200))
+          .listen((a) {
+        // Amplitude is dBFS, roughly -50..0
+        final v = ((a.current + 50) / 50).clamp(0.0, 1.0);
+        if (mounted) setState(() => _level = v);
+      }, onError: (_) {});
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() => _elapsedSeconds++);
+      });
+      if (mounted) setState(() => _recording = true);
+    } catch (e) {
+      final hint = !kIsWeb && Platform.isLinux
+          ? ' On Linux, recording requires parecord (pulseaudio-utils) '
+              'and ffmpeg.'
+          : '';
+      if (mounted) {
+        setState(() => _error = 'Could not start recording: $e$hint');
+      }
+    }
+  }
+
+  Future<void> _stop() async {
+    if (_stopping || !_recording) return;
+    setState(() => _stopping = true);
+    _ticker?.cancel();
+    await _ampSub?.cancel();
+    try {
+      final path = await _recorder.stop();
+      if (path == null) throw Exception('no file produced');
+      final file = File(path);
+      final bytes = await file.readAsBytes();
+      try {
+        await file.delete();
+      } catch (_) {}
+      if (!mounted) return;
+      final now = DateTime.now();
+      String two(int v) => v.toString().padLeft(2, '0');
+      final name = 'voice-${now.year}${two(now.month)}${two(now.day)}'
+          '-${two(now.hour)}${two(now.minute)}${two(now.second)}.wav';
+      Navigator.pop(context, (bytes: bytes, name: name));
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _stopping = false;
+          _recording = false;
+          _error = 'Recording failed: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _cancel() async {
+    if (_stopping) return;
+    _ticker?.cancel();
+    await _ampSub?.cancel();
+    try {
+      await _recorder.stop();
+    } catch (_) {}
+    if (_path != null) {
+      try {
+        await File(_path!).delete();
+      } catch (_) {}
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    _ampSub?.cancel();
+    _recorder.dispose();
+    super.dispose();
+  }
+
+  String get _elapsedLabel {
+    final m = (_elapsedSeconds ~/ 60).toString().padLeft(2, '0');
+    final s = (_elapsedSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mc = context.mc;
+
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): _cancel,
+        const SingleActivator(LogicalKeyboardKey.enter): _stop,
+      },
+      child: Focus(
+        autofocus: true,
+        child: PopScope(
+          canPop: false,
+          // System back discards, so the temp file is always cleaned up
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) _cancel();
+          },
+          child: Scaffold(
+            backgroundColor: mc.surface,
+            body: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: _error != null ? _buildError(mc) : _buildRecorder(mc),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildError(ManentColors mc) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.mic_off, size: 48, color: mc.iconMuted),
+            const SizedBox(height: 16),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: mc.primaryText),
+            ),
+            const SizedBox(height: 24),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecorder(ManentColors mc) {
+    return Column(
+      children: [
+        const Spacer(flex: 3),
+        _LevelCircle(level: _recording ? _level : 0, busy: _stopping),
+        const SizedBox(height: 40),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.fiber_manual_record,
+                size: 14, color: _recording ? Colors.red : mc.iconMuted),
+            const SizedBox(width: 10),
+            ExcludeSemantics(
+              child: Text(
+                _elapsedLabel,
+                style: TextStyle(
+                  fontSize: 40,
+                  fontWeight: FontWeight.w300,
+                  color: mc.primaryText,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const Spacer(flex: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _RoundAction(
+              label: 'Cancel',
+              semanticsLabel: 'Discard recording',
+              icon: Icons.close,
+              background: mc.cardDim,
+              foreground: mc.primaryText,
+              onPressed: _stopping ? null : _cancel,
+            ),
+            const SizedBox(width: 56),
+            _RoundAction(
+              label: 'Done',
+              semanticsLabel: 'Stop and transcribe',
+              icon: Icons.check,
+              background: accent,
+              foreground: Colors.white,
+              busy: _stopping,
+              onPressed: _recording && !_stopping ? _stop : null,
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+}
+
+class _LevelCircle extends StatelessWidget {
+  final double level;
+  final bool busy;
+
+  const _LevelCircle({required this.level, required this.busy});
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final v = reduceMotion ? 0.0 : level;
+    const base = 120.0;
+    // Amplitude arrives every 200 ms; animating over the same span smooths it
+    const duration = Duration(milliseconds: 200);
+
+    return Semantics(
+      label: 'Microphone level',
+      value: '${(level * 100).round()} percent',
+      child: SizedBox(
+        width: base * 2,
+        height: base * 2,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            AnimatedContainer(
+              duration: duration,
+              curve: Curves.easeOut,
+              width: base + base * 0.9 * v,
+              height: base + base * 0.9 * v,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent.withValues(alpha: 0.12 + 0.12 * v),
+              ),
+            ),
+            AnimatedContainer(
+              duration: duration,
+              curve: Curves.easeOut,
+              width: base + base * 0.25 * v,
+              height: base + base * 0.25 * v,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: accent,
+              ),
+              child: busy
+                  ? const Padding(
+                      padding: EdgeInsets.all(40),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.mic, size: 52, color: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RoundAction extends StatelessWidget {
+  final String label;
+  final String semanticsLabel;
+  final IconData icon;
+  final Color background;
+  final Color foreground;
+  final bool busy;
+  final VoidCallback? onPressed;
+
+  const _RoundAction({
+    required this.label,
+    required this.semanticsLabel,
+    required this.icon,
+    required this.background,
+    required this.foreground,
+    required this.onPressed,
+    this.busy = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mc = context.mc;
+    final enabled = onPressed != null;
+
+    return Semantics(
+      label: semanticsLabel,
+      button: true,
+      enabled: enabled,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Material(
+            color: enabled ? background : background.withValues(alpha: 0.5),
+            shape: const CircleBorder(),
+            child: InkWell(
+              onTap: onPressed,
+              customBorder: const CircleBorder(),
+              child: SizedBox(
+                width: 72,
+                height: 72,
+                child: Center(
+                  child: busy
+                      ? SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(foreground),
+                          ),
+                        )
+                      : Icon(icon, size: 32, color: foreground),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          ExcludeSemantics(
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 14, color: mc.secondaryText),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
