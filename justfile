@@ -21,6 +21,7 @@ dev_web:
 
 build_macos:
     flutter build macos --release
+    ./scripts/macos_verify_signature.sh build/macos/Build/Products/Release/Manent.app
     cp -R build/macos/Build/Products/Release/Manent.app dist/
 
 build_android:
