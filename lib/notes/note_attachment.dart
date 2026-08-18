@@ -86,7 +86,8 @@ class NoteAttachment {
 
   String toJsonString() => jsonEncode(toJson());
 
-  NoteAttachment copyWith({String? url, String? data, bool? sensitive}) =>
+  NoteAttachment copyWith(
+          {String? url, String? data, bool? sensitive, String? caption}) =>
       NoteAttachment(
         url: url ?? this.url,
         data: data ?? this.data,
@@ -96,7 +97,7 @@ class NoteAttachment {
         sha256: sha256,
         key: key,
         thumbhash: thumbhash,
-        caption: caption,
+        caption: caption ?? this.caption,
         sensitive: sensitive ?? this.sensitive,
         dim: dim,
       );

@@ -42,6 +42,8 @@ import '../search/note_filter.dart';
 import '../search/note_search.dart';
 import '../search/note_tags.dart';
 import '../search/search_ui.dart';
+import '../stt/stt.dart' as stt;
+import '../stt/stt_state.dart';
 import '../theme.dart';
 import '../widgets/gif_player.dart';
 import '../widgets/inline_web_video.dart';
@@ -646,6 +648,29 @@ class _NotesScreenState extends State<NotesScreen>
       });
       _focusCaption();
     }
+  }
+
+  Future<void> _recordVoiceNote() async {
+    _inputFocusNode.unfocus();
+    final rec = await stt.recordVoiceNote(context);
+    if (rec == null || !mounted) return;
+    // Any recording longer than a second exceeds the inline threshold
+    if (rec.bytes.length >= 32 * 1024 &&
+        NoteCache.instance.blossomServers.isEmpty) {
+      final added = await _showFallbackBlossomDialog();
+      if (!added) return;
+    }
+    final caption = _withInheritedTags('');
+    setState(() => _sending = true);
+    final id = await NoteCache.instance.addFile(
+      rec.bytes,
+      rec.name,
+      caption: caption.isEmpty ? null : caption,
+    );
+    _trackIfFilteredOut(id);
+    if (mounted) setState(() => _sending = false);
+    // The audio note is already persisted; the transcript lands in its caption
+    if (id != null && mounted) stt.transcribeNote(context, id);
   }
 
   Future<void> _takePhoto() async {
@@ -2818,6 +2843,26 @@ class _NotesScreenState extends State<NotesScreen>
                                       ),
                                     ),
                                   ],
+                                  if (stt.sttAvailable) ...[
+                                    Semantics(
+                                      label: 'Record voice note',
+                                      hint:
+                                          'Long press for transcription settings',
+                                      button: true,
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onTap: _recordVoiceNote,
+                                        onLongPress: () =>
+                                            stt.openSttSettings(context),
+                                        child: Padding(
+                                          padding:
+                                              const EdgeInsets.only(right: 20),
+                                          child: Icon(Icons.mic_none,
+                                              size: 24, color: mc.iconMuted),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                   Semantics(
                                     label: 'Attach file',
                                     button: true,
@@ -3691,6 +3736,11 @@ class _NoteCardState extends State<_NoteCard>
           showShare: isFileNote && !_isDesktopOrWeb,
           showCopyCaption:
               isFileNote && widget.note.attachment?.caption != null,
+          showTranscribe: isFileNote &&
+              widget.note.error == null &&
+              widget.note.attachment != null &&
+              stt.canTranscribe(widget.note.attachment!) &&
+              !SttState.transcribing.value.contains(widget.note.id),
           showSensitive: widget.note.error == null,
           isSensitive: widget.note.sensitive,
           // Kept in release for failed notes so they can report the sync log
@@ -3726,6 +3776,8 @@ class _NoteCardState extends State<_NoteCard>
     } else if (result == 'copy_caption') {
       await Clipboard.setData(
           ClipboardData(text: widget.note.attachment?.caption ?? ''));
+    } else if (result == 'transcribe') {
+      if (mounted) stt.transcribeNote(context, widget.note.id);
     } else if (result == 'edit' || result == 'edit_caption') {
       widget.onEdit?.call();
     } else if (result == 'retry_sync') {
@@ -4718,6 +4770,48 @@ class _FileNoteContent extends StatelessWidget {
     );
   }
 
+  Widget _transcribingIndicator(ManentColors mc) {
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: SttState.transcribing,
+      builder: (context, ids, _) {
+        if (!ids.contains(note.id)) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 8),
+              Text('Transcribing…',
+                  style: TextStyle(fontSize: 12, color: mc.secondaryText)),
+              const SizedBox(width: 16),
+              Semantics(
+                label: 'Cancel transcription',
+                button: true,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => stt.abortTranscription(note.id),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: mc.secondaryText,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildFileContent(ManentColors mc, NoteAttachment attachment) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -4757,6 +4851,7 @@ class _FileNoteContent extends StatelessWidget {
           const SizedBox(height: 8),
           LinkedText(text: attachment.caption!),
         ],
+        _transcribingIndicator(mc),
         SizedBox(height: note.sensitive ? 12 : 6),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -5006,6 +5101,7 @@ class _NoteMenuOverlay extends StatelessWidget {
   final bool showCopyImage;
   final bool showShare;
   final bool showCopyCaption;
+  final bool showTranscribe;
   final bool showSensitive;
   final bool isSensitive;
   final bool showDebugJson;
@@ -5025,6 +5121,7 @@ class _NoteMenuOverlay extends StatelessWidget {
     this.showCopyImage = false,
     this.showShare = false,
     this.showCopyCaption = false,
+    this.showTranscribe = false,
     this.showSensitive = false,
     this.isSensitive = false,
     this.showDebugJson = false,
@@ -5076,6 +5173,7 @@ class _NoteMenuOverlay extends StatelessWidget {
       if (showCopyImage) _menuItem('copy_image', 'Copy'),
       if (showShare) _menuItem('share', 'Share'),
       if (showCopyCaption) _menuItem('copy_caption', 'Copy caption'),
+      if (showTranscribe) _menuItem('transcribe', 'Transcribe audio'),
       if (copyLabel != null) _menuItem('copy', copyLabel!),
       if (showSelectText) _menuItem('select_text', 'Select text'),
       if (showRetry) _menuItem('retry', 'Try to decrypt again'),

@@ -13,6 +13,17 @@ subprojects {
     project.evaluationDependsOn(':app')
 }
 
+// Enable dotprod/i8mm/fp16 in whisper's arm64 build; see whisper_arch.cmake
+subprojects { sub ->
+    if (sub.name == 'whisper_ggml_plus') {
+        sub.afterEvaluate {
+            sub.android.defaultConfig.externalNativeBuild.cmake.arguments(
+                "-DCMAKE_PROJECT_INCLUDE=${rootProject.projectDir}/whisper_arch.cmake"
+            )
+        }
+    }
+}
+
 
 tasks.register("clean", Delete) {
     delete rootProject.buildDir

@@ -456,7 +456,10 @@ class NoteCache {
     _mirrorToOtherServers(localId, url, attachment.sha256, encryptedBytes,
         skip: {uploadedTo!, ...failedHere});
 
-    final updated = attachment.copyWith(url: url);
+    // The caption may have been edited (or transcribed) while the upload ran,
+    // so merge the URL into the freshest attachment we have
+    final current = _map[localId]?.attachment ?? attachment;
+    final updated = current.copyWith(url: url);
 
     // Update local_content with the URL
     if (_localKey != null && _db != null) {
@@ -596,6 +599,22 @@ class NoteCache {
     }
   }
 
+  DecryptedNote? byId(String id) => _map[id];
+
+  // Appends text to a file note's caption on a new paragraph, never
+  // overwriting what is already there
+  Future<void> appendToCaption(String id, String text) async {
+    final existing = _map[id];
+    final att = existing?.attachment;
+    final addition = text.trim();
+    if (existing == null || att == null || addition.isEmpty) return;
+    final current = att.caption?.trim();
+    final combined = current == null || current.isEmpty
+        ? addition
+        : '$current\n\n$addition';
+    await update(id, combined);
+  }
+
   Future<void> update(String id, String newText) async {
     if (_localKey == null) return;
     final existing = _map[id];
@@ -619,6 +638,8 @@ class NoteCache {
         key: att.key,
         thumbhash: att.thumbhash,
         caption: newText.isEmpty ? null : newText,
+        sensitive: att.sensitive,
+        dim: att.dim,
       );
       localContent = await LocalCrypto.encrypt(
           _localKey!, updatedAttachment.toJsonString());
