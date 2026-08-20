@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -41,6 +43,10 @@ class _RecorderScreenState extends State<_RecorderScreen> {
   bool _stopping = false;
   int _elapsedSeconds = 0;
   double _level = 0;
+  double? _peakDb;
+  double? _lastRawDb;
+  DateTime? _lastChange;
+  double _sampleIntervalMs = 50;
 
   @override
   void initState() {
@@ -65,23 +71,14 @@ class _RecorderScreenState extends State<_RecorderScreen> {
           f.deleteSync();
         } catch (_) {}
       }
-      _path = p.join(
-          dir.path, 'rec-${DateTime.now().millisecondsSinceEpoch}.wav');
-      // 16 kHz mono WAV is what whisper.cpp expects; no transcoding needed
-      await _recorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.wav,
-          sampleRate: 16000,
-          numChannels: 1,
-        ),
-        path: _path!,
-      );
+      _path =
+          p.join(dir.path, 'rec-${DateTime.now().millisecondsSinceEpoch}.wav');
+      await _startRecorder(_path!);
       _ampSub = _recorder
-          .onAmplitudeChanged(const Duration(milliseconds: 200))
+          .onAmplitudeChanged(const Duration(milliseconds: 50))
           .listen((a) {
-        // Amplitude is dBFS, roughly -50..0
-        final v = ((a.current + 50) / 50).clamp(0.0, 1.0);
-        if (mounted) setState(() => _level = v);
+        _trackSampleInterval(a.current);
+        if (mounted) setState(() => _level = _normalize(a.current));
       }, onError: (_) {});
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() => _elapsedSeconds++);
@@ -94,6 +91,72 @@ class _RecorderScreenState extends State<_RecorderScreen> {
           : '';
       if (mounted) {
         setState(() => _error = 'Could not start recording: $e$hint');
+      }
+    }
+  }
+
+  // Phone mics report speech ~20 dB hotter than laptop mics (measured: peaks
+  // around -15 dBFS vs -35, room noise near -50 vs -60)
+  static final bool _isPhone =
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  static final double _floorDb = _isPhone ? -50 : -58;
+  static final double _minPeakDb = _isPhone ? -22 : -33;
+
+  // Fixed silence floor; the top of the scale starts at a typical speech peak
+  // and only grows when louder peaks arrive, decaying ~1 dB/s back toward it
+  double _normalize(double db) {
+    db = db.clamp(-60.0, 0.0);
+    final peak = _peakDb ?? _minPeakDb;
+    _peakDb = db > peak ? db : (peak - 0.05).clamp(_minPeakDb, 0.0);
+    return ((db - _floorDb) / (_peakDb! - _floorDb)).clamp(0.0, 1.0);
+  }
+
+  // Android recomputes the level only every ~250 ms and repeats it between
+  // polls; tracking how often it actually changes lets the easing span the gap
+  void _trackSampleInterval(double db) {
+    final now = DateTime.now();
+    if (db == _lastRawDb) return;
+    if (_lastChange != null) {
+      final dt = now.difference(_lastChange!).inMilliseconds.toDouble();
+      _sampleIntervalMs =
+          (_sampleIntervalMs * 0.7 + dt * 0.3).clamp(50.0, 400.0);
+    }
+    _lastRawDb = db;
+    _lastChange = now;
+  }
+
+  // Android meters one value per read block, and the plugin sizes the block at
+  // twice the device minimum (~250 ms on some phones). Smaller blocks refresh
+  // the level faster but are rejected below the minimum, which Dart cannot
+  // query, so probe from small to default and remember what worked
+  static const _androidBlockLadder = [3200, 4800];
+  static bool _androidProbed = false;
+  static int? _androidBlockSize;
+
+  Future<void> _startRecorder(String path) async {
+    // 16 kHz mono WAV is what whisper.cpp expects; no transcoding needed
+    RecordConfig config([int? blockSize]) => RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 16000,
+          numChannels: 1,
+          streamBufferSize: blockSize,
+        );
+
+    if (kIsWeb || !Platform.isAndroid) {
+      await _recorder.start(config(), path: path);
+      return;
+    }
+    final sizes = _androidProbed
+        ? [_androidBlockSize, null]
+        : [..._androidBlockLadder, null];
+    for (final size in sizes) {
+      await _recorder.start(config(size), path: path);
+      // A rejected block size fails inside the record thread before start
+      // returns, leaving the recorder stopped
+      if (size == null || await _recorder.isRecording()) {
+        _androidProbed = true;
+        _androidBlockSize = size;
+        return;
       }
     }
   }
@@ -217,7 +280,11 @@ class _RecorderScreenState extends State<_RecorderScreen> {
     return Column(
       children: [
         const Spacer(flex: 3),
-        _LevelCircle(level: _recording ? _level : 0, busy: _stopping),
+        _LevelCircle(
+          level: _recording ? _level : 0,
+          smoothingMs: _sampleIntervalMs,
+          busy: _stopping,
+        ),
         const SizedBox(height: 40),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -268,59 +335,119 @@ class _RecorderScreenState extends State<_RecorderScreen> {
   }
 }
 
-class _LevelCircle extends StatelessWidget {
+class _LevelCircle extends StatefulWidget {
   final double level;
+  final double smoothingMs;
   final bool busy;
 
-  const _LevelCircle({required this.level, required this.busy});
+  const _LevelCircle({
+    required this.level,
+    required this.smoothingMs,
+    required this.busy,
+  });
+
+  @override
+  State<_LevelCircle> createState() => _LevelCircleState();
+}
+
+class _LevelCircleState extends State<_LevelCircle>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
+  Duration? _lastElapsed;
+  final _shown = ValueNotifier<double>(0);
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker(_onTick);
+  }
+
+  @override
+  void didUpdateWidget(_LevelCircle old) {
+    super.didUpdateWidget(old);
+    if (widget.level != _shown.value && !_ticker.isActive) {
+      _lastElapsed = null;
+      _ticker.start();
+    }
+  }
+
+  // Exponential easing whose time constant follows the sample cadence, so the
+  // motion spans the gap until the next sample instead of snapping and holding
+  void _onTick(Duration elapsed) {
+    final frameMs = _lastElapsed == null
+        ? 16.0
+        : (elapsed - _lastElapsed!).inMicroseconds / 1000;
+    _lastElapsed = elapsed;
+    final target = widget.level;
+    final cur = _shown.value;
+    final diff = target - cur;
+    if (diff.abs() < 0.002) {
+      _shown.value = target;
+      _ticker.stop();
+      return;
+    }
+    final tau = widget.smoothingMs * (diff > 0 ? 0.25 : 0.45);
+    final alpha = 1 - math.exp(-frameMs / tau);
+    // Small changes move gently so steady speech does not jitter; large ones
+    // keep full speed
+    final gain = (diff.abs() / 0.25).clamp(0.3, 1.0);
+    _shown.value = cur + diff * alpha * gain;
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _shown.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final v = reduceMotion ? 0.0 : level;
     const base = 120.0;
-    // Amplitude arrives every 200 ms; animating over the same span smooths it
-    const duration = Duration(milliseconds: 200);
 
     return Semantics(
       label: 'Microphone level',
-      value: '${(level * 100).round()} percent',
+      value: '${(widget.level * 100).round()} percent',
       child: SizedBox(
         width: base * 2,
         height: base * 2,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            AnimatedContainer(
-              duration: duration,
-              curve: Curves.easeOut,
-              width: base + base * 0.9 * v,
-              height: base + base * 0.9 * v,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: accent.withValues(alpha: 0.12 + 0.12 * v),
-              ),
-            ),
-            AnimatedContainer(
-              duration: duration,
-              curve: Curves.easeOut,
-              width: base + base * 0.25 * v,
-              height: base + base * 0.25 * v,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: accent,
-              ),
-              child: busy
-                  ? const Padding(
-                      padding: EdgeInsets.all(40),
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.mic, size: 52, color: Colors.white),
-            ),
-          ],
+        child: ValueListenableBuilder<double>(
+          valueListenable: _shown,
+          builder: (context, shown, child) {
+            final v = reduceMotion ? 0.0 : shown;
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: base + base * 0.9 * v,
+                  height: base + base * 0.9 * v,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accent.withValues(alpha: 0.12 + 0.12 * v),
+                  ),
+                ),
+                Container(
+                  width: base + base * 0.25 * v,
+                  height: base + base * 0.25 * v,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: accent,
+                  ),
+                  child: child,
+                ),
+              ],
+            );
+          },
+          child: widget.busy
+              ? const Padding(
+                  padding: EdgeInsets.all(40),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
+              : const Icon(Icons.mic, size: 52, color: Colors.white),
         ),
       ),
     );
