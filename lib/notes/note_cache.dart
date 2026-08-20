@@ -16,6 +16,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:thumbhash/thumbhash.dart';
 
+import '../audio/audio_analysis.dart';
+import '../audio/waveform.dart';
 import '../auth/nostr_client.dart';
 import '../blossom/blossom_client.dart';
 import '../blossom/file_crypto.dart';
@@ -248,6 +250,17 @@ class NoteCache {
       dim = info.dim;
     }
 
+    // Duration and peak waveform for audio, when decodable here
+    double? duration;
+    String? waveform;
+    if (mimeType.startsWith('audio/')) {
+      final info = await analyzeAudio(bytes, mimeType);
+      if (info != null) {
+        duration = info.duration;
+        waveform = encodeWaveform(info.peaks);
+      }
+    }
+
     final isInline = encryptedBytes.length < 32 * 1024;
 
     NoteAttachment attachment;
@@ -262,6 +275,8 @@ class NoteCache {
         thumbhash: thumbhash,
         caption: caption,
         dim: dim,
+        duration: duration,
+        waveform: waveform,
       );
     } else {
       // Save encrypted file to disk cache for later display
@@ -279,6 +294,8 @@ class NoteCache {
         thumbhash: thumbhash,
         caption: caption,
         dim: dim,
+        duration: duration,
+        waveform: waveform,
       );
     }
 
@@ -640,6 +657,8 @@ class NoteCache {
         caption: newText.isEmpty ? null : newText,
         sensitive: att.sensitive,
         dim: att.dim,
+        duration: att.duration,
+        waveform: att.waveform,
       );
       localContent = await LocalCrypto.encrypt(
           _localKey!, updatedAttachment.toJsonString());

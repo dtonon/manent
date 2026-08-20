@@ -20,6 +20,8 @@ class NoteAttachment {
   final String? caption;
   final bool sensitive;
   final String? dim; // "<width>x<height>", images only
+  final double? duration; // seconds, audio only
+  final String? waveform; // base64, one 0-255 peak per bucket, audio only
 
   const NoteAttachment({
     this.url,
@@ -33,12 +35,15 @@ class NoteAttachment {
     this.caption,
     this.sensitive = false,
     this.dim,
+    this.duration,
+    this.waveform,
   });
 
   bool get isInline => data != null;
   bool get isImage => rasterImageMimeTypes.contains(mimeType);
   bool get isGif => mimeType == 'image/gif';
   bool get isVideo => mimeType.startsWith('video/');
+  bool get isAudio => mimeType.startsWith('audio/');
 
   // Short uppercase label for badges, e.g. MP4 / MOV — from the extension,
   // falling back to the mime subtype.
@@ -64,6 +69,8 @@ class NoteAttachment {
         if (caption != null) 'caption': caption,
         if (sensitive) 'sensitive': true,
         if (dim != null) 'dim': dim,
+        if (duration != null) 'duration': duration,
+        if (waveform != null) 'waveform': waveform,
       };
 
   factory NoteAttachment.fromJson(Map<String, dynamic> j) => NoteAttachment(
@@ -82,6 +89,8 @@ class NoteAttachment {
             as String?, // TODO: 'comment' is deprecated, remove it after some time
         sensitive: j['sensitive'] == true,
         dim: j['dim'] as String?,
+        duration: (j['duration'] as num?)?.toDouble(),
+        waveform: j['waveform'] as String?,
       );
 
   String toJsonString() => jsonEncode(toJson());
@@ -100,5 +109,7 @@ class NoteAttachment {
         caption: caption ?? this.caption,
         sensitive: sensitive ?? this.sensitive,
         dim: dim,
+        duration: duration,
+        waveform: waveform,
       );
 }

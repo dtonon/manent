@@ -31,6 +31,7 @@ import '../utils/video_thumb.dart';
 
 import 'package:ndk/ndk.dart';
 
+import '../audio/audio_player_service.dart';
 import '../auth/auth_state.dart';
 import '../auth/relay_constants.dart';
 import '../blossom/blossom_constants.dart';
@@ -45,6 +46,7 @@ import '../search/search_ui.dart';
 import '../stt/stt.dart' as stt;
 import '../stt/stt_state.dart';
 import '../theme.dart';
+import '../widgets/audio_note_player.dart';
 import '../widgets/gif_player.dart';
 import '../widgets/inline_web_video.dart';
 import '../widgets/manent_app_bar.dart';
@@ -3825,6 +3827,10 @@ class _NoteCardState extends State<_NoteCard>
         ),
       );
       if (confirmed == true) {
+        final sha = widget.note.attachment?.sha256;
+        if (sha != null && AudioPlayerService.instance.activeSha.value == sha) {
+          await AudioPlayerService.instance.stop();
+        }
         await NoteCache.instance
             .delete(widget.note.id, nostrId: widget.note.nostrId);
       }
@@ -3860,6 +3866,8 @@ class _NoteCardState extends State<_NoteCard>
         final isFileVideo =
             isFileNote && widget.note.attachment?.isVideo == true;
         final isFileGif = isFileNote && widget.note.attachment?.isGif == true;
+        final isFileAudio =
+            isFileNote && widget.note.attachment?.isAudio == true;
         // On web, GIFs/videos play inline in the card — the outer tap just
         // opens the context menu (the inline player handles its own controls).
         final isWebInlineMedia = kIsWeb && (isFileVideo || isFileGif);
@@ -3898,8 +3906,9 @@ class _NoteCardState extends State<_NoteCard>
             }
           }
           if (_isDesktopOrWeb) {
-            // File notes (non-image): left-click saves the file directly
-            final isFileNonImage = isFileNote && !isFileImage;
+            // File notes (non-image): left-click saves the file directly.
+            // Audio notes have their own inline controls.
+            final isFileNonImage = isFileNote && !isFileImage && !isFileAudio;
             onTap = isWebInlineMedia
                 ? _showContextMenu
                 : isFileVideo
@@ -3932,8 +3941,9 @@ class _NoteCardState extends State<_NoteCard>
           onSecondaryTapDown: onSecondaryTapDown,
           onLongPressStart: onLongPressStart,
           child: Container(
-            // Image/video notes use zero padding — the preview fills the card
-            padding: (isFileImage || isFileVideo)
+            // Image/video/audio notes use zero padding — the preview fills
+            // the card
+            padding: (isFileImage || isFileVideo || isFileAudio)
                 ? EdgeInsets.zero
                 : const EdgeInsets.fromLTRB(16, 16, 16, 8),
             decoration: BoxDecoration(
@@ -4344,7 +4354,14 @@ class _FileNoteContent extends StatelessWidget {
     if (attachment == null) return const SizedBox.shrink();
 
     if (note.sensitive && !isRevealed) {
-      return _buildSensitivePlaceholder(mc, attachment);
+      final placeholder = _buildSensitivePlaceholder(mc, attachment);
+      // Audio cards have no outer padding, so pad the file placeholder here
+      return attachment.isAudio
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: placeholder,
+            )
+          : placeholder;
     }
 
     if (attachment.isImage) {
@@ -4353,7 +4370,46 @@ class _FileNoteContent extends StatelessWidget {
     if (attachment.isVideo) {
       return _buildVideoContent(mc, attachment);
     }
+    if (attachment.isAudio) {
+      return _buildAudioContent(mc, attachment);
+    }
     return _buildFileContent(mc, attachment);
+  }
+
+  Widget _buildAudioContent(ManentColors mc, NoteAttachment attachment) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+          child: AudioNotePlayer(
+            key: ValueKey(attachment.sha256),
+            attachment: attachment,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${attachment.filename} - ${_formatFileSize(attachment.size)}',
+                style: TextStyle(
+                    fontSize: 14, height: 1.3, color: mc.secondaryText),
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (attachment.caption != null) ...[
+                const SizedBox(height: 6),
+                LinkedText(text: attachment.caption!),
+              ],
+              _transcribingIndicator(mc),
+              SizedBox(height: note.sensitive ? 12 : 6),
+              _buildFileFooter(mc),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildVideoContent(ManentColors mc, NoteAttachment attachment) {
@@ -4579,10 +4635,10 @@ class _FileNoteContent extends StatelessWidget {
                     imageFilter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                     child: Row(
                       children: [
-                        CircleAvatar(
+                        const CircleAvatar(
                           radius: 22,
-                          backgroundColor: const Color(0xFF333333),
-                          child: const Icon(Icons.insert_drive_file,
+                          backgroundColor: Color(0xFF333333),
+                          child: Icon(Icons.insert_drive_file,
                               color: Colors.white, size: 20),
                         ),
                         const SizedBox(width: 12),
@@ -4853,51 +4909,55 @@ class _FileNoteContent extends StatelessWidget {
         ],
         _transcribingIndicator(mc),
         SizedBox(height: note.sensitive ? 12 : 6),
+        _buildFileFooter(mc),
+      ],
+    );
+  }
+
+  Widget _buildFileFooter(ManentColors mc) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        if (note.sensitive)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onHide,
+            child: Semantics(
+              label: 'Hide sensitive content',
+              button: true,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: mc.cardDim,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.visibility_off_outlined,
+                        size: 12, color: mc.secondaryText),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Hide',
+                      style:
+                          TextStyle(fontSize: 11, color: mc.secondaryText),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          const SizedBox.shrink(),
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (note.sensitive)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onHide,
-                child: Semantics(
-                  label: 'Hide sensitive content',
-                  button: true,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: mc.cardDim,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.visibility_off_outlined,
-                            size: 12, color: mc.secondaryText),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Hide',
-                          style:
-                              TextStyle(fontSize: 11, color: mc.secondaryText),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              )
-            else
-              const SizedBox.shrink(),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                buildSyncIcon(),
-                const SizedBox(width: 4),
-                Text(
-                  formatTime(note.createdAt),
-                  style: TextStyle(fontSize: 12, color: mc.faintText),
-                ),
-              ],
+            buildSyncIcon(),
+            const SizedBox(width: 4),
+            Text(
+              formatTime(note.createdAt),
+              style: TextStyle(fontSize: 12, color: mc.faintText),
             ),
           ],
         ),
