@@ -37,6 +37,10 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
   Duration _reportedPos = Duration.zero;
   DateTime _reportedAt = DateTime.now();
   Duration _shownPos = Duration.zero;
+  // Set on seek: backend reports far from it are ignored for a short while,
+  // since they may predate the seek
+  Duration? _seekTarget;
+  DateTime _seekAt = DateTime.now();
   late final Ticker _ticker;
 
   bool _dragging = false;
@@ -138,12 +142,33 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
     if (_ticker.isActive) _ticker.stop();
   }
 
+  static const _staleWindow = Duration(seconds: 1);
+  static const _staleTolerance = Duration(milliseconds: 700);
+
   void _onPosition() {
     final pb = _playback;
     if (pb == null) return;
-    _reportedPos = pb.position.value;
-    _reportedAt = DateTime.now();
-    if (!_dragging) setState(() => _shownPos = _reportedPos);
+    final reported = pb.position.value;
+    final now = DateTime.now();
+    final target = _seekTarget;
+    if (target != null) {
+      if (now.difference(_seekAt) > _staleWindow) {
+        _seekTarget = null;
+      } else if ((reported - target).abs() > _staleTolerance) {
+        return;
+      }
+    }
+    _reportedPos = reported;
+    _reportedAt = now;
+    if (_dragging) return;
+    // While playing, small backward corrections stall the cursor instead of
+    // stepping it back; the ticker catches up from the new baseline
+    if (_playing &&
+        reported < _shownPos &&
+        _shownPos - reported < _staleWindow) {
+      return;
+    }
+    setState(() => _shownPos = reported);
   }
 
   void _onPlaying() {
@@ -177,7 +202,7 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
     var pos = _reportedPos + elapsed;
     final total = _totalDuration;
     if (total != null && pos > total) pos = total;
-    setState(() => _shownPos = pos);
+    if (pos > _shownPos) setState(() => _shownPos = pos);
   }
 
   Duration? get _totalDuration {
@@ -217,12 +242,28 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
     await loaded?.play();
   }
 
+  void _setSeekTarget(Duration target) {
+    setState(() {
+      _seekTarget = target;
+      _seekAt = DateTime.now();
+      _reportedPos = target;
+      _reportedAt = _seekAt;
+      _shownPos = target;
+    });
+  }
+
   Future<void> _seekFraction(double fraction, {required bool thenPlay}) async {
+    fraction = fraction.clamp(0.0, 1.0);
+    // Land on the target before loading so the initial 0 report is ignored
+    final known = _totalDuration;
+    if (known != null) _setSeekTarget(known * fraction);
     final pb = await _ensurePlayback();
-    if (pb == null) return;
+    if (pb == null || !mounted) return;
     final total = pb.duration.value ?? _totalDuration;
     if (total == null) return;
-    await pb.seek(total * fraction.clamp(0.0, 1.0));
+    final target = total * fraction;
+    if (target != _seekTarget) _setSeekTarget(target);
+    await pb.seek(target);
     if (thenPlay && !pb.isPlaying.value) await pb.play();
   }
 
@@ -247,7 +288,12 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
 
   Future<void> _onDragEnd() async {
     final fraction = _dragFraction;
-    setState(() => _dragging = false);
+    final total = _totalDuration;
+    // Land on the drag position in the same frame the knob disappears
+    setState(() {
+      _dragging = false;
+      if (total != null) _shownPos = total * fraction;
+    });
     await _seekFraction(fraction, thenPlay: false);
   }
 
@@ -282,8 +328,14 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
     final current =
         _dragging && total != null ? total * _dragFraction : _shownPos;
 
+    // Light surfaces need a clearly darker strip to stand out from the page
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final stripColor = isDark
+        ? Color.lerp(mc.card, mc.cardDim, 0.6)!
+        : const Color(0xFFE8E8E8);
+
     return ColoredBox(
-      color: Color.lerp(mc.card, mc.cardDim, 0.6)!,
+      color: stripColor,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
