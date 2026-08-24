@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import '../audio/wav_decoder.dart';
 import '../theme.dart';
 
 typedef Recording = ({Uint8List bytes, String name});
@@ -170,7 +171,8 @@ class _RecorderScreenState extends State<_RecorderScreen> {
       final path = await _recorder.stop();
       if (path == null) throw Exception('no file produced');
       final file = File(path);
-      final bytes = await file.readAsBytes();
+      // Raw mic input is quiet; bring the peak up to a normal level
+      final bytes = normalizeWavInPlace(await file.readAsBytes());
       try {
         await file.delete();
       } catch (_) {}

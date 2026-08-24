@@ -38,6 +38,7 @@ Uint8List _wav16({
 }
 
 void main() {
+  _normalizeTests();
   test('parses 16-bit mono WAV and reports duration', () {
     final samples = List<int>.generate(16000 * 2, (i) => 0);
     final wav =
@@ -86,5 +87,42 @@ void main() {
     expect(resamplePeaks(peaks, 8).length, 8);
     expect(decodeWaveform(null), isNull);
     expect(decodeWaveform('***'), isNull);
+  });
+}
+
+void _normalizeTests() {
+  test('normalize raises a quiet file to the target peak', () {
+    final samples =
+        List<int>.generate(2000, (i) => (math.sin(i / 7) * 1000).round());
+    final bytes = _wav16(sampleRate: 8000, channels: 1, samples: samples);
+    normalizeWavInPlace(bytes);
+    final wav = WavPcm.parse(bytes)!;
+    var peak = 0.0;
+    for (var f = 0; f < wav.frameCount; f++) {
+      peak = math.max(peak, wav.sample(f, 0).abs());
+    }
+    expect(peak, closeTo(0.9, 0.01));
+  });
+
+  test('normalize leaves a loud file alone', () {
+    final samples =
+        List<int>.generate(2000, (i) => (math.sin(i / 7) * 31000).round());
+    final bytes = _wav16(sampleRate: 8000, channels: 1, samples: samples);
+    final before = Uint8List.fromList(bytes);
+    normalizeWavInPlace(bytes);
+    expect(bytes, before);
+  });
+
+  test('normalize caps the gain on near-silent input', () {
+    final samples = List<int>.generate(2000, (i) => i.isEven ? 10 : -10);
+    final bytes = _wav16(sampleRate: 8000, channels: 1, samples: samples);
+    normalizeWavInPlace(bytes, maxGain: 32);
+    final wav = WavPcm.parse(bytes)!;
+    expect(wav.sample(0, 0), closeTo(320 / 32768, 1e-6));
+  });
+
+  test('normalize ignores non-WAV bytes', () {
+    final junk = Uint8List.fromList([1, 2, 3, 4]);
+    expect(normalizeWavInPlace(junk), junk);
   });
 }

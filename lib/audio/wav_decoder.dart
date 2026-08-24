@@ -138,3 +138,36 @@ class WavPcm {
     return out;
   }
 }
+
+// Scales 16-bit PCM so the loudest sample reaches [targetPeak], with the gain
+// capped at [maxGain] so near-silent takes are not turned into noise. Other
+// formats are returned unchanged. Modifies and returns the same bytes.
+Uint8List normalizeWavInPlace(
+  Uint8List bytes, {
+  double targetPeak = 0.9,
+  double maxGain = 32,
+}) {
+  final wav = WavPcm.parse(bytes);
+  if (wav == null || wav.bitsPerSample != 16 || wav.frameCount == 0) {
+    return bytes;
+  }
+  final bd = ByteData.sublistView(bytes);
+  final start = wav._dataOffset;
+  final end = start + wav.frameCount * wav.channels * 2;
+
+  var peak = 0;
+  for (var o = start; o < end; o += 2) {
+    final v = bd.getInt16(o, Endian.little).abs();
+    if (v > peak) peak = v;
+  }
+  if (peak == 0) return bytes;
+
+  final gain = (targetPeak * 32767 / peak).clamp(0.0, maxGain);
+  if (gain <= 1.0) return bytes;
+
+  for (var o = start; o < end; o += 2) {
+    final v = (bd.getInt16(o, Endian.little) * gain).round();
+    bd.setInt16(o, v.clamp(-32768, 32767), Endian.little);
+  }
+  return bytes;
+}
