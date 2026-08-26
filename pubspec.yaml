@@ -67,13 +67,15 @@ dependencies:
   media_kit_libs_linux: ^1.2.1
   record: ^6.2.0
   whisper_ggml_plus: ^1.5.2
+  # Regular dependency: Flutter excludes dev deps from Android release builds
+  # while still registering the plugin, which breaks the release compile
+  flutter_native_splash: ^2.4.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
   flutter_launcher_icons: ^0.14.3
-  flutter_native_splash: ^2.4.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
