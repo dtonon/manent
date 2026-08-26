@@ -252,7 +252,9 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
     });
   }
 
-  Future<void> _seekFraction(double fraction, {required bool thenPlay}) async {
+  // Seeks without changing the play state: a playing note keeps playing
+  // from the new position, a paused one stays paused
+  Future<void> _seekFraction(double fraction) async {
     fraction = fraction.clamp(0.0, 1.0);
     // Land on the target before loading so the initial 0 report is ignored
     final known = _totalDuration;
@@ -264,7 +266,6 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
     final target = total * fraction;
     if (target != _seekTarget) _setSeekTarget(target);
     await pb.seek(target);
-    if (thenPlay && !pb.isPlaying.value) await pb.play();
   }
 
   Future<void> _seekBy(Duration delta) async {
@@ -272,7 +273,7 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
     if (total == null || total == Duration.zero) return;
     final target =
         (_shownPos + delta).inMilliseconds.clamp(0, total.inMilliseconds);
-    await _seekFraction(target / total.inMilliseconds, thenPlay: false);
+    await _seekFraction(target / total.inMilliseconds);
   }
 
   void _onDragStart(double fraction) {
@@ -294,7 +295,7 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
       _dragging = false;
       if (total != null) _shownPos = total * fraction;
     });
-    await _seekFraction(fraction, thenPlay: false);
+    await _seekFraction(fraction);
   }
 
   // --- formatting ---
@@ -360,8 +361,7 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
                         width <= 0 ? 0 : local.dx / width;
                     return GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTapUp: (d) => _seekFraction(fraction(d.localPosition),
-                          thenPlay: true),
+                      onTapUp: (d) => _seekFraction(fraction(d.localPosition)),
                       onHorizontalDragStart: (d) =>
                           _onDragStart(fraction(d.localPosition)),
                       onHorizontalDragUpdate: (d) =>
