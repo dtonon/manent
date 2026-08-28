@@ -792,6 +792,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "9.5.0"
+  opus_decode:
+    dependency: "direct main"
+    description:
+      path: "packages/opus_decode"
+      relative: true
+    source: path
+    version: "0.1.0"
   package_config:
     dependency: transitive
     description:
