@@ -67,6 +67,7 @@ dependencies:
   media_kit_libs_linux: ^1.2.1
   record: ^6.2.0
   whisper_ggml_plus: ^1.5.2
+  audio_decode: ^1.3.3
   # Regular dependency: Flutter excludes dev deps from Android release builds
   # while still registering the plugin, which breaks the release compile
   flutter_native_splash: ^2.4.4

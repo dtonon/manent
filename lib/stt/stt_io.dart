@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../audio/speech_audio.dart';
 import '../notes/note_attachment.dart';
 import 'recorder_screen.dart';
 import 'stt_model_manager.dart';
@@ -9,14 +10,14 @@ import 'stt_settings_sheet.dart';
 
 const sttAvailable = true;
 
-// Only our own recordings are guaranteed 16 kHz WAV, which is all whisper
-// accepts without a transcoder
+// WAV, mp3 and Ogg Vorbis: anything toSpeechWav can turn into 16 kHz mono
 bool canTranscribe(NoteAttachment attachment) =>
-    attachment.mimeType == 'audio/wav' || attachment.mimeType == 'audio/x-wav';
+    isSpeechConvertible(attachment.mimeType, attachment.filename);
 
 // Ensures a model exists (offering the settings sheet), then records
 Future<({Uint8List bytes, String name})?> recordVoiceNote(
-    BuildContext context) async {
+  BuildContext context,
+) async {
   final manager = SttModelManager.instance;
   await manager.init();
   if (!context.mounted) return null;
@@ -35,8 +36,7 @@ Future<void> transcribeNote(BuildContext context, String noteId) async {
     await showSttSettingsSheet(context, explainFirstUse: true);
     if (!manager.hasDownloadedModel) return;
   }
-  final messenger =
-      context.mounted ? ScaffoldMessenger.maybeOf(context) : null;
+  final messenger = context.mounted ? ScaffoldMessenger.maybeOf(context) : null;
   final error = await SttService.instance.transcribeNote(noteId);
   if (error != null) {
     messenger?.showSnackBar(SnackBar(content: Text(error)));

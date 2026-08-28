@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:whisper_ggml_plus/whisper_ggml_plus.dart';
 
+import '../audio/speech_audio.dart';
 import '../notes/note_cache.dart';
 import 'stt_model_manager.dart';
 import 'stt_state.dart';
@@ -80,13 +81,19 @@ class SttService {
 
     final bytes = await NoteCache.instance.getFileBytes(attachment);
     if (bytes == null) return 'Could not load the audio file.';
+    if (_aborted.remove(noteId)) return null;
+
+    // Whisper wants 16 kHz mono; other formats and rates are converted
+    final speech = await toSpeechWav(bytes);
+    if (speech == null) return 'This audio format cannot be transcribed.';
+    if (_aborted.remove(noteId)) return null;
 
     // Plaintext WAV exists on disk only while whisper reads it
     final tmp = await getTemporaryDirectory();
     final dir = Directory(p.join(tmp.path, 'manent_stt'));
     await dir.create(recursive: true);
     final wav = File(p.join(dir.path, 'stt-${attachment.sha256}.wav'));
-    await wav.writeAsBytes(bytes);
+    await wav.writeAsBytes(speech);
 
     _current = noteId;
     try {
