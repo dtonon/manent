@@ -3720,6 +3720,13 @@ class _NoteCardState extends State<_NoteCard>
     }
 
     final isFileNote = widget.note.kind == NoteKind.file;
+    final att = widget.note.attachment;
+    final transcribing =
+        SttState.transcribing.value.contains(widget.note.id);
+    final canTranscribe = isFileNote &&
+        widget.note.error == null &&
+        att != null &&
+        stt.canTranscribe(att);
     entry = OverlayEntry(
       builder: (_) => ExcludeFocus(
         child: _NoteMenuOverlay(
@@ -3732,29 +3739,23 @@ class _NoteCardState extends State<_NoteCard>
                   widget.note.nostrId == null),
           showSelectText: !_isDesktopOrWeb && !isFileNote,
           showEdit: widget.note.error == null && !isFileNote,
-          showEditComment: isFileNote && widget.note.error == null,
           showSave: isFileNote,
-          showCopyImage: isFileNote && widget.note.attachment?.isImage == true,
+          showCopyImage: isFileNote && att?.isImage == true,
           showShare: isFileNote && !_isDesktopOrWeb,
-          showCopyCaption:
-              isFileNote && widget.note.attachment?.caption != null,
-          showTranscribe: isFileNote &&
-              widget.note.error == null &&
-              widget.note.attachment != null &&
-              stt.canTranscribe(widget.note.attachment!) &&
-              !SttState.transcribing.value.contains(widget.note.id),
+          showCaption: isFileNote && widget.note.error == null,
+          hasCaption: isFileNote && att?.caption != null,
+          showTranscribe: canTranscribe && !transcribing,
           showSensitive: widget.note.error == null,
           isSensitive: widget.note.sensitive,
           // Kept in release for failed notes so they can report the sync log
           showDebugJson:
               kDebugMode || widget.note.syncStatus == SyncStatus.failed,
           editedAt: widget.note.editedAt,
+          filename: widget.note.attachment?.filename,
           fileSize: widget.note.attachment?.size,
           dim: widget.note.attachment?.dim,
           copyLabel: isFileNote
-              ? (widget.note.attachment?.isImage == true
-                  ? null
-                  : 'Copy filename')
+              ? null
               : (hasSelection ? 'Copy selected text' : 'Copy text'),
         ),
       ),
@@ -3776,57 +3777,29 @@ class _NoteCardState extends State<_NoteCard>
     } else if (result == 'share') {
       _shareFile();
     } else if (result == 'copy_caption') {
-      await Clipboard.setData(
-          ClipboardData(text: widget.note.attachment?.caption ?? ''));
+      await Clipboard.setData(ClipboardData(text: att?.caption ?? ''));
     } else if (result == 'transcribe') {
       if (mounted) stt.transcribeNote(context, widget.note.id);
+    } else if (result == 'remove_caption') {
+      if (await _confirm(
+          'Remove caption', 'Remove the caption from this note?', 'Remove')) {
+        await NoteCache.instance.update(widget.note.id, '');
+      }
     } else if (result == 'edit' || result == 'edit_caption') {
       widget.onEdit?.call();
     } else if (result == 'retry_sync') {
       NoteCache.instance.retrySync(widget.note.id);
     } else if (result == 'copy') {
-      final textToCopy = widget.note.kind == NoteKind.file
-          ? (widget.note.attachment?.filename ?? '')
-          : (hasSelection ? selectedText : widget.note.text);
+      final textToCopy = hasSelection ? selectedText : widget.note.text;
       await Clipboard.setData(ClipboardData(text: textToCopy));
     } else if (result == 'select_text') {
       _selectionModeId.value = widget.note.id;
     } else if (result == 'retry') {
       _retry();
     } else if (result == 'delete') {
-      if (!mounted) return;
-      FocusManager.instance.primaryFocus?.unfocus();
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => CallbackShortcuts(
-          bindings: <ShortcutActivator, VoidCallback>{
-            const SingleActivator(LogicalKeyboardKey.enter, control: true):
-                () => Navigator.pop(ctx, true),
-            const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
-                Navigator.pop(ctx, true),
-          },
-          child: Focus(
-            autofocus: true,
-            child: AlertDialog(
-              title: const Text('Delete note'),
-              content:
-                  const Text('Are you sure you want to delete this message?'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Cancel'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  style: TextButton.styleFrom(foregroundColor: Colors.red),
-                  child: const Text('Delete'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-      if (confirmed == true) {
+      final ok = await _confirm('Delete note',
+          'Are you sure you want to delete this message?', 'Delete');
+      if (ok) {
         final sha = widget.note.attachment?.sha256;
         if (sha != null && AudioPlayerService.instance.activeSha.value == sha) {
           await AudioPlayerService.instance.stop();
@@ -3835,6 +3808,42 @@ class _NoteCardState extends State<_NoteCard>
             .delete(widget.note.id, nostrId: widget.note.nostrId);
       }
     }
+  }
+
+  // Destructive confirmation; Ctrl/Cmd+Enter confirms from the keyboard
+  Future<bool> _confirm(String title, String message, String action) async {
+    if (!mounted) return false;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
+              Navigator.pop(ctx, true),
+          const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
+              Navigator.pop(ctx, true),
+        },
+        child: Focus(
+          autofocus: true,
+          child: AlertDialog(
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: Text(action),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return confirmed == true;
   }
 
   @override
@@ -4392,16 +4401,8 @@ class _FileNoteContent extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                '${attachment.filename} - ${_formatFileSize(attachment.size)}',
-                style: TextStyle(
-                    fontSize: 14, height: 1.3, color: mc.secondaryText),
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (attachment.caption != null) ...[
-                const SizedBox(height: 6),
+              if (attachment.caption != null)
                 LinkedText(text: attachment.caption!),
-              ],
               _transcribingIndicator(mc),
               SizedBox(height: note.sensitive ? 12 : 6),
               _buildFileFooter(mc),
@@ -4513,24 +4514,11 @@ class _FileNoteContent extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         preview,
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${attachment.filename} - ${_formatFileSize(attachment.size)}',
-                style: TextStyle(
-                    fontSize: 14, height: 1.3, color: mc.secondaryText),
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (attachment.caption != null) ...[
-                const SizedBox(height: 6),
-                LinkedText(text: attachment.caption!),
-              ],
-            ],
+        if (attachment.caption != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: LinkedText(text: attachment.caption!),
           ),
-        ),
       ],
     );
   }
@@ -4885,20 +4873,11 @@ class _FileNoteContent extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    attachment.filename,
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    _formatFileSize(attachment.size),
-                    style: TextStyle(fontSize: 12, color: mc.secondaryText),
-                  ),
-                ],
+              child: Text(
+                attachment.filename,
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
@@ -5144,7 +5123,7 @@ class _GifStillImageState extends State<_GifStillImage> {
   }
 }
 
-class _NoteMenuOverlay extends StatelessWidget {
+class _NoteMenuOverlay extends StatefulWidget {
   final Offset tapPosition;
   final bool isDesktopOrWeb;
   final void Function([String?]) onSelect;
@@ -5152,19 +5131,21 @@ class _NoteMenuOverlay extends StatelessWidget {
   final bool showRetrySync;
   final bool showSelectText;
   final bool showEdit;
-  final bool showEditComment;
   final DateTime? editedAt;
-  // Null hides the copy action (e.g. image notes where filename copy is useless)
+  // Null hides the copy action (file notes copy details from the info block)
   final String? copyLabel;
 
   final bool showSave;
   final bool showCopyImage;
   final bool showShare;
-  final bool showCopyCaption;
+  // File notes: a caption row that opens a submenu once a caption exists
+  final bool showCaption;
+  final bool hasCaption;
   final bool showTranscribe;
   final bool showSensitive;
   final bool isSensitive;
   final bool showDebugJson;
+  final String? filename;
   final int? fileSize;
   final String? dim;
 
@@ -5176,20 +5157,29 @@ class _NoteMenuOverlay extends StatelessWidget {
     this.showRetrySync = false,
     this.showSelectText = false,
     this.showEdit = false,
-    this.showEditComment = false,
     this.showSave = false,
     this.showCopyImage = false,
     this.showShare = false,
-    this.showCopyCaption = false,
+    this.showCaption = false,
+    this.hasCaption = false,
     this.showTranscribe = false,
     this.showSensitive = false,
     this.isSensitive = false,
     this.showDebugJson = false,
     this.editedAt,
     this.copyLabel = 'Copy text',
+    this.filename,
     this.fileSize,
     this.dim,
   });
+
+  @override
+  State<_NoteMenuOverlay> createState() => _NoteMenuOverlayState();
+}
+
+// Submenus expand in place: the list is swapped for a back row plus their items
+class _NoteMenuOverlayState extends State<_NoteMenuOverlay> {
+  String? _submenu;
 
   String _formatEditedAt(DateTime dt) {
     final months = [
@@ -5208,13 +5198,13 @@ class _NoteMenuOverlay extends StatelessWidget {
     ];
     final time =
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    return 'Edited ${dt.day} ${months[dt.month - 1]} $time';
+    return 'Edited: ${dt.day} ${months[dt.month - 1]} $time';
   }
 
   // color null inherits the menu's DefaultTextStyle (primaryText) so it adapts
   Widget _menuItem(String action, String label, {Color? color}) {
     return InkWell(
-      onTap: () => onSelect(action),
+      onTap: () => widget.onSelect(action),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Text(label, style: TextStyle(fontSize: 14, color: color)),
@@ -5222,56 +5212,151 @@ class _NoteMenuOverlay extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final mc = context.mc;
-    // Menu actions in display order; dividers are interposed only between items
-    // so none ever touches the top or bottom edge of the menu.
-    final items = <Widget>[
-      if (showRetrySync) _menuItem('retry_sync', 'Retry sync'),
-      if (showSave) _menuItem('save', 'Save'),
-      if (showCopyImage) _menuItem('copy_image', 'Copy'),
-      if (showShare) _menuItem('share', 'Share'),
-      if (showCopyCaption) _menuItem('copy_caption', 'Copy caption'),
-      if (showTranscribe) _menuItem('transcribe', 'Transcribe audio'),
-      if (copyLabel != null) _menuItem('copy', copyLabel!),
-      if (showSelectText) _menuItem('select_text', 'Select text'),
-      if (showRetry) _menuItem('retry', 'Try to decrypt again'),
-      if (showEdit) _menuItem('edit', 'Edit'),
-      if (showEditComment) _menuItem('edit_caption', 'Edit caption'),
-      if (showSensitive)
-        _menuItem('set_sensitive',
-            isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
-      _menuItem('delete', 'Delete', color: Colors.red),
-      if (showDebugJson)
-        _menuItem('show_json', 'Show raw data', color: mc.secondaryText),
-      if (fileSize != null || editedAt != null)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _submenuRow(ManentColors mc, String id, String label) {
+    return Semantics(
+      button: true,
+      hint: 'Opens submenu',
+      child: InkWell(
+        onTap: () => setState(() => _submenu = id),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+          child: Row(
             children: [
-              if (fileSize != null)
-                Text(
-                  'Size: ${_formatFileSize(fileSize!)}',
-                  style: TextStyle(fontSize: 12, color: mc.secondaryText),
-                ),
-              if (dim != null)
-                Text(
-                  'Dimensions: $dim',
-                  style: TextStyle(fontSize: 12, color: mc.secondaryText),
-                ),
-              if ((fileSize != null || dim != null) && editedAt != null)
-                const SizedBox(height: 6),
-              if (editedAt != null)
-                Text(
-                  _formatEditedAt(editedAt!),
-                  style: TextStyle(fontSize: 12, color: mc.secondaryText),
-                ),
+              Expanded(
+                child: Text(label, style: const TextStyle(fontSize: 14)),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: mc.secondaryText),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _backRow(ManentColors mc, String label) {
+    return Semantics(
+      button: true,
+      label: 'Back to note menu',
+      child: InkWell(
+        onTap: () => setState(() => _submenu = null),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 12, 16, 12),
+          child: Row(
+            children: [
+              Icon(Icons.chevron_left, size: 18, color: mc.secondaryText),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Read-only details with a button that copies them as text
+  Widget _infoBlock(ManentColors mc) {
+    final fileLines = [
+      if (widget.filename != null) 'Filename: ${widget.filename}',
+      if (widget.fileSize != null) 'Size: ${_formatFileSize(widget.fileSize!)}',
+      if (widget.dim != null) 'Dimensions: ${widget.dim}',
     ];
+    final editedLine =
+        widget.editedAt == null ? null : _formatEditedAt(widget.editedAt!);
+    final allLines = [...fileLines, if (editedLine != null) editedLine];
+    final style = TextStyle(fontSize: 12, color: mc.secondaryText);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final line in fileLines)
+                  Text(line,
+                      style: style,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                if (fileLines.isNotEmpty && editedLine != null)
+                  const SizedBox(height: 6),
+                if (editedLine != null) Text(editedLine, style: style),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: 'Copy details',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: allLines.join('\n')));
+                widget.onSelect(null);
+              },
+              child: Semantics(
+                label: 'Copy details',
+                button: true,
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(Icons.copy_outlined,
+                      size: 16, color: mc.secondaryText),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _mainItems(ManentColors mc) {
+    final w = widget;
+    return [
+      if (w.showRetrySync) _menuItem('retry_sync', 'Retry sync'),
+      if (w.showSave) _menuItem('save', 'Save'),
+      if (w.showCopyImage) _menuItem('copy_image', 'Copy'),
+      if (w.showShare) _menuItem('share', 'Share'),
+      if (w.copyLabel != null) _menuItem('copy', w.copyLabel!),
+      if (w.showSelectText) _menuItem('select_text', 'Select text'),
+      if (w.showRetry) _menuItem('retry', 'Try to decrypt again'),
+      if (w.showEdit) _menuItem('edit', 'Edit'),
+      if (w.showCaption)
+        w.hasCaption
+            ? _submenuRow(mc, 'caption', 'Caption')
+            : _menuItem('edit_caption', 'Add caption'),
+      if (w.showTranscribe) _menuItem('transcribe', 'Transcribe audio'),
+      if (w.showSensitive)
+        _menuItem('set_sensitive',
+            w.isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
+      _menuItem('delete', 'Delete', color: Colors.red),
+      if (w.showDebugJson)
+        _menuItem('show_json', 'Show raw data', color: mc.secondaryText),
+      if (w.filename != null || w.fileSize != null || w.editedAt != null)
+        _infoBlock(mc),
+    ];
+  }
+
+  List<Widget> _captionItems(ManentColors mc) => [
+        _backRow(mc, 'Caption'),
+        _menuItem('edit_caption', 'Edit'),
+        _menuItem('copy_caption', 'Copy'),
+        _menuItem('remove_caption', 'Remove', color: Colors.red),
+      ];
+
+  @override
+  Widget build(BuildContext context) {
+    final mc = context.mc;
+    // Menu rows in display order; dividers are interposed only between items
+    // so none ever touches the top or bottom edge of the menu.
+    final items = switch (_submenu) {
+      'caption' => _captionItems(mc),
+      _ => _mainItems(mc),
+    };
 
     final children = <Widget>[];
     for (final item in items) {
@@ -5286,13 +5371,13 @@ class _NoteMenuOverlay extends StatelessWidget {
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => onSelect(null),
-            onSecondaryTap: () => onSelect(null),
+            onTap: () => widget.onSelect(null),
+            onSecondaryTap: () => widget.onSelect(null),
           ),
         ),
         CustomSingleChildLayout(
-          delegate: _MenuPositionDelegate(tapPosition,
-              isDesktopOrWeb: isDesktopOrWeb,
+          delegate: _MenuPositionDelegate(widget.tapPosition,
+              isDesktopOrWeb: widget.isDesktopOrWeb,
               keyboardHeight: MediaQuery.of(context).viewInsets.bottom),
           child: Container(
             decoration: BoxDecoration(

@@ -8,6 +8,7 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 - Show audio notes as an inline player with a real waveform, a draggable cursor and the duration
 - Normalize voice recordings to a standard level
 - Decode mp3, Ogg Vorbis and Ogg Opus for waveforms and transcription
+- Group file note menus into Caption and Transcript submenus and move the filename into the details block
 - Add a GitHub Linux release pipeline producing tar.gz, deb and rpm packages
 - Replace the Linux AppImage with a plain tar.gz bundle
 - Standardize the release pipeline (just release / publish / ship, with undo and changelog helpers)

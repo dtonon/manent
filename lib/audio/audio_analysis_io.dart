@@ -25,8 +25,9 @@ Future<AudioInfo?> analyzeAudio(Uint8List bytes, String mimeType) async {
     if (wav != null) return wav;
   } catch (_) {}
   try {
-    if (opus.isOggOpus(bytes))
+    if (opus.isOggOpus(bytes)) {
       return await compute(_decodeOpusAndAnalyze, bytes);
+    }
     if (ad.detectFormat(bytes) == ad.AudioFormat.unknown) return null;
     return await compute(_decodeAndAnalyze, bytes);
   } catch (_) {
