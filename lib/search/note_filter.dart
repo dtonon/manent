@@ -2,7 +2,7 @@ import '../notes/note.dart';
 import 'note_tags.dart';
 
 // Facets derived from data we already store — no write-path changes needed.
-enum NoteKindFilter { all, text, images, videos, files, sensitive }
+enum NoteKindFilter { all, text, images, videos, audio, files, sensitive }
 
 extension NoteKindFilterExt on NoteKindFilter {
   String get label => switch (this) {
@@ -10,6 +10,7 @@ extension NoteKindFilterExt on NoteKindFilter {
         NoteKindFilter.text => 'Text',
         NoteKindFilter.images => 'Images',
         NoteKindFilter.videos => 'Videos',
+        NoteKindFilter.audio => 'Audio',
         NoteKindFilter.files => 'Files',
         NoteKindFilter.sensitive => 'Sensitive',
       };
@@ -25,7 +26,8 @@ extension NoteKindFilterExt on NoteKindFilter {
     return switch (this) {
       NoteKindFilter.images => a.isImage,
       NoteKindFilter.videos => a.isVideo,
-      NoteKindFilter.files => !a.isImage && !a.isVideo,
+      NoteKindFilter.audio => a.isAudio,
+      NoteKindFilter.files => !a.isImage && !a.isVideo && !a.isAudio,
       _ => false,
     };
   }
