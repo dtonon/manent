@@ -105,6 +105,7 @@ class _NotesScreenState extends State<NotesScreen>
   static const _processTextChannel = MethodChannel('manent/process_text');
   String? _editingNoteId;
   DecryptedNote? _editingNote;
+  _EditTarget _editTarget = _EditTarget.text;
   // True while a file is being dragged over the window
   bool _dragging = false;
   // Pending file selected by user, cleared after send
@@ -671,7 +672,7 @@ class _NotesScreenState extends State<NotesScreen>
     );
     _trackIfFilteredOut(id);
     if (mounted) setState(() => _sending = false);
-    // The audio note is already persisted; the transcript lands in its caption
+    // The audio note is already persisted; the transcript lands in its own field
     if (id != null && mounted) stt.transcribeNote(context, id);
   }
 
@@ -1221,14 +1222,19 @@ class _NotesScreenState extends State<NotesScreen>
     }
   }
 
-  void _startEdit(DecryptedNote note) {
+  void _startEdit(DecryptedNote note, {_EditTarget? target}) {
+    final effective = target ??
+        (note.kind == NoteKind.file ? _EditTarget.caption : _EditTarget.text);
     setState(() {
       _editingNoteId = note.id;
       _editingNote = note;
+      _editTarget = effective;
     });
-    final initialText = note.kind == NoteKind.file
-        ? (note.attachment?.caption ?? '')
-        : note.text;
+    final initialText = switch (effective) {
+      _EditTarget.text => note.text,
+      _EditTarget.caption => note.attachment?.caption ?? '',
+      _EditTarget.transcript => note.attachment?.transcript ?? '',
+    };
     _textController.text = initialText;
     _textController.selection =
         TextSelection.collapsed(offset: initialText.length);
@@ -1250,6 +1256,7 @@ class _NotesScreenState extends State<NotesScreen>
   Future<void> _confirmEdit() async {
     final text = _textController.text.trim();
     final id = _editingNoteId;
+    final target = _editTarget;
     final isFileNote = _editingNote?.kind == NoteKind.file;
     if ((!isFileNote && text.isEmpty) || id == null || _sending) return;
     setState(() {
@@ -1259,7 +1266,11 @@ class _NotesScreenState extends State<NotesScreen>
     });
     _textController.clear();
     _inputFocusNode.unfocus();
-    await NoteCache.instance.update(id, text);
+    if (target == _EditTarget.transcript) {
+      await NoteCache.instance.setTranscript(id, text);
+    } else {
+      await NoteCache.instance.update(id, text);
+    }
     if (mounted) {
       setState(() => _sending = false);
       // An edit can remove the very tag the filter matched on
@@ -2322,7 +2333,9 @@ class _NotesScreenState extends State<NotesScreen>
         items.add(_buildOutsideFilterLabel());
       }
       items.add(_NoteCard(
-          key: ValueKey(note.id), note: note, onEdit: () => _startEdit(note)));
+          key: ValueKey(note.id),
+          note: note,
+          onEdit: (target) => _startEdit(note, target: target)));
       currentDate = noteDate;
     }
 
@@ -2555,7 +2568,11 @@ class _NotesScreenState extends State<NotesScreen>
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            'Editing',
+                            switch (_editTarget) {
+                              _EditTarget.text => 'Editing',
+                              _EditTarget.caption => 'Editing caption',
+                              _EditTarget.transcript => 'Editing transcript',
+                            },
                             style: TextStyle(
                                 fontSize: 13, color: mc.secondaryText),
                           ),
@@ -3498,9 +3515,12 @@ class _LinkedTextState extends State<LinkedText> {
   }
 }
 
+// Which field of a note the composer is editing
+enum _EditTarget { text, caption, transcript }
+
 class _NoteCard extends StatefulWidget {
   final DecryptedNote note;
-  final VoidCallback? onEdit;
+  final void Function(_EditTarget target)? onEdit;
 
   const _NoteCard({super.key, required this.note, this.onEdit});
 
@@ -3744,7 +3764,10 @@ class _NoteCardState extends State<_NoteCard>
           showShare: isFileNote && !_isDesktopOrWeb,
           showCaption: isFileNote && widget.note.error == null,
           hasCaption: isFileNote && att?.caption != null,
-          showTranscribe: canTranscribe && !transcribing,
+          hasTranscript: isFileNote && att?.transcript != null && !transcribing,
+          showTranscribe:
+              canTranscribe && !transcribing && att.transcript == null,
+          canRetranscribe: canTranscribe,
           showSensitive: widget.note.error == null,
           isSensitive: widget.note.sensitive,
           // Kept in release for failed notes so they can report the sync log
@@ -3778,15 +3801,30 @@ class _NoteCardState extends State<_NoteCard>
       _shareFile();
     } else if (result == 'copy_caption') {
       await Clipboard.setData(ClipboardData(text: att?.caption ?? ''));
+    } else if (result == 'copy_transcript') {
+      await Clipboard.setData(ClipboardData(text: att?.transcript ?? ''));
     } else if (result == 'transcribe') {
       if (mounted) stt.transcribeNote(context, widget.note.id);
+    } else if (result == 'retranscribe') {
+      final ok = await _confirm('Replace transcript',
+          'Transcribe the audio again and replace the current transcript?',
+          'Replace');
+      if (ok && mounted) stt.transcribeNote(context, widget.note.id);
     } else if (result == 'remove_caption') {
       if (await _confirm(
           'Remove caption', 'Remove the caption from this note?', 'Remove')) {
         await NoteCache.instance.update(widget.note.id, '');
       }
-    } else if (result == 'edit' || result == 'edit_caption') {
-      widget.onEdit?.call();
+    } else if (result == 'remove_transcript') {
+      final ok = await _confirm('Remove transcript',
+          'Remove the transcript from this note?', 'Remove');
+      if (ok) await NoteCache.instance.setTranscript(widget.note.id, null);
+    } else if (result == 'edit') {
+      widget.onEdit?.call(_EditTarget.text);
+    } else if (result == 'edit_caption') {
+      widget.onEdit?.call(_EditTarget.caption);
+    } else if (result == 'edit_transcript') {
+      widget.onEdit?.call(_EditTarget.transcript);
     } else if (result == 'retry_sync') {
       NoteCache.instance.retrySync(widget.note.id);
     } else if (result == 'copy') {
@@ -4374,7 +4412,7 @@ class _FileNoteContent extends StatelessWidget {
     }
 
     if (attachment.isImage) {
-      return _buildImageContent(attachment);
+      return _buildImageContent(mc, attachment);
     }
     if (attachment.isVideo) {
       return _buildVideoContent(mc, attachment);
@@ -4403,6 +4441,7 @@ class _FileNoteContent extends StatelessWidget {
             children: [
               if (attachment.caption != null)
                 LinkedText(text: attachment.caption!),
+              _transcriptBlock(mc, attachment),
               _transcribingIndicator(mc),
               SizedBox(height: note.sensitive ? 12 : 6),
               _buildFileFooter(mc),
@@ -4514,10 +4553,17 @@ class _FileNoteContent extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         preview,
-        if (attachment.caption != null)
+        if (attachment.caption != null || attachment.transcript != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: LinkedText(text: attachment.caption!),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (attachment.caption != null)
+                  LinkedText(text: attachment.caption!),
+                _transcriptBlock(mc, attachment),
+              ],
+            ),
           ),
       ],
     );
@@ -4694,7 +4740,7 @@ class _FileNoteContent extends StatelessWidget {
     );
   }
 
-  Widget _buildImageContent(NoteAttachment attachment) {
+  Widget _buildImageContent(ManentColors mc, NoteAttachment attachment) {
     final image = ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: Stack(
@@ -4801,16 +4847,60 @@ class _FileNoteContent extends StatelessWidget {
       ),
     );
 
-    if (attachment.caption == null) return image;
+    if (attachment.caption == null && attachment.transcript == null) {
+      return image;
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         image,
         Padding(
           padding: const EdgeInsets.all(16),
-          child: LinkedText(text: attachment.caption!),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (attachment.caption != null)
+                LinkedText(text: attachment.caption!),
+              _transcriptBlock(mc, attachment),
+            ],
+          ),
         ),
       ],
+    );
+  }
+
+  // Speech-to-text shown apart from the caption under a labelled rule.
+  // [top] is the gap above it; by default it only applies after a caption.
+  Widget _transcriptBlock(ManentColors mc, NoteAttachment attachment,
+      {double? top}) {
+    final transcript = attachment.transcript;
+    if (transcript == null) return const SizedBox.shrink();
+    return Padding(
+      padding:
+          EdgeInsets.only(top: top ?? (attachment.caption != null ? 8 : 0)),
+      child: Semantics(
+        label: 'Transcript',
+        container: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Transcript',
+                  style: TextStyle(fontSize: 11, color: mc.secondaryText),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Divider(height: 1, thickness: 1, color: mc.border),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            LinkedText(text: transcript),
+          ],
+        ),
+      ),
     );
   }
 
@@ -4886,6 +4976,7 @@ class _FileNoteContent extends StatelessWidget {
           const SizedBox(height: 8),
           LinkedText(text: attachment.caption!),
         ],
+        _transcriptBlock(mc, attachment, top: 8),
         _transcribingIndicator(mc),
         SizedBox(height: note.sensitive ? 12 : 6),
         _buildFileFooter(mc),
@@ -5138,10 +5229,13 @@ class _NoteMenuOverlay extends StatefulWidget {
   final bool showSave;
   final bool showCopyImage;
   final bool showShare;
-  // File notes: a caption row that opens a submenu once a caption exists
+  // File notes: a caption row that opens a submenu once a caption exists, and
+  // a transcript row that does the same, or offers to transcribe
   final bool showCaption;
   final bool hasCaption;
+  final bool hasTranscript;
   final bool showTranscribe;
+  final bool canRetranscribe;
   final bool showSensitive;
   final bool isSensitive;
   final bool showDebugJson;
@@ -5162,7 +5256,9 @@ class _NoteMenuOverlay extends StatefulWidget {
     this.showShare = false,
     this.showCaption = false,
     this.hasCaption = false,
+    this.hasTranscript = false,
     this.showTranscribe = false,
+    this.canRetranscribe = false,
     this.showSensitive = false,
     this.isSensitive = false,
     this.showDebugJson = false,
@@ -5329,7 +5425,10 @@ class _NoteMenuOverlayState extends State<_NoteMenuOverlay> {
         w.hasCaption
             ? _submenuRow(mc, 'caption', 'Caption')
             : _menuItem('edit_caption', 'Add caption'),
-      if (w.showTranscribe) _menuItem('transcribe', 'Transcribe audio'),
+      if (w.hasTranscript)
+        _submenuRow(mc, 'transcript', 'Transcript')
+      else if (w.showTranscribe)
+        _menuItem('transcribe', 'Transcribe audio'),
       if (w.showSensitive)
         _menuItem('set_sensitive',
             w.isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
@@ -5348,6 +5447,14 @@ class _NoteMenuOverlayState extends State<_NoteMenuOverlay> {
         _menuItem('remove_caption', 'Remove', color: Colors.red),
       ];
 
+  List<Widget> _transcriptItems(ManentColors mc) => [
+        _backRow(mc, 'Transcript'),
+        _menuItem('edit_transcript', 'Edit'),
+        _menuItem('copy_transcript', 'Copy'),
+        if (widget.canRetranscribe) _menuItem('retranscribe', 'Re-transcribe'),
+        _menuItem('remove_transcript', 'Remove', color: Colors.red),
+      ];
+
   @override
   Widget build(BuildContext context) {
     final mc = context.mc;
@@ -5355,6 +5462,7 @@ class _NoteMenuOverlayState extends State<_NoteMenuOverlay> {
     // so none ever touches the top or bottom edge of the menu.
     final items = switch (_submenu) {
       'caption' => _captionItems(mc),
+      'transcript' => _transcriptItems(mc),
       _ => _mainItems(mc),
     };
 

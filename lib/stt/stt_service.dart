@@ -108,7 +108,7 @@ class SttService {
       if (_aborted.remove(noteId)) return null;
       final text = response.text.trim();
       if (text.isEmpty) return 'No speech detected.';
-      await NoteCache.instance.appendToCaption(noteId, text);
+      await NoteCache.instance.setTranscript(noteId, text);
       return null;
     } catch (e) {
       if (_aborted.remove(noteId)) return null;

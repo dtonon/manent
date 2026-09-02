@@ -18,6 +18,7 @@ class NoteAttachment {
   final String key; // hex 32-byte AES key
   final String? thumbhash; // base64, images only
   final String? caption;
+  final String? transcript; // speech-to-text of audio, kept apart from caption
   final bool sensitive;
   final String? dim; // "<width>x<height>", images only
   final double? duration; // seconds, audio only
@@ -33,6 +34,7 @@ class NoteAttachment {
     required this.key,
     this.thumbhash,
     this.caption,
+    this.transcript,
     this.sensitive = false,
     this.dim,
     this.duration,
@@ -67,6 +69,7 @@ class NoteAttachment {
         'decryption-key': key,
         if (thumbhash != null) 'thumbhash': thumbhash,
         if (caption != null) 'caption': caption,
+        if (transcript != null) 'transcript': transcript,
         if (sensitive) 'sensitive': true,
         if (dim != null) 'dim': dim,
         if (duration != null) 'duration': duration,
@@ -87,6 +90,7 @@ class NoteAttachment {
         thumbhash: j['thumbhash'] as String?,
         caption: (j['caption'] ?? j['comment'])
             as String?, // TODO: 'comment' is deprecated, remove it after some time
+        transcript: j['transcript'] as String?,
         sensitive: j['sensitive'] == true,
         dim: j['dim'] as String?,
         duration: (j['duration'] as num?)?.toDouble(),
@@ -95,8 +99,17 @@ class NoteAttachment {
 
   String toJsonString() => jsonEncode(toJson());
 
-  NoteAttachment copyWith(
-          {String? url, String? data, bool? sensitive, String? caption}) =>
+  // Caption and transcript can be cleared by passing clearCaption /
+  // clearTranscript, since null means "keep"
+  NoteAttachment copyWith({
+    String? url,
+    String? data,
+    bool? sensitive,
+    String? caption,
+    bool clearCaption = false,
+    String? transcript,
+    bool clearTranscript = false,
+  }) =>
       NoteAttachment(
         url: url ?? this.url,
         data: data ?? this.data,
@@ -106,7 +119,8 @@ class NoteAttachment {
         sha256: sha256,
         key: key,
         thumbhash: thumbhash,
-        caption: caption ?? this.caption,
+        caption: clearCaption ? null : (caption ?? this.caption),
+        transcript: clearTranscript ? null : (transcript ?? this.transcript),
         sensitive: sensitive ?? this.sensitive,
         dim: dim,
         duration: duration,

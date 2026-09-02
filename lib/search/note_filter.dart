@@ -76,13 +76,14 @@ class NoteFilter {
 }
 
 // Text notes match on their body; file notes carry their text in the
-// attachment caption, plus the filename is worth matching too.
+// attachment caption and transcript, plus the filename is worth matching too.
 bool noteMatchesQuery(DecryptedNote note, String needle) {
   if (needle.isEmpty) return true;
   if (note.text.toLowerCase().contains(needle)) return true;
   final a = note.attachment;
   if (a == null) return false;
   return (a.caption?.toLowerCase().contains(needle) ?? false) ||
+      (a.transcript?.toLowerCase().contains(needle) ?? false) ||
       a.filename.toLowerCase().contains(needle);
 }
 
