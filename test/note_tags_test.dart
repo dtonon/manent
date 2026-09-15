@@ -1,7 +1,35 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:manent/notes/note.dart';
+import 'package:manent/notes/note_attachment.dart';
 import 'package:manent/search/note_tags.dart';
 
+DecryptedNote _fileNote({String? caption, String? transcript}) => DecryptedNote(
+      id: 'n1',
+      text: '',
+      createdAt: DateTime(2026, 1, 1),
+      syncStatus: SyncStatus.synced,
+      kind: NoteKind.file,
+      attachment: NoteAttachment(
+        filename: 'voice.ogg',
+        mimeType: 'audio/ogg',
+        size: 1,
+        sha256: 'x',
+        key: 'k',
+        caption: caption,
+        transcript: transcript,
+      ),
+    );
+
 void main() {
+  group('tagsOf', () {
+    test('file notes take tags from caption and transcript', () {
+      expect(tagsOf(_fileNote(caption: '#a', transcript: 'say #b')),
+          {'a', 'b'});
+      expect(tagsOf(_fileNote(transcript: 'only #spoken')), {'spoken'});
+      expect(tagsOf(_fileNote()), isEmpty);
+    });
+  });
+
   group('extractTags', () {
     test('picks up tags at start, mid-text and end', () {
       expect(extractTags('#work meeting notes'), {'work'});

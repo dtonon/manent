@@ -10,9 +10,13 @@ final _tagPattern = RegExp(
   multiLine: true,
 );
 
-// Tags live in the note body, or in the caption for file notes
-String tagSourceOf(DecryptedNote note) =>
-    note.kind == NoteKind.file ? (note.attachment?.caption ?? '') : note.text;
+// Tags live in the note body, or in the caption and transcript for file notes
+String tagSourceOf(DecryptedNote note) {
+  if (note.kind != NoteKind.file) return note.text;
+  final a = note.attachment;
+  if (a == null) return '';
+  return [a.caption, a.transcript].whereType<String>().join('\n');
+}
 
 // Parsing runs on every keystroke while filtering, so memoise by source text.
 // Notes are immutable, so a given string always yields the same tags.
