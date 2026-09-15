@@ -8,6 +8,7 @@ import 'package:whisper_ggml_plus/whisper_ggml_plus.dart';
 import '../audio/speech_audio.dart';
 import '../notes/note_cache.dart';
 import 'stt_model_manager.dart';
+import 'stt_prompt.dart';
 import 'stt_state.dart';
 
 class SttService {
@@ -102,6 +103,7 @@ class SttService {
           audio: wav.path,
           language: manager.language.value,
           threads: _threads,
+          prompt: buildSttPrompt(NoteCache.instance.notifier.value),
         ),
         modelPath: modelPath,
       );
