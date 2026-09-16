@@ -3768,6 +3768,11 @@ class _NoteCardState extends State<_NoteCard>
           showTranscribe:
               canTranscribe && !transcribing && att.transcript == null,
           canRetranscribe: canTranscribe,
+          showRemoveAudio: isFileNote &&
+              widget.note.error == null &&
+              att?.isAudio == true &&
+              !transcribing &&
+              (att!.transcript != null || att.caption != null),
           showSensitive: widget.note.error == null,
           isSensitive: widget.note.sensitive,
           // Kept in release for failed notes so they can report the sync log
@@ -3834,6 +3839,15 @@ class _NoteCardState extends State<_NoteCard>
       _selectionModeId.value = widget.note.id;
     } else if (result == 'retry') {
       _retry();
+    } else if (result == 'remove_audio') {
+      final ok = await _confirm(
+        'Remove audio file',
+        'The transcript and caption are kept as a text note and the audio '
+            'file is deleted.',
+        'Remove',
+        actionColor: accent,
+      );
+      if (ok) await _replaceAudioWithText();
     } else if (result == 'delete') {
       final ok = await _confirm('Delete note',
           'Are you sure you want to delete this message?', 'Delete');
@@ -3848,8 +3862,32 @@ class _NoteCardState extends State<_NoteCard>
     }
   }
 
+  // Turns an audio note into a text note made of its transcript and caption,
+  // then deletes the audio note. The text note is created first so nothing
+  // is lost if that step fails.
+  Future<void> _replaceAudioWithText() async {
+    final note = widget.note;
+    final att = note.attachment;
+    if (att == null) return;
+    final text = [att.transcript, att.caption]
+        .whereType<String>()
+        .map((t) => t.trim())
+        .where((t) => t.isNotEmpty)
+        .join('\n\n');
+    if (text.isEmpty) return;
+    final newId =
+        await NoteCache.instance.add(text, createdAt: note.createdAt);
+    if (newId == null) return;
+    if (note.sensitive) await NoteCache.instance.setSensitive(newId, true);
+    if (AudioPlayerService.instance.activeSha.value == att.sha256) {
+      await AudioPlayerService.instance.stop();
+    }
+    await NoteCache.instance.delete(note.id, nostrId: note.nostrId);
+  }
+
   // Destructive confirmation; Ctrl/Cmd+Enter confirms from the keyboard
-  Future<bool> _confirm(String title, String message, String action) async {
+  Future<bool> _confirm(String title, String message, String action,
+      {Color actionColor = Colors.red}) async {
     if (!mounted) return false;
     FocusManager.instance.primaryFocus?.unfocus();
     final confirmed = await showDialog<bool>(
@@ -3873,7 +3911,7 @@ class _NoteCardState extends State<_NoteCard>
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                style: TextButton.styleFrom(foregroundColor: actionColor),
                 child: Text(action),
               ),
             ],
@@ -5236,6 +5274,7 @@ class _NoteMenuOverlay extends StatefulWidget {
   final bool hasTranscript;
   final bool showTranscribe;
   final bool canRetranscribe;
+  final bool showRemoveAudio;
   final bool showSensitive;
   final bool isSensitive;
   final bool showDebugJson;
@@ -5259,6 +5298,7 @@ class _NoteMenuOverlay extends StatefulWidget {
     this.hasTranscript = false,
     this.showTranscribe = false,
     this.canRetranscribe = false,
+    this.showRemoveAudio = false,
     this.showSensitive = false,
     this.isSensitive = false,
     this.showDebugJson = false,
@@ -5432,6 +5472,8 @@ class _NoteMenuOverlayState extends State<_NoteMenuOverlay> {
       if (w.showSensitive)
         _menuItem('set_sensitive',
             w.isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
+      if (w.showRemoveAudio)
+        _menuItem('remove_audio', 'Remove audio file', color: accent),
       _menuItem('delete', 'Delete', color: Colors.red),
       if (w.showDebugJson)
         _menuItem('show_json', 'Show raw data', color: mc.secondaryText),

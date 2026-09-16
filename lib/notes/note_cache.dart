@@ -203,12 +203,13 @@ class NoteCache {
   }
 
   // Returns the local id of the new note so callers can track it
-  Future<String?> add(String text) async {
+  // [createdAt] lets a note take another note's place in the timeline
+  Future<String?> add(String text, {DateTime? createdAt}) async {
     if (_localKey == null) return null;
 
     final localContent = await LocalCrypto.encrypt(_localKey!, text);
     final id = _generateId();
-    final now = DateTime.now();
+    final now = createdAt ?? DateTime.now();
 
     if (_db != null) {
       await _db!.insert(
