@@ -1302,7 +1302,7 @@ class _NotesScreenState extends State<NotesScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Icon(Icons.warning_amber_rounded,
-                      color: Colors.red, size: 20),
+                      color: accent, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -1310,7 +1310,7 @@ class _NotesScreenState extends State<NotesScreen>
                       '${unsynced == 1 ? 'note' : 'notes'} — '
                       'they will be lost.',
                       style: const TextStyle(
-                        color: Colors.red,
+                        color: accent,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -3845,7 +3845,6 @@ class _NoteCardState extends State<_NoteCard>
         'The transcript and caption are kept as a text note and the audio '
             'file is deleted.',
         'Remove',
-        actionColor: accent,
       );
       if (ok) await _replaceAudioWithText();
     } else if (result == 'delete') {
@@ -3886,8 +3885,7 @@ class _NoteCardState extends State<_NoteCard>
   }
 
   // Destructive confirmation; Ctrl/Cmd+Enter confirms from the keyboard
-  Future<bool> _confirm(String title, String message, String action,
-      {Color actionColor = Colors.red}) async {
+  Future<bool> _confirm(String title, String message, String action) async {
     if (!mounted) return false;
     FocusManager.instance.primaryFocus?.unfocus();
     final confirmed = await showDialog<bool>(
@@ -3911,7 +3909,7 @@ class _NoteCardState extends State<_NoteCard>
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                style: TextButton.styleFrom(foregroundColor: actionColor),
+                style: TextButton.styleFrom(foregroundColor: accent),
                 child: Text(action),
               ),
             ],
@@ -5474,7 +5472,7 @@ class _NoteMenuOverlayState extends State<_NoteMenuOverlay> {
             w.isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
       if (w.showRemoveAudio)
         _menuItem('remove_audio', 'Remove audio file', color: accent),
-      _menuItem('delete', 'Delete', color: Colors.red),
+      _menuItem('delete', 'Delete', color: accent),
       if (w.showDebugJson)
         _menuItem('show_json', 'Show raw data', color: mc.secondaryText),
       if (w.filename != null || w.fileSize != null || w.editedAt != null)
@@ -5486,7 +5484,7 @@ class _NoteMenuOverlayState extends State<_NoteMenuOverlay> {
         _backRow(mc, 'Caption'),
         _menuItem('edit_caption', 'Edit'),
         _menuItem('copy_caption', 'Copy'),
-        _menuItem('remove_caption', 'Remove', color: Colors.red),
+        _menuItem('remove_caption', 'Remove', color: accent),
       ];
 
   List<Widget> _transcriptItems(ManentColors mc) => [
@@ -5494,7 +5492,7 @@ class _NoteMenuOverlayState extends State<_NoteMenuOverlay> {
         _menuItem('edit_transcript', 'Edit'),
         _menuItem('copy_transcript', 'Copy'),
         if (widget.canRetranscribe) _menuItem('retranscribe', 'Re-transcribe'),
-        _menuItem('remove_transcript', 'Remove', color: Colors.red),
+        _menuItem('remove_transcript', 'Remove', color: accent),
       ];
 
   @override

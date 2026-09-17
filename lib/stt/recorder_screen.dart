@@ -292,7 +292,7 @@ class _RecorderScreenState extends State<_RecorderScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.fiber_manual_record,
-                size: 14, color: _recording ? Colors.red : mc.iconMuted),
+                size: 14, color: _recording ? accent : mc.iconMuted),
             const SizedBox(width: 10),
             ExcludeSemantics(
               child: Text(

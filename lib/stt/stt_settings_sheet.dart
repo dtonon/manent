@@ -211,7 +211,7 @@ class _SttSettingsSheet extends StatelessWidget {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: accent),
             child: const Text('Delete'),
           ),
         ],

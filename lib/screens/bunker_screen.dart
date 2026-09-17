@@ -363,7 +363,7 @@ class _BunkerScreenState extends State<BunkerScreen> {
                         Text(
                           _error!,
                           style:
-                              const TextStyle(fontSize: 13, color: Colors.red),
+                              const TextStyle(fontSize: 13, color: accent),
                           textAlign: TextAlign.center,
                         ),
                       ],
