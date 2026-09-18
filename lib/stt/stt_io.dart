@@ -43,6 +43,21 @@ Future<void> transcribeNote(BuildContext context, String noteId) async {
   }
 }
 
+// Imported audio starts transcribing only when a model is already on disk,
+// so adding a file never opens the download sheet
+Future<void> autoTranscribeImport(
+  BuildContext context,
+  String noteId,
+  String mimeType,
+  String filename,
+) async {
+  if (!isSpeechConvertible(mimeType, filename)) return;
+  final manager = SttModelManager.instance;
+  await manager.init();
+  if (!manager.hasDownloadedModel || !context.mounted) return;
+  await transcribeNote(context, noteId);
+}
+
 Future<void> abortTranscription(String noteId) =>
     SttService.instance.abort(noteId);
 

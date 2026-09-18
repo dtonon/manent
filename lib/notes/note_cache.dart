@@ -5,7 +5,6 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:mime/mime.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ndk/data_layer/repositories/verifiers/bip340_event_verifier.dart';
 import 'package:ndk/domain_layer/entities/broadcast_state.dart';
@@ -23,6 +22,7 @@ import '../blossom/blossom_client.dart';
 import '../blossom/file_crypto.dart';
 import 'local_crypto.dart';
 import 'local_key_store.dart';
+import 'mime_lookup.dart';
 import 'note.dart';
 import 'note_attachment.dart';
 import 'notes_database.dart';
@@ -236,7 +236,7 @@ class NoteCache {
     if (_localKey == null) return null;
 
     filename = p.basename(filename);
-    final mimeType = lookupMimeType(filename) ?? 'application/octet-stream';
+    final mimeType = mimeTypeForFilename(filename);
     final key = FileCrypto.generateKey();
     final encryptedBytes = await FileCrypto.encrypt(key, bytes);
     final sha256 = await FileCrypto.sha256Hex(encryptedBytes);

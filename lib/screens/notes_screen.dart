@@ -37,6 +37,7 @@ import '../auth/auth_state.dart';
 import '../auth/relay_constants.dart';
 import '../blossom/blossom_constants.dart';
 import '../notes/note.dart';
+import '../notes/mime_lookup.dart';
 import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
 import '../notes/sync_diagnostics.dart';
@@ -311,7 +312,7 @@ class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
     final name = xfile.name.isNotEmpty
         ? xfile.name
         : 'dropped-${DateTime.now().millisecondsSinceEpoch}';
-    final mimeType = lookupMimeType(name) ?? 'application/octet-stream';
+    final mimeType = mimeTypeForFilename(name);
     if (rasterImageMimeTypes.contains(mimeType)) {
       await _handleImagePicked(bytes, name, mimeType);
     } else {
@@ -522,6 +523,9 @@ class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
       );
       _trackIfFilteredOut(id);
       if (mounted) setState(() => _sending = false);
+      if (id != null && mounted) {
+        stt.autoTranscribeImport(context, id, file.mimeType, file.name);
+      }
       return;
     }
     final text = _withInheritedTags(_textController.text.trim());
@@ -649,7 +653,7 @@ class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
       if (pf.path == null) return;
       bytes = await File(pf.path!).readAsBytes();
     }
-    final mimeType = lookupMimeType(pf.name) ?? 'application/octet-stream';
+    final mimeType = mimeTypeForFilename(pf.name);
     if (rasterImageMimeTypes.contains(mimeType)) {
       await _handleImagePicked(bytes, pf.name, mimeType);
     } else {
@@ -1207,7 +1211,7 @@ class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
       final bytes = await File(item.path).readAsBytes();
       final name = item.path.split('/').last;
       final mimeType =
-          item.mimeType ?? lookupMimeType(name) ?? 'application/octet-stream';
+          item.mimeType ?? mimeTypeForFilename(name);
       if (mounted) {
         if (rasterImageMimeTypes.contains(mimeType)) {
           await _handleImagePicked(bytes, name, mimeType);

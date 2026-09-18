@@ -13,6 +13,13 @@ Future<({Uint8List bytes, String name})?> recordVoiceNote(
 
 Future<void> transcribeNote(BuildContext context, String noteId) async {}
 
+Future<void> autoTranscribeImport(
+  BuildContext context,
+  String noteId,
+  String mimeType,
+  String filename,
+) async {}
+
 Future<void> abortTranscription(String noteId) async {}
 
 Future<void> openSttSettings(BuildContext context) async {}

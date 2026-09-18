@@ -80,8 +80,10 @@ class NoteAttachment {
         url: j['url'] as String?,
         data: j['data'] as String?,
         filename: j['filename'] as String,
-        mimeType: (j['file-type'] ?? j['mime_type'])
-            as String, // TODO: 'mime_type' is deprecated, remove it after some time
+        mimeType: _normalizeMimeType(
+            (j['file-type'] ?? j['mime_type'])
+                as String, // TODO: 'mime_type' is deprecated, remove it after some time
+            j['filename'] as String),
         size: j['size'] as int,
         sha256: (j['x'] ?? j['sha256'])
             as String, // TODO: 'sha256' is deprecated, remove it after some time
@@ -98,6 +100,15 @@ class NoteAttachment {
       );
 
   String toJsonString() => jsonEncode(toJson());
+
+  // Opus notes saved before the extension was known carry a generic type
+  static String _normalizeMimeType(String mimeType, String filename) {
+    if (mimeType == 'application/octet-stream' &&
+        filename.toLowerCase().endsWith('.opus')) {
+      return 'audio/ogg';
+    }
+    return mimeType;
+  }
 
   // Caption and transcript can be cleared by passing clearCaption /
   // clearTranscript, since null means "keep"
