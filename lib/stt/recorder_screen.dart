@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../audio/wav_decoder.dart';
 import '../theme.dart';
@@ -34,7 +35,8 @@ class _RecorderScreen extends StatefulWidget {
   State<_RecorderScreen> createState() => _RecorderScreenState();
 }
 
-class _RecorderScreenState extends State<_RecorderScreen> {
+class _RecorderScreenState extends State<_RecorderScreen>
+    with WidgetsBindingObserver {
   final _recorder = AudioRecorder();
   Timer? _ticker;
   StreamSubscription<Amplitude>? _ampSub;
@@ -52,7 +54,15 @@ class _RecorderScreenState extends State<_RecorderScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _start();
+  }
+
+  // Backgrounding mutes the mic while the file keeps growing, so save what
+  // was captured instead of recording silence
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused && _recording) _stop();
   }
 
   Future<void> _start() async {
@@ -75,6 +85,8 @@ class _RecorderScreenState extends State<_RecorderScreen> {
       _path =
           p.join(dir.path, 'rec-${DateTime.now().millisecondsSinceEpoch}.wav');
       await _startRecorder(_path!);
+      // Auto-lock would mute the mic mid-recording
+      await WakelockPlus.enable();
       _ampSub = _recorder
           .onAmplitudeChanged(const Duration(milliseconds: 50))
           .listen((a) {
@@ -167,6 +179,7 @@ class _RecorderScreenState extends State<_RecorderScreen> {
     setState(() => _stopping = true);
     _ticker?.cancel();
     await _ampSub?.cancel();
+    await WakelockPlus.disable();
     try {
       final path = await _recorder.stop();
       if (path == null) throw Exception('no file produced');
@@ -197,6 +210,7 @@ class _RecorderScreenState extends State<_RecorderScreen> {
     if (_stopping) return;
     _ticker?.cancel();
     await _ampSub?.cancel();
+    await WakelockPlus.disable();
     try {
       await _recorder.stop();
     } catch (_) {}
@@ -210,8 +224,10 @@ class _RecorderScreenState extends State<_RecorderScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _ampSub?.cancel();
+    WakelockPlus.disable();
     _recorder.dispose();
     super.dispose();
   }
