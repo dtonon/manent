@@ -92,8 +92,9 @@ class _RecorderScreenState extends State<_RecorderScreen>
       _path =
           p.join(dir.path, 'rec-${DateTime.now().millisecondsSinceEpoch}.wav');
       await _startRecorder(_path!);
-      // Auto-lock would mute the mic mid-recording
-      await WakelockPlus.enable();
+      // Auto-lock would mute the mic mid-recording; a wakelock failure must
+      // never affect the recording itself
+      unawaited(WakelockPlus.enable().catchError((_) {}));
       _ampSub = _recorder
           .onAmplitudeChanged(const Duration(milliseconds: 50))
           .listen((a) {
@@ -104,6 +105,10 @@ class _RecorderScreenState extends State<_RecorderScreen>
         if (mounted) setState(() => _elapsedSeconds++);
       });
       if (mounted) setState(() => _recording = true);
+      // The app may have gone to the background while start was still running
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
+        _stop();
+      }
     } catch (e) {
       final hint = !kIsWeb && Platform.isLinux
           ? ' On Linux, recording requires parecord (pulseaudio-utils) '
@@ -186,7 +191,6 @@ class _RecorderScreenState extends State<_RecorderScreen>
     setState(() => _stopping = true);
     _ticker?.cancel();
     await _ampSub?.cancel();
-    await WakelockPlus.disable();
     try {
       final path = await _recorder.stop();
       if (path == null) throw Exception('no file produced');
@@ -203,6 +207,8 @@ class _RecorderScreenState extends State<_RecorderScreen>
           '-${two(now.hour)}${two(now.minute)}${two(now.second)}.wav';
       Navigator.pop(context, (bytes: bytes, name: name));
     } catch (e) {
+      // The screen stays open on the error, so dispose will not release it
+      _releaseWakelock();
       if (mounted) {
         setState(() {
           _stopping = false;
@@ -256,7 +262,6 @@ class _RecorderScreenState extends State<_RecorderScreen>
     }
     _ticker?.cancel();
     await _ampSub?.cancel();
-    await WakelockPlus.disable();
     try {
       await _recorder.stop();
     } catch (_) {}
@@ -273,9 +278,13 @@ class _RecorderScreenState extends State<_RecorderScreen>
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _ampSub?.cancel();
-    WakelockPlus.disable();
+    _releaseWakelock();
     _recorder.dispose();
     super.dispose();
+  }
+
+  void _releaseWakelock() {
+    unawaited(WakelockPlus.disable().catchError((_) {}));
   }
 
   String get _elapsedLabel {
