@@ -44,12 +44,16 @@ class _RecorderScreenState extends State<_RecorderScreen>
   String? _error;
   bool _recording = false;
   bool _stopping = false;
+  bool _confirming = false;
   int _elapsedSeconds = 0;
   double _level = 0;
   double? _peakDb;
   double? _lastRawDb;
   DateTime? _lastChange;
   double _sampleIntervalMs = 50;
+
+  // Below this a mis-tap on the mic button should be cheap to back out of
+  static const _discardConfirmAfter = 3;
 
   @override
   void initState() {
@@ -62,7 +66,10 @@ class _RecorderScreenState extends State<_RecorderScreen>
   // was captured instead of recording silence
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused && _recording) _stop();
+    if (state != AppLifecycleState.paused) return;
+    // Close the discard dialog so the pop below leaves the recorder route
+    if (_confirming) Navigator.pop(context);
+    if (_recording) _stop();
   }
 
   Future<void> _start() async {
@@ -206,8 +213,47 @@ class _RecorderScreenState extends State<_RecorderScreen>
     }
   }
 
+  // The recording keeps running underneath, so Keep loses nothing
+  Future<bool> _confirmDiscard() async {
+    _confirming = true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
+              Navigator.pop(ctx, true),
+          const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
+              Navigator.pop(ctx, true),
+        },
+        child: Focus(
+          autofocus: true,
+          child: AlertDialog(
+            title: const Text('Discard recording?'),
+            content: const Text('The audio recorded so far will be lost.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Keep recording'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: TextButton.styleFrom(foregroundColor: accent),
+                child: const Text('Discard'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    _confirming = false;
+    return confirmed == true;
+  }
+
   Future<void> _cancel() async {
-    if (_stopping) return;
+    if (_stopping || _confirming) return;
+    if (_recording && _elapsedSeconds >= _discardConfirmAfter) {
+      if (!await _confirmDiscard() || _stopping || !mounted) return;
+    }
     _ticker?.cancel();
     await _ampSub?.cancel();
     await WakelockPlus.disable();
