@@ -44,6 +44,7 @@ class _RecorderScreenState extends State<_RecorderScreen>
   String? _error;
   bool _recording = false;
   bool _stopping = false;
+  bool _paused = false;
   bool _confirming = false;
   int _elapsedSeconds = 0;
   double _level = 0;
@@ -69,7 +70,8 @@ class _RecorderScreenState extends State<_RecorderScreen>
     if (state != AppLifecycleState.paused) return;
     // Close the discard dialog so the pop below leaves the recorder route
     if (_confirming) Navigator.pop(context);
-    if (_recording) _stop();
+    // A paused recording captures nothing, so there is nothing to protect
+    if (_recording && !_paused) _stop();
   }
 
   Future<void> _start() async {
@@ -98,11 +100,12 @@ class _RecorderScreenState extends State<_RecorderScreen>
       _ampSub = _recorder
           .onAmplitudeChanged(const Duration(milliseconds: 50))
           .listen((a) {
+        if (_paused) return;
         _trackSampleInterval(a.current);
         if (mounted) setState(() => _level = _normalize(a.current));
       }, onError: (_) {});
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted) setState(() => _elapsedSeconds++);
+        if (mounted && !_paused) setState(() => _elapsedSeconds++);
       });
       if (mounted) setState(() => _recording = true);
       // The app may have gone to the background while start was still running
@@ -186,12 +189,32 @@ class _RecorderScreenState extends State<_RecorderScreen>
     }
   }
 
+  Future<void> _togglePause() async {
+    if (!_recording || _stopping || _confirming) return;
+    try {
+      if (_paused) {
+        await _recorder.resume();
+      } else {
+        await _recorder.pause();
+      }
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _paused = !_paused;
+      if (_paused) _level = 0;
+    });
+  }
+
   Future<void> _stop() async {
     if (_stopping || !_recording) return;
     setState(() => _stopping = true);
     _ticker?.cancel();
     await _ampSub?.cancel();
     try {
+      // A stopped parecord ignores the kill until it is continued
+      if (_paused) await _recorder.resume();
       final path = await _recorder.stop();
       if (path == null) throw Exception('no file produced');
       final file = File(path);
@@ -301,6 +324,7 @@ class _RecorderScreenState extends State<_RecorderScreen>
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): _cancel,
         const SingleActivator(LogicalKeyboardKey.enter): _stop,
+        const SingleActivator(LogicalKeyboardKey.space): _togglePause,
       },
       child: Focus(
         autofocus: true,
@@ -362,8 +386,13 @@ class _RecorderScreenState extends State<_RecorderScreen>
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.fiber_manual_record,
-                size: 14, color: _recording ? accent : mc.iconMuted),
+            Icon(
+              _paused
+                  ? Icons.radio_button_unchecked
+                  : Icons.fiber_manual_record,
+              size: 14,
+              color: _recording && !_paused ? accent : mc.iconMuted,
+            ),
             const SizedBox(width: 10),
             ExcludeSemantics(
               child: Text(
@@ -378,6 +407,18 @@ class _RecorderScreenState extends State<_RecorderScreen>
             ),
           ],
         ),
+        SizedBox(
+          height: 24,
+          child: _paused
+              ? Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    'Paused',
+                    style: TextStyle(fontSize: 14, color: mc.secondaryText),
+                  ),
+                )
+              : null,
+        ),
         const Spacer(flex: 4),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -390,7 +431,16 @@ class _RecorderScreenState extends State<_RecorderScreen>
               foreground: mc.primaryText,
               onPressed: _stopping ? null : _cancel,
             ),
-            const SizedBox(width: 56),
+            const SizedBox(width: 40),
+            _RoundAction(
+              label: _paused ? 'Resume' : 'Pause',
+              semanticsLabel: _paused ? 'Resume recording' : 'Pause recording',
+              icon: _paused ? Icons.fiber_manual_record : Icons.pause,
+              background: mc.strongButtonBg,
+              foreground: mc.strongButtonFg,
+              onPressed: _recording && !_stopping ? _togglePause : null,
+            ),
+            const SizedBox(width: 40),
             _RoundAction(
               label: 'Done',
               semanticsLabel: 'Stop and transcribe',
