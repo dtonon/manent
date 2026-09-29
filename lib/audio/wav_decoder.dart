@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 // Minimal RIFF/WAVE reader: integer PCM (8/16/24/32-bit) and 32-bit float,
@@ -170,4 +171,112 @@ Uint8List normalizeWavInPlace(
     bd.setInt16(o, v.clamp(-32768, 32767), Endian.little);
   }
   return bytes;
+}
+
+// Cuts the silence before the first and after the last [windowMs] window
+// that rises clearly above the recording's own noise floor, keeping [leadMs]
+// and [tailMs] of padding. Levels are measured after pre-emphasis
+// (x[n] - [preEmphasis] * x[n-1]), a first-order high-pass that keeps the
+// speech harmonics but drops the handling rumble and mic hiss that otherwise
+// anchor the ends. The floor is the RMS of the quietest tenth of the windows
+// and speech must exceed it by [marginDb], a threshold then clamped to
+// [minBelowPeakDb]..[maxBelowPeakDb] under the peak, which is the loudest
+// 100 ms median so a single tap cannot set it. A window only counts as speech
+// when most of its [sustainWindows] neighbourhood is loud too. 16-bit PCM
+// only; other formats and all-silent input are returned unchanged. Returns a
+// new buffer with the chunk sizes rewritten.
+Uint8List trimWavSilence(
+  Uint8List bytes, {
+  int windowMs = 20,
+  int leadMs = 150,
+  int tailMs = 300,
+  double preEmphasis = 0.97,
+  double marginDb = 12,
+  double minBelowPeakDb = 15,
+  double maxBelowPeakDb = 25,
+  int sustainWindows = 11,
+}) {
+  final wav = WavPcm.parse(bytes);
+  if (wav == null || wav.bitsPerSample != 16 || wav.frameCount == 0) {
+    return bytes;
+  }
+  final bd = ByteData.sublistView(bytes);
+  final start = wav._dataOffset;
+  final frameBytes = wav.channels * 2;
+  final windowFrames = math.max(1, wav.sampleRate * windowMs ~/ 1000);
+
+  // Some mics sit off centre, which would lift the RMS of silence too
+  final end = start + wav.frameCount * frameBytes;
+  var total = 0;
+  for (var o = start; o < end; o += 2) {
+    total += bd.getInt16(o, Endian.little);
+  }
+  final mean = total / (wav.frameCount * wav.channels);
+
+  final rms = <double>[];
+  var prev = 0.0;
+  for (var f = 0; f < wav.frameCount; f += windowFrames) {
+    final wEnd = math.min(f + windowFrames, wav.frameCount);
+    var sum = 0.0;
+    for (var o = start + f * frameBytes;
+        o < start + wEnd * frameBytes;
+        o += 2) {
+      final x = bd.getInt16(o, Endian.little) - mean;
+      final v = x - preEmphasis * prev;
+      prev = x;
+      sum += v * v;
+    }
+    rms.add(math.sqrt(sum / ((wEnd - f) * wav.channels)));
+  }
+
+  final sorted = List<double>.from(rms)..sort();
+  final floor = sorted[sorted.length ~/ 10];
+  var peak = 0.0;
+  for (var w = 0; w + 5 <= rms.length; w++) {
+    final m = (rms.sublist(w, w + 5)..sort())[2];
+    if (m > peak) peak = m;
+  }
+  if (peak == 0) peak = sorted.last;
+  if (peak == 0) return bytes;
+
+  double db(double x) => 20 * math.log(x) / math.ln10;
+  final limitDb = (floor > 0 ? db(floor) + marginDb : double.negativeInfinity)
+      .clamp(db(peak) - maxBelowPeakDb, db(peak) - minBelowPeakDb);
+  final limit = math.pow(10, limitDb / 20);
+
+  final loud = [for (final r in rms) r >= limit];
+  final half = sustainWindows ~/ 2;
+  bool sustained(int w) {
+    var n = 0;
+    for (var i = math.max(0, w - half);
+        i <= math.min(loud.length - 1, w + half);
+        i++) {
+      if (loud[i]) n++;
+    }
+    return n > half;
+  }
+
+  int? firstLoud;
+  var lastLoud = 0;
+  for (var w = 0; w < rms.length; w++) {
+    if (loud[w] && sustained(w)) {
+      firstLoud ??= w * windowFrames;
+      lastLoud = math.min((w + 1) * windowFrames, wav.frameCount);
+    }
+  }
+  if (firstLoud == null) return bytes;
+
+  final from = math.max(0, firstLoud - wav.sampleRate * leadMs ~/ 1000);
+  final to =
+      math.min(wav.frameCount, lastLoud + wav.sampleRate * tailMs ~/ 1000);
+  if (from == 0 && to == wav.frameCount) return bytes;
+
+  final dataLen = (to - from) * frameBytes;
+  final out = Uint8List(start + dataLen);
+  out.setRange(0, start, bytes);
+  out.setRange(start, start + dataLen, bytes, start + from * frameBytes);
+  final ob = ByteData.sublistView(out);
+  ob.setUint32(4, out.length - 8, Endian.little);
+  ob.setUint32(start - 4, dataLen, Endian.little);
+  return out;
 }

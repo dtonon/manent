@@ -218,8 +218,10 @@ class _RecorderScreenState extends State<_RecorderScreen>
       final path = await _recorder.stop();
       if (path == null) throw Exception('no file produced');
       final file = File(path);
-      // Raw mic input is quiet; bring the peak up to a normal level
-      final bytes = normalizeWavInPlace(await file.readAsBytes());
+      // Drop the dead air at both ends, then bring the quiet mic input up to
+      // a normal level
+      final bytes =
+          normalizeWavInPlace(trimWavSilence(await file.readAsBytes()));
       try {
         await file.delete();
       } catch (_) {}
