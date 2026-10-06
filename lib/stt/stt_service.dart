@@ -97,6 +97,7 @@ class SttService {
     await wav.writeAsBytes(speech);
 
     _current = noteId;
+    SttState.setRunning(noteId);
     try {
       final response = await _whisper.transcribe(
         transcribeRequest: TranscribeRequest(
@@ -117,6 +118,7 @@ class SttService {
       return 'Transcription failed: $e';
     } finally {
       _current = null;
+      SttState.setRunning(null);
       try {
         await wav.delete();
       } catch (_) {}

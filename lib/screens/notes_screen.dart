@@ -5127,47 +5127,8 @@ class _FileNoteContent extends StatelessWidget {
     );
   }
 
-  Widget _transcribingIndicator(ManentColors mc) {
-    return ValueListenableBuilder<Set<String>>(
-      valueListenable: SttState.transcribing,
-      builder: (context, ids, _) {
-        if (!ids.contains(note.id)) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 8),
-              Text('Transcribing…',
-                  style: TextStyle(fontSize: 12, color: mc.secondaryText)),
-              const SizedBox(width: 16),
-              Semantics(
-                label: 'Cancel transcription',
-                button: true,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => stt.abortTranscription(note.id),
-                  child: Text(
-                    'Cancel',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: mc.secondaryText,
-                      decoration: TextDecoration.underline,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  Widget _transcribingIndicator(ManentColors mc) =>
+      _TranscribingBlock(noteId: note.id);
 
   Widget _buildFileContent(ManentColors mc, NoteAttachment attachment) {
     return Column(
@@ -5324,6 +5285,125 @@ class _ThumbhashImageState extends State<_ThumbhashImage> {
 
 // Still first frame of a GIF with a centered play icon; the animation only
 // plays in the fullscreen viewer. Non-animated GIFs render without the icon.
+// Transcription feedback under the player: a sliding bar and the elapsed time
+// while whisper runs, a plain label while the note waits behind another one,
+// and a Cancel button in both cases
+class _TranscribingBlock extends StatefulWidget {
+  final String noteId;
+
+  const _TranscribingBlock({required this.noteId});
+
+  @override
+  State<_TranscribingBlock> createState() => _TranscribingBlockState();
+}
+
+class _TranscribingBlockState extends State<_TranscribingBlock> {
+  Timer? _ticker;
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  // The ticker only redraws the elapsed label, so it runs just while running
+  void _syncTicker(bool running) {
+    if (running && _ticker == null) {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    } else if (!running && _ticker != null) {
+      _ticker!.cancel();
+      _ticker = null;
+    }
+  }
+
+  String get _elapsed {
+    final since = SttState.runningSince;
+    final s = since == null ? 0 : DateTime.now().difference(since).inSeconds;
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mc = context.mc;
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: SttState.transcribing,
+      builder: (context, ids, _) {
+        if (!ids.contains(widget.noteId)) {
+          _syncTicker(false);
+          return const SizedBox.shrink();
+        }
+        return ValueListenableBuilder<String?>(
+          valueListenable: SttState.running,
+          builder: (context, running, _) {
+            final isRunning = running == widget.noteId;
+            _syncTicker(isRunning);
+            final labelStyle =
+                TextStyle(fontSize: 12, color: mc.secondaryText);
+            return Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isRunning ? 'Transcribing…' : 'Waiting to transcribe…',
+                        style: labelStyle,
+                      ),
+                      if (isRunning)
+                        Text(
+                          _elapsed,
+                          style: labelStyle.copyWith(
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (isRunning) ...[
+                    const SizedBox(height: 10),
+                    Semantics(
+                      label: 'Transcribing',
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          minHeight: 3,
+                          backgroundColor: mc.cardDim,
+                          color: accent,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Center(
+                    child: OutlinedButton(
+                      onPressed: () => stt.abortTranscription(widget.noteId),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: mc.secondaryText,
+                        side: BorderSide(color: mc.border),
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(horizontal: 22),
+                        minimumSize: const Size(0, 36),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ),
+                      child: const Text(
+                        'Cancel',
+                        semanticsLabel: 'Cancel transcription',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
 class _GifStillImage extends StatefulWidget {
   final Uint8List bytes;
   final String cacheKey; // sha256
