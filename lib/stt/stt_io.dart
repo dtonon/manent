@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../audio/audio_player_service.dart';
 import '../audio/speech_audio.dart';
 import '../notes/note_attachment.dart';
 import 'recorder_screen.dart';
@@ -25,6 +26,9 @@ Future<({Uint8List bytes, String name})?> recordVoiceNote(
     await showSttSettingsSheet(context, explainFirstUse: true);
     if (!manager.hasDownloadedModel || !context.mounted) return null;
   }
+  // The mic would pick up the speaker
+  await AudioPlayerService.instance.stop();
+  if (!context.mounted) return null;
   return showRecorderScreen(context);
 }
 
