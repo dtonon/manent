@@ -17,6 +17,7 @@ abstract class AudioPlayback {
   Future<void> play();
   Future<void> pause();
   Future<void> seek(Duration position);
+  Future<void> setSpeed(double speed);
 
   @mustCallSuper
   Future<void> dispose() async {

@@ -16,8 +16,24 @@ class AudioPlayerService {
   // sha256 currently being loaded (bytes fetch + player init)
   final ValueNotifier<String?> loadingSha = ValueNotifier(null);
 
+  // Playback speed of the loaded note only: it resets to 1x whenever another
+  // note is loaded, and applies to voice notes alone
+  static const speeds = [1.0, 1.25, 1.5, 1.75, 2.0, 0.75];
+  final ValueNotifier<double> speed = ValueNotifier(1.0);
+  bool _activeIsVoice = false;
+
   AudioPlayback? _playback;
   int _generation = 0;
+
+  Future<void> setSpeed(double value) async {
+    speed.value = value;
+    if (_activeIsVoice) await _playback?.setSpeed(value);
+  }
+
+  Future<void> cycleSpeed() {
+    final i = speeds.indexOf(speed.value);
+    return setSpeed(speeds[(i + 1) % speeds.length]);
+  }
 
   AudioPlayback? playbackFor(String sha256) =>
       activeSha.value == sha256 ? _playback : null;
@@ -41,6 +57,7 @@ class AudioPlayerService {
         await playback.dispose();
         return null;
       }
+      _activeIsVoice = attachment.isVoiceNote;
       _playback = playback;
       activeSha.value = attachment.sha256;
       return playback;
@@ -52,6 +69,7 @@ class AudioPlayerService {
   Future<void> stop() async {
     final playback = _playback;
     _playback = null;
+    speed.value = 1.0;
     // Listeners detach on this change, before the notifiers are disposed
     activeSha.value = null;
     await playback?.dispose();

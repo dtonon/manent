@@ -91,6 +91,10 @@ class _VideoPlayerPlayback extends AudioPlayback {
   }
 
   @override
+  Future<void> setSpeed(double speed) async =>
+      _controller?.setPlaybackSpeed(speed);
+
+  @override
   Future<void> dispose() async {
     _disposed = true;
     _controller?.removeListener(_onChange);
@@ -163,6 +167,9 @@ class _MediaKitPlayback extends AudioPlayback {
     position.value = pos;
     await player.seek(pos);
   }
+
+  @override
+  Future<void> setSpeed(double speed) async => _player?.setRate(speed);
 
   @override
   Future<void> dispose() async {

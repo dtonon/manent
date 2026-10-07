@@ -83,6 +83,9 @@ class _HtmlAudioPlayback extends AudioPlayback {
   }
 
   @override
+  Future<void> setSpeed(double speed) async => _audio?.playbackRate = speed;
+
+  @override
   Future<void> dispose() async {
     _disposed = true;
     for (final s in _subs) {

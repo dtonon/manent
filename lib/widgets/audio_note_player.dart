@@ -227,6 +227,14 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
     return pb;
   }
 
+  // The chip on a note that is not loaded loads it first, so the speed always
+  // belongs to the note it was set on
+  Future<void> _cycleSpeed() async {
+    final pb = await _ensurePlayback();
+    if (pb == null || !mounted) return;
+    await _service.cycleSpeed();
+  }
+
   Future<void> _togglePlay() async {
     final pb = _playback;
     if (pb != null) {
@@ -407,7 +415,75 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
                 ),
               ),
             ),
+            if (widget.attachment.isVoiceNote) ...[
+              const SizedBox(width: 8),
+              ValueListenableBuilder<String?>(
+                valueListenable: _service.activeSha,
+                builder: (context, active, _) => ValueListenableBuilder<double>(
+                  valueListenable: _service.speed,
+                  builder: (context, speed, _) => _SpeedChip(
+                    speed: active == _sha ? speed : 1.0,
+                    onTap: _cycleSpeed,
+                  ),
+                ),
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Tap-to-cycle playback speed: quiet at 1x, accent-filled once changed, with
+// a fixed width so the strip does not shift between labels
+class _SpeedChip extends StatelessWidget {
+  final double speed;
+  final VoidCallback onTap;
+
+  const _SpeedChip({required this.speed, required this.onTap});
+
+  String get _label {
+    final s = speed == speed.roundToDouble()
+        ? speed.toInt().toString()
+        : speed.toString();
+    return '$s×';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mc = context.mc;
+    final changed = speed != 1.0;
+    return Semantics(
+      label: 'Playback speed ${_label.replaceAll('×', 'x')}, tap to change',
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
+          child: Container(
+            height: 22,
+            constraints: const BoxConstraints(minWidth: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 7),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: changed ? accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(11),
+              border: changed ? null : Border.all(color: mc.border),
+            ),
+            child: ExcludeSemantics(
+              child: Text(
+                _label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                  color: changed ? Colors.white : mc.secondaryText,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
