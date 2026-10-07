@@ -47,6 +47,9 @@ class NoteAttachment {
   bool get isVideo => mimeType.startsWith('video/');
   bool get isAudio => mimeType.startsWith('audio/');
 
+  // Audio someone spoke in, by the only evidence that cannot lie: a transcript
+  bool get isVoiceNote => isAudio && transcript != null;
+
   // Short uppercase label for badges, e.g. MP4 / MOV — from the extension,
   // falling back to the mime subtype.
   String get formatBadge {

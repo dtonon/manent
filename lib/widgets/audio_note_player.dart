@@ -387,6 +387,13 @@ class _AudioNotePlayerState extends State<AudioNotePlayer>
               ),
             ),
             const SizedBox(width: 12),
+            if (widget.attachment.isVoiceNote) ...[
+              Semantics(
+                label: 'Voice note',
+                child: Icon(Icons.mic, size: 16, color: mc.secondaryText),
+              ),
+              const SizedBox(width: 4),
+            ],
             ConstrainedBox(
               constraints: const BoxConstraints(minWidth: 36),
               child: Text(

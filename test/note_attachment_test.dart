@@ -24,6 +24,20 @@ void main() {
     expect(NoteAttachment.fromJson(json).transcript, isNull);
   });
 
+  test('voice note means audio with a transcript', () {
+    expect(base.isVoiceNote, isTrue);
+    expect(base.copyWith(clearTranscript: true).isVoiceNote, isFalse);
+    const transcribedVideo = NoteAttachment(
+      filename: 'clip.mp4',
+      mimeType: 'video/mp4',
+      size: 10,
+      sha256: 'abc',
+      key: 'def',
+      transcript: 'words',
+    );
+    expect(transcribedVideo.isVoiceNote, isFalse);
+  });
+
   test('copyWith keeps or clears each field independently', () {
     final edited = base.copyWith(caption: 'new caption');
     expect(edited.transcript, 'spoken words');
