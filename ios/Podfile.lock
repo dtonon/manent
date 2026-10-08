@@ -208,7 +208,7 @@ SPEC CHECKSUMS:
   url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
   video_player_avfoundation: 3453f792138786248960ca029747fcd9f318ef52
   wakelock_plus: e29112ab3ef0b318e58cfa5c32326458be66b556
-  whisper_ggml_plus: 03dbc05ca07acd625beec982db80b41dae2fe005
+  whisper_ggml_plus: 3c1196cee818eae5482d3068eee9274922373d79
 
 PODFILE CHECKSUM: fd4447d0b62fdb54ff34a444f11ecff99bbeb64b
 
