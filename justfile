@@ -52,6 +52,14 @@ build_linux:
     # Runtime dependency: mpv-libs (Fedora) / libmpv2 (Debian/Ubuntu).
     ./scripts/strip_bundled_mpv.sh
 
+gh_build_linux:
+    gh workflow run linux-release.yml --ref master
+    @echo "\nFollow the build with: gh run watch"
+
+gh_fetch_linux:
+    gh run download $(gh run list --workflow=linux-release.yml --status success -L1 --json databaseId -q '.[0].databaseId') -p 'manent-linux-*' -D dist/
+    @echo "\nArtifacts saved in dist/manent-linux-*/"
+
 build_windows:
     gh workflow run windows-release.yml --ref master
     @echo "\nFollow the build with: gh run watch"

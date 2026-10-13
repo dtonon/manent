@@ -1,0 +1,49 @@
+name: linux-release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+# Flutter publishes no Linux ARM64 SDK, so only x64 can be built.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            libsecret-1-dev libjsoncpp-dev \
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
+            libmpv-dev libepoxy-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.41.2
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter build linux --release
+
+      - name: Package
+        run: |
+          BUNDLE_DIR=$(ls -d build/linux/*/release/bundle)
+          tar -czf "manent-linux-x64.tar.gz" -C "$BUNDLE_DIR" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manent-linux-x64
+          path: manent-linux-x64.tar.gz
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: manent-linux-x64.tar.gz
