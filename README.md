@@ -50,12 +50,11 @@ This patch is overwritten by `flutter upgrade` and must be reapplied until Flutt
 
 ### Linux build
 
-Building the Linux AppImage (`just build_linux`) needs libmpv's headers and `appimagetool`:
+`just build_linux` produces a plain tar.gz of the Flutter release bundle, the same output as the GitHub pipeline (`just gh_build_linux`). Beyond the standard Flutter toolchain it needs the dev headers for libmpv and libepoxy (`media_kit_video`) and FFmpeg (`fc_native_video_thumbnail`):
 
-- **Fedora:** `sudo dnf install mpv-devel`
-- **Debian/Ubuntu:** `sudo apt install libmpv-dev`
-- **appimagetool:** download the [AppImage](https://github.com/AppImage/appimagetool/releases) and put it on your `PATH`.
+- **Fedora:** `sudo dnf install mpv-devel libepoxy-devel ffmpeg-free-devel`
+- **Debian/Ubuntu:** `sudo apt install libmpv-dev libepoxy-dev libavformat-dev libavcodec-dev libavutil-dev libswscale-dev`
 
-The `media_kit` video player links against libmpv. `flutter_distributor`'s AppImage maker bundles libmpv together with its entire ffmpeg stack, but on distros where ffmpeg is split across packages (e.g. Fedora's `ffmpeg-free` + RPM Fusion `libavcodec-freeworld`) it captures a mismatched mix of `libav*` libraries. That inconsistent set aborts inside libmpv on playback (`m_config_cache_from_shadow: Assertion 'group_index >= 0' failed`). `build_linux` therefore runs `scripts/strip_bundled_mpv.sh`, which removes the bundled media stack so the AppImage uses the system libmpv instead.
+The full list, including the generic Flutter desktop dependencies, is in `.github/workflows/linux-release.yml`.
 
-**Runtime dependency:** because of the above, the AppImage requires libmpv to be installed on the target machine — `mpv-libs` (Fedora) or `libmpv2` (Debian/Ubuntu).
+**Runtime dependency:** the app links the system libmpv and FFmpeg libraries, so the target machine needs `mpv-libs` (Fedora) or `libmpv2` (Debian/Ubuntu), which pulls in the FFmpeg libraries with it.

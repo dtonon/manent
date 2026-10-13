@@ -43,14 +43,11 @@ build_ios:
     flutter build ipa --release --obfuscate --split-debug-info=build/symbols/ios
     cp build/ios/ipa/*.ipa dist/
 
+# Runtime dependency: mpv-libs (Fedora) / libmpv2 (Debian/Ubuntu).
 build_linux:
-    dart pub global activate flutter_distributor
-    export PATH="$PATH":"$HOME/.pub-cache/bin"
-    $HOME/.pub-cache/bin/flutter_distributor release --name linux --jobs release-linux-appimage
-    # The AppImage maker bundles a mismatched mpv/ffmpeg stack that crashes
-    # libmpv on video playback; strip it so it uses the system libmpv.
-    # Runtime dependency: mpv-libs (Fedora) / libmpv2 (Debian/Ubuntu).
-    ./scripts/strip_bundled_mpv.sh
+    flutter build linux --release
+    tar -czf dist/manent-linux-x64.tar.gz -C $(ls -d build/linux/*/release/bundle) .
+    @echo "\nArtifact saved in dist/manent-linux-x64.tar.gz"
 
 gh_build_linux:
     gh workflow run linux-release.yml --ref master
