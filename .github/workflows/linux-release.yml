@@ -20,7 +20,9 @@ jobs:
             libgtk-3-dev liblzma-dev libstdc++-12-dev \
             libsecret-1-dev libjsoncpp-dev \
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
-            libmpv-dev libepoxy-dev
+            libmpv-dev libepoxy-dev \
+            rpm
+          sudo gem install fpm
 
       - uses: subosito/flutter-action@v2
         with:
@@ -35,15 +37,48 @@ jobs:
       - name: Package
         run: |
           BUNDLE_DIR=$(ls -d build/linux/*/release/bundle)
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+
           tar -czf "manent-linux-x64.tar.gz" -C "$BUNDLE_DIR" .
+
+          mkdir -p pkg/usr/lib/manent pkg/usr/bin \
+            pkg/usr/share/applications pkg/usr/share/icons/hicolor/1024x1024/apps
+          cp -r "$BUNDLE_DIR"/. pkg/usr/lib/manent/
+          ln -s ../lib/manent/manent pkg/usr/bin/manent
+          cp linux/packaging/manent.desktop pkg/usr/share/applications/
+          cp assets/icon.png pkg/usr/share/icons/hicolor/1024x1024/apps/manent.png
+
+          fpm -s dir -t deb -n manent -v "$VERSION" -a native \
+            --description "Sync encrypted notes and files between devices via Nostr" \
+            --url "https://github.com/dtonon/manent" \
+            --depends libmpv2 \
+            -p manent-linux-x64.deb -C pkg usr
+          fpm -s dir -t rpm -n manent -v "$VERSION" -a native \
+            --description "Sync encrypted notes and files between devices via Nostr" \
+            --url "https://github.com/dtonon/manent" \
+            --depends mpv-libs \
+            -p manent-linux-x64.rpm -C pkg usr
 
       - uses: actions/upload-artifact@v4
         with:
           name: manent-linux-x64
-          path: manent-linux-x64.tar.gz
+          path: |
+            manent-linux-x64.tar.gz
+            manent-linux-x64.deb
+            manent-linux-x64.rpm
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          files: manent-linux-x64.tar.gz
+          name: manent-linux-x64
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            manent-linux-x64.tar.gz
+            manent-linux-x64.deb
+            manent-linux-x64.rpm

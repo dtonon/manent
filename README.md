@@ -57,4 +57,6 @@ This patch is overwritten by `flutter upgrade` and must be reapplied until Flutt
 
 The full list, including the generic Flutter desktop dependencies, is in `.github/workflows/linux-release.yml`.
 
+`just package_linux` additionally wraps the bundle into `.deb` and `.rpm` packages, same as the GitHub pipeline; it needs [fpm](https://fpm.readthedocs.io) (`gem install fpm`; building the `.deb` on Fedora also needs `dnf install dpkg`).
+
 **Runtime dependency:** the app links the system libmpv and FFmpeg libraries, so the target machine needs `mpv-libs` (Fedora) or `libmpv2` (Debian/Ubuntu), which pulls in the FFmpeg libraries with it.

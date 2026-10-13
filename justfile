@@ -49,6 +49,32 @@ build_linux:
     tar -czf dist/manent-linux-x64.tar.gz -C $(ls -d build/linux/*/release/bundle) .
     @echo "\nArtifact saved in dist/manent-linux-x64.tar.gz"
 
+# Same packaging as the github workflow; needs fpm (gem install fpm).
+package_linux: build_linux
+    #!/usr/bin/env bash
+    set -euo pipefail
+    BUNDLE_DIR=$(ls -d build/linux/*/release/bundle)
+    VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
+    PKG=build/linux-pkg
+    rm -rf "$PKG"
+    mkdir -p "$PKG"/usr/lib/manent "$PKG"/usr/bin \
+      "$PKG"/usr/share/applications "$PKG"/usr/share/icons/hicolor/1024x1024/apps
+    cp -r "$BUNDLE_DIR"/. "$PKG"/usr/lib/manent/
+    ln -s ../lib/manent/manent "$PKG"/usr/bin/manent
+    cp linux/packaging/manent.desktop "$PKG"/usr/share/applications/
+    cp assets/icon.png "$PKG"/usr/share/icons/hicolor/1024x1024/apps/manent.png
+    fpm -f -s dir -t deb -n manent -v "$VERSION" -a native \
+      --description "Sync encrypted notes and files between devices via Nostr" \
+      --url "https://github.com/dtonon/manent" \
+      --depends libmpv2 \
+      -p dist/manent-linux-x64.deb -C "$PKG" usr
+    fpm -f -s dir -t rpm -n manent -v "$VERSION" -a native \
+      --description "Sync encrypted notes and files between devices via Nostr" \
+      --url "https://github.com/dtonon/manent" \
+      --depends mpv-libs \
+      -p dist/manent-linux-x64.rpm -C "$PKG" usr
+    echo -e "\nArtifacts saved in dist/manent-linux-x64.{deb,rpm}"
+
 gh_build_linux:
     gh workflow run linux-release.yml --ref master
     @echo "\nFollow the build with: gh run watch"
