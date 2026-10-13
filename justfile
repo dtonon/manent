@@ -60,11 +60,11 @@ gh_fetch_linux:
     gh run download $(gh run list --workflow=linux-release.yml --status success -L1 --json databaseId -q '.[0].databaseId') -p 'manent-linux-*' -D dist/
     @echo "\nArtifacts saved in dist/manent-linux-*/"
 
-build_windows:
+gh_build_windows:
     gh workflow run windows-release.yml --ref master
     @echo "\nFollow the build with: gh run watch"
 
-fetch_windows:
+gh_fetch_windows:
     gh run download $(gh run list --workflow=windows-release.yml --status success -L1 --json databaseId -q '.[0].databaseId') -p 'manent-windows-*' -D dist/
     @echo "\nArtifacts saved in dist/manent-windows-*/"
 
