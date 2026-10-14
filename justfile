@@ -66,12 +66,12 @@ package_linux: build_linux
     fpm -f -s dir -t deb -n manent -v "$VERSION" -a native \
       --description "Sync encrypted notes and files between devices via Nostr" \
       --url "https://github.com/dtonon/manent" \
-      --depends libmpv2 \
+      --depends libmpv2 --depends libsecret-1-0 \
       -p dist/manent-linux-x64.deb -C "$PKG" usr
     fpm -f -s dir -t rpm -n manent -v "$VERSION" -a native \
       --description "Sync encrypted notes and files between devices via Nostr" \
       --url "https://github.com/dtonon/manent" \
-      --depends mpv-libs \
+      --depends mpv-libs --depends libsecret \
       -p dist/manent-linux-x64.rpm -C "$PKG" usr
     echo -e "\nArtifacts saved in dist/manent-linux-x64.{deb,rpm}"
 
