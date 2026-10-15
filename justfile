@@ -170,6 +170,34 @@ ship VERSION MODE="":
     git push --follow-tags
     just publish {{MODE}}
 
+# Undo the last release: `just undo release` (local only) | `just undo ship` (also deletes the github release and remote tag)
+undo action:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v="{{version}}"; tag="v$v"
+    [[ "{{action}}" == "release" || "{{action}}" == "ship" ]] || { echo "unknown action: {{action}} (release | ship)"; exit 1; }
+    [[ "$(git log -1 --format=%s)" == "Release $tag" ]] || { echo "last commit is not 'Release $tag', nothing to undo"; exit 1; }
+    [[ -z "$(git status --porcelain)" ]] || { echo "working tree not clean"; exit 1; }
+    on_origin="$(git ls-remote --tags origin "$tag")"
+    if [[ "{{action}}" == "release" ]]; then
+        [[ -z "$on_origin" ]] || { echo "tag $tag is already on origin, use: just undo ship"; exit 1; }
+        read -r -p "Undo local release $tag (drop the tag and reset the last commit)? [y/N] " a
+        [[ "$a" == "y" || "$a" == "Y" ]] || exit 1
+    else
+        read -r -p "Undo shipped $tag (delete the github release and remote tag, force-push the removal)? [y/N] " a
+        [[ "$a" == "y" || "$a" == "Y" ]] || exit 1
+        ! gh release view "$tag" > /dev/null 2>&1 || gh release delete "$tag" --yes
+        [[ -z "$on_origin" ]] || git push origin ":refs/tags/$tag"
+    fi
+    ! git rev-parse -q --verify "refs/tags/$tag" > /dev/null || git tag -d "$tag"
+    git reset --hard HEAD~1
+    if [[ "{{action}}" == "ship" ]]; then
+        git push --force-with-lease origin master
+        echo "Shipped $tag undone; note that anyone who already fetched the tag keeps it"
+    else
+        echo "Release $tag undone"
+    fi
+
 # Deploy to a live environment: android (adb) | web (rsync to HOST)
 deploy target host="":
     #!/usr/bin/env bash
