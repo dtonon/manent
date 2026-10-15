@@ -6,6 +6,8 @@ CF_ZONE_ID := env_var_or_default("CF_ZONE_ID", "")
 CF_API_TOKEN := env_var_or_default("CF_API_TOKEN", "")
 CF_HOST := env_var_or_default("CF_HOST", "")
 
+host := os()
+
 version := `sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml`
 
 default:
@@ -21,54 +23,53 @@ version:
     @echo "code: {{version}}"
     @echo "tag:  $(git describe --tags --abbrev=0 2>/dev/null || echo none)"
 
-dev_macos:
-    flutter run -d macos
-
-dev_android:
-    flutter run -d Pixel
-
-dev_ios:
-    open -a Simulator
-    flutter run -d iPhone
-
-dev_web:
-    export CHROME_EXECUTABLE=/Applications/Chromium.app/Contents/MacOS/Chromium
-    flutter run -d chrome --web-port 8080
-
-build_macos:
-    flutter build macos --release
-    cp -R build/macos/Build/Products/Release/Manent.app dist/
-
-# Second isolated instance (own bundle id → own data dir/prefs), handy for sync tests
-test_instance_macos:
-    rm -rf dist/Manent-Test.app
-    cp -R build/macos/Build/Products/Release/Manent.app dist/Manent-Test.app
-    plutil -replace CFBundleIdentifier -string com.dtonon.manent.test dist/Manent-Test.app/Contents/Info.plist
-    plutil -replace CFBundleName -string Manent-Test dist/Manent-Test.app/Contents/Info.plist
-    codesign --force --deep --sign - dist/Manent-Test.app
-    open dist/Manent-Test.app
-
-build_android:
-    flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols/android
-    cp -R build/app/outputs/flutter-apk/* dist/
-
-build_android_bundle:
-    flutter build appbundle --release --obfuscate --split-debug-info=build/symbols/android
-
-build_ios:
-    flutter build ipa --release --obfuscate --split-debug-info=build/symbols/ios
-    cp build/ios/ipa/*.ipa dist/
-
-# Runtime dependency: mpv-libs (Fedora) / libmpv2 (Debian/Ubuntu).
-build_linux:
-    flutter build linux --release
-    tar -czf dist/manent-{{version}}-linux-x64.tar.gz -C $(ls -d build/linux/*/release/bundle) .
-    @echo -e "\nArtifact saved in dist/manent-{{version}}-linux-x64.tar.gz"
-
-# Same packaging as the github workflow; needs fpm (gem install fpm).
-package_linux: build_linux
+# Run for development: macos | linux | android | ios | web (default: current platform)
+dev target=host:
     #!/usr/bin/env bash
     set -euo pipefail
+    case "{{target}}" in
+        macos) flutter run -d macos ;;
+        linux) flutter run -d linux ;;
+        android) flutter run -d Pixel ;;
+        ios) open -a Simulator; flutter run -d iPhone ;;
+        web)
+            export CHROME_EXECUTABLE=/Applications/Chromium.app/Contents/MacOS/Chromium
+            flutter run -d chrome --web-port 8080 ;;
+        *) echo "unknown target: {{target}} (macos | linux | android | ios | web)"; exit 1 ;;
+    esac
+
+# Build a release artifact: macos | android | android-bundle | ios | linux | web (default: current platform)
+build target=host:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{target}}" in
+        macos)
+            flutter build macos --release
+            cp -R build/macos/Build/Products/Release/Manent.app dist/ ;;
+        android)
+            flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols/android
+            cp -R build/app/outputs/flutter-apk/* dist/ ;;
+        android-bundle)
+            flutter build appbundle --release --obfuscate --split-debug-info=build/symbols/android ;;
+        ios)
+            flutter build ipa --release --obfuscate --split-debug-info=build/symbols/ios
+            cp build/ios/ipa/*.ipa dist/ ;;
+        linux)
+            # Runtime dependency: mpv-libs (Fedora) / libmpv2 (Debian/Ubuntu)
+            flutter build linux --release
+            tar -czf dist/manent-{{version}}-linux-x64.tar.gz -C "$(ls -d build/linux/*/release/bundle)" .
+            echo -e "\nArtifact saved in dist/manent-{{version}}-linux-x64.tar.gz" ;;
+        web)
+            flutter build web --release
+            tar --format zip --options zip:compression=deflate,zip:compression-level=9 -cf dist/manent-web.zip -s '|^build/web|manent-web|' build/web ;;
+        *) echo "unknown target: {{target}} (macos | android | android-bundle | ios | linux | web)"; exit 1 ;;
+    esac
+
+# Wrap a build into distro packages; same packaging as the github workflow: linux (deb+rpm, needs fpm)
+package target=host: (build target)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{target}}" == "linux" ]] || { echo "unknown target: {{target}} (linux)"; exit 1; }
     BUNDLE_DIR=$(ls -d build/linux/*/release/bundle)
     PKG=build/linux-pkg
     rm -rf "$PKG"
@@ -90,30 +91,30 @@ package_linux: build_linux
       -p dist/manent-{{version}}-linux-x64.rpm -C "$PKG" usr
     echo -e "\nArtifacts saved in dist/manent-{{version}}-linux-x64.{deb,rpm}"
 
-build_web:
-    flutter build web --release
-    tar --format zip --options zip:compression=deflate,zip:compression-level=9 -cf dist/manent-web.zip -s '|^build/web|manent-web|' build/web
-
-gh_build_linux:
-    gh workflow run linux-release.yml --ref master
+# Build on the github runners: linux | windows
+gh_build target:
+    @[[ "{{target}}" == "linux" || "{{target}}" == "windows" ]] || { echo "unknown target: {{target}} (linux | windows)"; exit 1; }
+    gh workflow run {{target}}-release.yml --ref master
     @echo -e "\nFollow the build with: gh run watch"
 
-gh_fetch_linux:
-    rm -rf dist/manent-linux-*
-    gh run download $(gh run list --workflow=linux-release.yml --status success -L1 --json databaseId -q '.[0].databaseId') -p 'manent-linux-*' -D dist/
-    @echo -e "\nArtifacts saved in dist/manent-linux-*/"
+# Fetch the latest successful github build into dist/: linux | windows
+gh_fetch target:
+    @[[ "{{target}}" == "linux" || "{{target}}" == "windows" ]] || { echo "unknown target: {{target}} (linux | windows)"; exit 1; }
+    rm -rf dist/manent-{{target}}-*
+    gh run download $(gh run list --workflow={{target}}-release.yml --status success -L1 --json databaseId -q '.[0].databaseId') -p 'manent-{{target}}-*' -D dist/
+    @echo -e "\nArtifacts saved in dist/manent-{{target}}-*/"
 
-gh_build_windows:
-    gh workflow run windows-release.yml --ref master
-    @echo -e "\nFollow the build with: gh run watch"
-
-gh_fetch_windows:
-    rm -rf dist/manent-windows-*
-    gh run download $(gh run list --workflow=windows-release.yml --status success -L1 --json databaseId -q '.[0].databaseId') -p 'manent-windows-*' -D dist/
-    @echo -e "\nArtifacts saved in dist/manent-windows-*/"
+# Second isolated instance (own bundle id → own data dir/prefs), handy for sync tests
+test_instance_macos:
+    rm -rf dist/Manent-Test.app
+    cp -R build/macos/Build/Products/Release/Manent.app dist/Manent-Test.app
+    plutil -replace CFBundleIdentifier -string com.dtonon.manent.test dist/Manent-Test.app/Contents/Info.plist
+    plutil -replace CFBundleName -string Manent-Test dist/Manent-Test.app/Contents/Info.plist
+    codesign --force --deep --sign - dist/Manent-Test.app
+    open dist/Manent-Test.app
 
 # Build the local release artifacts as dist/manent-<version>-* (linux/windows come from CI on tag push)
-dist: build_macos build_android
+dist: (build "macos") (build "android")
     #!/usr/bin/env bash
     set -euo pipefail
     rm -f dist/manent-{{version}}-*
@@ -169,14 +170,23 @@ ship VERSION MODE="":
     git push --follow-tags
     just publish {{MODE}}
 
-deploy_android: build_android
-    @echo -e "\nDeploying application..."
-    adb install build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-
-deploy_web target: build_web
-    @echo -e "\nDeploying application..."
-    rsync -av --delete --progress build/web/ {{target}}:~/manent/
-    @just purge-web-cache
+# Deploy to a live environment: android (adb) | web (rsync to HOST)
+deploy target host="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{target}}" in
+        android)
+            just build android
+            echo -e "\nDeploying application..."
+            adb install build/app/outputs/flutter-apk/app-arm64-v8a-release.apk ;;
+        web)
+            [[ -n "{{host}}" ]] || { echo "usage: just deploy web <host>"; exit 1; }
+            just build web
+            echo -e "\nDeploying application..."
+            rsync -av --delete --progress build/web/ {{host}}:~/manent/
+            just purge-web-cache ;;
+        *) echo "unknown target: {{target}} (android | web)"; exit 1 ;;
+    esac
 
 purge-web-cache:
     @echo -e "\nPurging Cloudflare cache... for zone {{CF_ZONE_ID}}"
