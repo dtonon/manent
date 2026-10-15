@@ -11,8 +11,8 @@ Future<Uint8List> resizeImageForWeb(Uint8List bytes, int maxDim,
   await img.onLoad.first;
   html.Url.revokeObjectUrl(url);
 
-  final w = img.naturalWidth!;
-  final h = img.naturalHeight!;
+  final w = img.naturalWidth;
+  final h = img.naturalHeight;
   final maxOrig = w > h ? w : h;
   if (maxOrig <= maxDim) return bytes;
 

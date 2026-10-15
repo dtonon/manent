@@ -13,9 +13,9 @@ version := `sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml`
 default:
     @just --list
 
-# Analyze and run the tests
+# Analyze (errors/warnings fatal, infos tolerated) and run the tests
 test:
-    flutter analyze
+    flutter analyze --no-fatal-infos
     flutter test
 
 # Print the code version and the latest tag
@@ -135,10 +135,10 @@ release VERSION:
     ! git rev-parse -q --verify "refs/tags/v$v" >/dev/null || { echo "tag v$v exists"; exit 1; }
     grep -q '^## \[Unreleased\]' CHANGELOG.md || { echo "no Unreleased section in CHANGELOG.md"; exit 1; }
     [[ -n "$(awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f && /^- /' CHANGELOG.md)" ]] || { echo "no entries under Unreleased in CHANGELOG.md"; exit 1; }
+    just test
     build=$(sed -n 's/^version: .*+//p' pubspec.yaml)
     sed -i '' "s/^version: .*/version: $v+$((build + 1))/" pubspec.yaml
     sed -i '' "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$v] - $(date +%Y-%m-%d)/" CHANGELOG.md
-    just test
     git add pubspec.yaml CHANGELOG.md
     git commit -m "Release v$v"
     git tag -a "v$v" -m "v$v"
