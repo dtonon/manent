@@ -44,11 +44,9 @@ build target=host:
     set -euo pipefail
     case "{{target}}" in
         macos)
-            flutter build macos --release
-            cp -R build/macos/Build/Products/Release/Manent.app dist/ ;;
+            flutter build macos --release ;;
         android)
-            flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols/android
-            cp -R build/app/outputs/flutter-apk/* dist/ ;;
+            flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols/android ;;
         android-bundle)
             flutter build appbundle --release --obfuscate --split-debug-info=build/symbols/android ;;
         ios)
