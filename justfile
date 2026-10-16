@@ -58,8 +58,7 @@ build target=host:
             tar -czf dist/manent-{{version}}-linux-x64.tar.gz -C "$(ls -d build/linux/*/release/bundle)" .
             echo -e "\nArtifact saved in dist/manent-{{version}}-linux-x64.tar.gz" ;;
         web)
-            flutter build web --release
-            tar --format zip --options zip:compression=deflate,zip:compression-level=9 -cf dist/manent-web.zip -s '|^build/web|manent-web|' build/web ;;
+            flutter build web --release ;;
         *) echo "unknown target: {{target}} (macos | android | android-bundle | ios | linux | web)"; exit 1 ;;
     esac
 
@@ -112,10 +111,11 @@ test_instance_macos:
     open dist/Manent-Test.app
 
 # Build the local release artifacts as dist/manent-<version>-* (linux/windows come from CI on tag push)
-dist: (build "macos") (build "android")
+dist: (build "macos") (build "android") (build "web")
     #!/usr/bin/env bash
     set -euo pipefail
     rm -f dist/manent-{{version}}-*
+    tar --format zip --options zip:compression=deflate,zip:compression-level=9 -cf dist/manent-{{version}}-web.zip -s '|^build/web|manent-{{version}}-web|' build/web
     ditto -c -k --keepParent build/macos/Build/Products/Release/Manent.app dist/manent-{{version}}-macos.zip
     for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
         abi=$(basename "$apk" | sed 's/^app-\(.*\)-release\.apk$/\1/')
@@ -182,6 +182,7 @@ ship VERSION MODE="":
     just release {{VERSION}}
     git push --follow-tags
     just publish {{MODE}}
+    @echo -e "\nRemember to deploy the web app: just deploy web <host>"
 
 # Undo the last release: `just undo release` (local only) | `just undo ship` (also deletes the github release and remote tag)
 undo action:
