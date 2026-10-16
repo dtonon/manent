@@ -125,6 +125,21 @@ dist: (build "macos") (build "android")
     done
     ls -1 dist/manent-{{version}}-*
 
+# Add an entry to the changelog: just log "Fix video playback on Linux"
+log entry:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    grep -q '^## \[Unreleased\]' CHANGELOG.md || { echo "no Unreleased section in CHANGELOG.md"; exit 1; }
+    ENTRY={{quote(entry)}} awk '
+        /^## \[Unreleased\]/ {print; print ""; print "- " ENVIRON["ENTRY"]; ins=1; next}
+        ins && /^$/ {next}
+        ins && /^## / {print ""; print; ins=0; next}
+        ins {print; ins=0; next}
+        {print}
+    ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+    echo "Unreleased is now:"
+    awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md
+
 # Bump the version and changelog, commit and tag (no push)
 release VERSION:
     #!/usr/bin/env bash
