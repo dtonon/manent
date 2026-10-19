@@ -1265,7 +1265,7 @@ class _NotesScreenState extends State<NotesScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Icon(Icons.warning_amber_rounded,
-                      color: Colors.red, size: 20),
+                      color: accent, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -1273,7 +1273,7 @@ class _NotesScreenState extends State<NotesScreen>
                       '${unsynced == 1 ? 'note' : 'notes'} — '
                       'they will be lost.',
                       style: const TextStyle(
-                        color: Colors.red,
+                        color: accent,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -3772,7 +3772,7 @@ class _NoteCardState extends State<_NoteCard>
                 ),
                 TextButton(
                   onPressed: () => Navigator.pop(ctx, true),
-                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  style: TextButton.styleFrom(foregroundColor: accent),
                   child: const Text('Delete'),
                 ),
               ],
@@ -5092,7 +5092,7 @@ class _NoteMenuOverlay extends StatelessWidget {
       if (showSensitive)
         _menuItem('set_sensitive',
             isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
-      _menuItem('delete', 'Delete', color: Colors.red),
+      _menuItem('delete', 'Delete', color: accent),
       if (showDebugJson)
         _menuItem('show_json', 'Show raw data', color: mc.secondaryText),
       if (fileSize != null || editedAt != null)

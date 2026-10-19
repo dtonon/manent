@@ -114,7 +114,7 @@ class _NsecScreenState extends State<NsecScreen> {
                 const SizedBox(height: 8),
                 Text(
                   _error!,
-                  style: const TextStyle(fontSize: 14, color: Colors.red),
+                  style: const TextStyle(fontSize: 14, color: accent),
                 ),
               ],
               const SizedBox(height: 16),
