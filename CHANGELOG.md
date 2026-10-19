@@ -6,6 +6,9 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 
 - Add a GitHub Linux release pipeline producing tar.gz, deb and rpm packages
 - Replace the Linux AppImage with a plain tar.gz bundle
+- Standardize the release pipeline (just release / publish / ship, with undo and changelog helpers)
+- Name all release artifacts manent-<version>-<platform>-<arch>
+- Attach the web bundle to releases
 
 ## [2.0.1] - 2026-08-03
 
