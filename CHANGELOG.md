@@ -4,18 +4,33 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 
 ## [Unreleased]
 
-- Add voice notes with on-device transcription
-- Show audio notes as an inline player with a real waveform, a draggable cursor and the duration
-- Normalize voice recordings to a standard level
-- Decode mp3, Ogg Vorbis and Ogg Opus for waveforms and transcription
-- Keep transcripts apart from captions, with their own edit, copy, re-transcribe and remove actions
+Manent learns to listen. Record voice notes, have them transcribed on your device, and play them back from an inline player, all stored and synced with the same encryption as everything else.
+
+- Record voice notes in a full-screen recorder with a live level meter, pause and resume, a confirmation before discarding, and the screen kept awake while recording
+- Transcribe on the device with whisper: downloadable models, language choice, a prompt built from your own tags so hashtags come out spelled right, and transcription of imported audio as soon as a model is present
+- Show elapsed time, a progress bar and a Cancel button while a note is transcribing, and a Waiting state for notes queued behind it
+- Keep transcripts apart from captions, each with its own edit, copy, re-transcribe and remove actions, and count tags found in transcripts as note tags
+- Play audio notes inline with a real waveform, a draggable cursor, the duration, and a per-note playback speed on voice notes
+- Normalize recordings to a standard level and trim the silence at both ends
+- Decode mp3, Ogg Vorbis, Ogg Opus and WAV for waveforms and transcription
+- Filter by Voice notes and Audio in the search panel; voice notes carry a mic icon on the player
 - Group file note menus into Caption and Transcript submenus and move the filename into the details block
+- Turn an audio note into a text note with Remove audio file, keeping transcript and caption
+- Save a recording automatically if the app goes to the background, and stop any playing audio when the recorder opens
+
+General improvements:
+
+- Crop long notes to two thirds of the viewport with a Read more button
 - Add a GitHub Linux release pipeline producing tar.gz, deb and rpm packages
 - Replace the Linux AppImage with a plain tar.gz bundle
 - Standardize the release pipeline (just release / publish / ship, with undo and changelog helpers)
 - Name all release artifacts manent-<version>-<platform>-<arch>
 - Attach the web bundle to releases
 - Sign macOS builds with a stable self-signed identity so privacy grants survive updates (one re-prompt on the first update)
+
+Fixes:
+
+- Fix sync from relays that require authentication, by upgrading NDK to 0.10.1: the subscription is re-sent once the relay accepts the login, so notes stored only on such a relay are no longer missed on a fresh login or a full re-sync. If an account looked incomplete after logging in on a new device, a full re-sync now recovers the notes those relays hold
 
 ## [2.0.1] - 2026-08-03
 
