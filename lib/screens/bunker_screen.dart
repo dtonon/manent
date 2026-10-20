@@ -48,14 +48,16 @@ class _BunkerScreenState extends State<BunkerScreen> {
 
   final _nostrConnect = NostrConnect(
     relays: _nostrConnectRelays,
-    appName: 'Manent',
-    perms: [
-      'get_public_key',
-      'nip44_decrypt',
-      'nip44_encrypt',
-      'sign_event:33301',
-      'sign_event:5'
-    ],
+    clientMetadata: const Nip46ClientMetadata(
+      name: 'Manent',
+      perms: [
+        'get_public_key',
+        'nip44_decrypt',
+        'nip44_encrypt',
+        'sign_event:33301',
+        'sign_event:5'
+      ],
+    ),
   );
 
   bool _connectingWithUrl = false;
@@ -209,8 +211,9 @@ class _BunkerScreenState extends State<BunkerScreen> {
       params.add('relay=${Uri.encodeComponent(relay)}');
     }
     params.add('secret=$_secret');
-    if (_nostrConnect.perms != null && _nostrConnect.perms!.isNotEmpty) {
-      params.add('perms=${_nostrConnect.perms!.join(',')}');
+    final perms = _nostrConnect.clientMetadata?.perms;
+    if (perms != null && perms.isNotEmpty) {
+      params.add('perms=${perms.join(',')}');
     }
     params.add('name=Manent');
     return 'nostrconnect://$pubkey?${params.join('&')}';

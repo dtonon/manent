@@ -37,7 +37,7 @@ dependencies:
   url_launcher: ^6.3.2
   qr_flutter: ^4.1.0
   shared_preferences: ^2.3.0
-  ndk: ^0.7.0
+  ndk: ^0.10.1
   flutter_secure_storage: ^10.0.0
   amberflutter: ^0.0.9
   sqflite: ^2.3.0

@@ -125,6 +125,7 @@ Future<void> _restoreSession(AuthUser user) async {
           requests: ndk.requests,
           broadcast: ndk.broadcast,
           cachedPublicKey: user.pubkey,
+          eventSignerFactory: const Bip340EventSignerFactory(),
         );
         SignerSession.set(signer);
         ndk.accounts.loginExternalSigner(signer: signer);

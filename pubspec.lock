@@ -49,6 +49,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.2.2"
+  bip32_keys:
+    dependency: transitive
+    description:
+      name: bip32_keys
+      sha256: "40f3bcdbb6dac449d95405d58aa203706a917a27eca76cea10b54715aebd53c6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.1.4"
   bip340:
     dependency: transitive
     description:
@@ -57,6 +65,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.3.1"
+  bip39_mnemonic:
+    dependency: transitive
+    description:
+      name: bip39_mnemonic
+      sha256: "0fe4ac6c9f2e5b3fb65783371c806007acbcfb66590f4121f577adf5e4523f96"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.1.0"
   boolean_selector:
     dependency: transitive
     description:
@@ -65,6 +81,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.2"
+  bs58check:
+    dependency: transitive
+    description:
+      name: bs58check
+      sha256: c4a164d42b25c2f6bc88a8beccb9fc7d01440f3c60ba23663a20a70faf484ea9
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.2"
+  cbor:
+    dependency: transitive
+    description:
+      name: cbor
+      sha256: "2c5c37650f0a2d25149f03e748ab7b2857787bde338f95fe947738b80d713da2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.5.1"
   characters:
     dependency: transitive
     description:
@@ -456,6 +488,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.3"
+  hex:
+    dependency: transitive
+    description:
+      name: hex
+      sha256: "4e7cd54e4b59ba026432a6be2dd9d96e4c5205725194997193bf871703b82c4a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
   hooks:
     dependency: transitive
     description:
@@ -488,6 +528,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.1.2"
+  idb_shim:
+    dependency: transitive
+    description:
+      name: idb_shim
+      sha256: "48be1c95f06c4b059d0f5b9888dc5d7384e4a9e4d71824ae2deeb1e1546c6c07"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.9.2"
   image:
     dependency: "direct main"
     description:
@@ -688,14 +736,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.17.4"
+  native_toolchain_rust:
+    dependency: transitive
+    description:
+      name: native_toolchain_rust
+      sha256: e53ef1025e2c190333ec61f638513c890c1becf11222e27b115b03bac369c6be
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.3"
   ndk:
     dependency: "direct main"
     description:
       name: ndk
-      sha256: cb72cf29475ec0a1e0e7b7c41299e5e18b77c816d35c96c85c0b0389bd272059
+      sha256: "446c29cfe0e5e8ac66cc047c4b2977b08bfa692c2f1018bafbe4b77d5973dfaa"
       url: "https://pub.dev"
     source: hosted
-    version: "0.7.0"
+    version: "0.10.1"
   objective_c:
     dependency: transitive
     description:
@@ -912,6 +968,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.2.0"
+  sembast:
+    dependency: transitive
+    description:
+      name: sembast
+      sha256: "93654267ad36e72ef130ffc05970287f42955b40f07d0efd264e64f7215fa1de"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.8.7"
+  sembast_web:
+    dependency: transitive
+    description:
+      name: sembast_web
+      sha256: eaeb2f14613098fb8b363b01ae4e280031736b7ae1aa38653dbee0d47af6e3ea
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.4.4+1"
   share_plus:
     dependency: "direct main"
     description:
@@ -1125,6 +1197,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.1.0+1"
+  toml:
+    dependency: transitive
+    description:
+      name: toml
+      sha256: "35a35f782228656a2af31e8c73d1353cc4ef3d683fd68af1111b44631879c05e"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.18.0"
   typed_data:
     dependency: transitive
     description:
@@ -1149,6 +1229,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.0"
+  unorm_dart:
+    dependency: transitive
+    description:
+      name: unorm_dart
+      sha256: b4f4d2aff27d65a5fc37f400d4c09e55d7535359315acbe3b895a9add4de3a23
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.3"
   uri_parser:
     dependency: transitive
     description:
@@ -1325,14 +1413,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.3"
-  web_socket_client:
-    dependency: transitive
-    description:
-      name: web_socket_client
-      sha256: "394789177aa3bc1b7b071622a1dbf52a4631d7ce23c555c39bb2523e92316b07"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.2.1"
   win32:
     dependency: transitive
     description:
@@ -1390,5 +1470,5 @@ packages:
     source: hosted
     version: "3.1.3"
 sdks:
-  dart: ">=3.10.3 <4.0.0"
+  dart: ">=3.11.0 <4.0.0"
   flutter: ">=3.38.4"

@@ -1,4 +1,5 @@
 import 'package:ndk/domain_layer/entities/nip_01_event.dart';
+import 'package:ndk/domain_layer/entities/pending_signer_request.dart';
 import 'package:ndk/domain_layer/repositories/event_signer.dart';
 
 bool nip07Available() => false;
@@ -8,7 +9,7 @@ bool nip07SupportsNip44() => false;
 Future<String> nip07GetPublicKey() =>
     throw UnsupportedError('NIP-07 is only available on web');
 
-class Nip07EventSigner implements EventSigner {
+class Nip07EventSigner extends EventSigner {
   final String _pubkey;
 
   Nip07EventSigner({required String pubkey}) : _pubkey = pubkey;
@@ -46,4 +47,17 @@ class Nip07EventSigner implements EventSigner {
     required String senderPubKey,
   }) =>
       throw UnsupportedError('NIP-07 is only available on web');
+
+  @override
+  Stream<List<PendingSignerRequest>> get pendingRequestsStream =>
+      Stream.value(const []);
+
+  @override
+  List<PendingSignerRequest> get pendingRequests => const [];
+
+  @override
+  bool cancelRequest(String requestId) => false;
+
+  @override
+  Future<void> dispose() async {}
 }

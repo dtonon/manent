@@ -1,6 +1,7 @@
 import 'dart:js_interop';
 import 'dart:convert';
 import 'package:ndk/domain_layer/entities/nip_01_event.dart';
+import 'package:ndk/domain_layer/entities/pending_signer_request.dart';
 import 'package:ndk/domain_layer/repositories/event_signer.dart';
 
 extension type _NostrJs._(JSObject _) implements JSObject {
@@ -34,7 +35,7 @@ Future<String> nip07GetPublicKey() async {
   return (await nostr.getPublicKey().toDart).toDart;
 }
 
-class Nip07EventSigner implements EventSigner {
+class Nip07EventSigner extends EventSigner {
   final String _pubkey;
 
   Nip07EventSigner({required String pubkey}) : _pubkey = pubkey;
@@ -94,4 +95,17 @@ class Nip07EventSigner implements EventSigner {
     return (await nip44.decrypt(senderPubKey.toJS, ciphertext.toJS).toDart)
         .toDart;
   }
+
+  @override
+  Stream<List<PendingSignerRequest>> get pendingRequestsStream =>
+      Stream.value(const []);
+
+  @override
+  List<PendingSignerRequest> get pendingRequests => const [];
+
+  @override
+  bool cancelRequest(String requestId) => false;
+
+  @override
+  Future<void> dispose() async {}
 }

@@ -1,10 +1,11 @@
 import 'dart:convert';
 import 'package:amberflutter/amberflutter.dart';
 import 'package:ndk/domain_layer/entities/nip_01_event.dart';
+import 'package:ndk/domain_layer/entities/pending_signer_request.dart';
 import 'package:ndk/domain_layer/repositories/event_signer.dart';
 
 // EventSigner implementation that delegates all crypto ops to the Amber Android signer app
-class AmberEventSigner implements EventSigner {
+class AmberEventSigner extends EventSigner {
   final String _pubkey;
   final _amber = Amberflutter();
 
@@ -97,4 +98,17 @@ class AmberEventSigner implements EventSigner {
     // amberflutter returns the decrypted payload in 'signature'
     return result['signature'] as String?;
   }
+
+  @override
+  Stream<List<PendingSignerRequest>> get pendingRequestsStream =>
+      Stream.value(const []);
+
+  @override
+  List<PendingSignerRequest> get pendingRequests => const [];
+
+  @override
+  bool cancelRequest(String requestId) => false;
+
+  @override
+  Future<void> dispose() async {}
 }
