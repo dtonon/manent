@@ -944,6 +944,10 @@ class NoteCache {
                 until: until,
               ),
               explicitRelays: _writeRelays,
+              // Notes live in our own DB; the NDK cache rebuilds its state
+              // for every event saved, which grows quadratically
+              cacheRead: false,
+              cacheWrite: false,
             );
         events = await response.future.timeout(const Duration(seconds: 20));
       } catch (_) {
@@ -1485,6 +1489,8 @@ class NoteCache {
                   until: until,
                 ),
                 explicitRelays: _writeRelays,
+                cacheRead: false,
+                cacheWrite: false,
               );
           events = await response.future.timeout(const Duration(seconds: 20));
         } on TimeoutException {
