@@ -35,9 +35,11 @@ import 'widgets/video_player_screen.dart';
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await _installBundledRoots();
-  // media_kit is only used for in-app video on Linux; other platforms play via
-  // video_player, so we avoid bundling/initializing libmpv there.
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
+  // media_kit plays video and audio on Linux and Windows; other platforms use
+  // video_player, so libmpv is neither bundled nor initialized there.
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.linux ||
+          defaultTargetPlatform == TargetPlatform.windows)) {
     MediaKit.ensureInitialized();
   }
 

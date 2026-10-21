@@ -65,6 +65,7 @@ dependencies:
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
   media_kit_libs_linux: ^1.2.1
+  media_kit_libs_windows_video: ^1.0.11
   record: ^6.2.0
   wakelock_plus: ^1.2.8
   # Fork adding the initial prompt option, pending upstream PR

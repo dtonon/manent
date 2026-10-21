@@ -6,6 +6,7 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 
 - Fix the web build, which failed in the audio decoder build hooks
 - Let the GitHub release workflows attach their Linux and Windows artifacts
+- Ship libmpv with the Windows build so video and audio notes play there
 
 Manent learns to listen. Record voice notes, have them transcribed on your device, and play them back from an inline player, all stored and synced with the same encryption as everything else.
 
