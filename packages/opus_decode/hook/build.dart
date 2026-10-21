@@ -27,15 +27,34 @@ void main(List<String> args) async {
       return files;
     }
 
+    final sources = [
+      ...listC('celt'),
+      ...listC('silk'),
+      ...listC('silk/float'),
+      ...listC('src'),
+    ];
+
+    // On Windows native_toolchain_c runs cl.exe through cmd.exe, whose 8191
+    // character limit the 136 absolute source paths exceed. A response file
+    // carries them instead; cl.exe accepts @file anywhere on its command line.
+    final useResponseFile = targetOS == OS.windows;
+    Uri? responseFile;
+    if (useResponseFile) {
+      await Directory.fromUri(input.outputDirectory).create(recursive: true);
+      responseFile = input.outputDirectory.resolve('opus_sources.rsp');
+      final lines = sources
+          .map((s) => '"${input.packageRoot.resolve(s).toFilePath()}"')
+          .join('\r\n');
+      await File.fromUri(responseFile).writeAsString('$lines\r\n');
+      // CBuilder only registers the sources it is given
+      output.dependencies.addAll(sources.map(input.packageRoot.resolve));
+    }
+
     final builder = CBuilder.library(
       name: 'opus_decode',
       assetName: 'src/bindings.dart',
-      sources: [
-        ...listC('celt'),
-        ...listC('silk'),
-        ...listC('silk/float'),
-        ...listC('src'),
-      ],
+      sources: useResponseFile ? const [] : sources,
+      flags: [if (responseFile != null) '@${responseFile.toFilePath()}'],
       includes: [
         'src/opus/include',
         'src/opus/celt',
