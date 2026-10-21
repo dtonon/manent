@@ -3,14 +3,16 @@ import 'package:ndk/ndk.dart';
 import '../notes/ndk_log_output.dart';
 
 // Skips expensive sig verification for kinds we control:
-// - 33301: NIP-44 encryption already authenticates content
+// - 33301, 33302: NIP-44 encryption already authenticates content
 // - 5: subscription filters by our own pubkey; deletion handler checks _map
 class _ManentEventVerifier implements EventVerifier {
   final EventVerifier _delegate = Bip340EventVerifier();
 
+  static const _trustedKinds = {33301, 33302, 5, 22242};
+
   @override
   Future<bool> verify(Nip01Event event) {
-    if (event.kind == 33301 || event.kind == 5 || event.kind == 22242) return Future.value(true);
+    if (_trustedKinds.contains(event.kind)) return Future.value(true);
     return _delegate.verify(event);
   }
 }
