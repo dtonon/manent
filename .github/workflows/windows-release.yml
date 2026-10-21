@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 # Flutter publishes no Windows ARM64 SDK, so only x64 can be built.
 # ARM users run the x64 build via the built-in Prism emulation.
 jobs:
@@ -22,7 +25,8 @@ jobs:
 
       - run: flutter pub get
 
-      - run: flutter build windows --release
+      # Verbose so build hook errors reach the log; MSBuild swallows them otherwise
+      - run: flutter build windows --release -v
 
       - name: Package
         shell: bash

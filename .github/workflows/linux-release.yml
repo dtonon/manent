@@ -6,6 +6,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 # Flutter publishes no Linux ARM64 SDK, so only x64 can be built.
 jobs:
   build:
