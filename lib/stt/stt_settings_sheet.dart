@@ -22,8 +22,12 @@ class _SttSettingsSheet extends StatelessWidget {
 
   static const _languages = [
     ('auto', 'Auto detect'),
-    ('it', 'Italian'),
     ('en', 'English'),
+    ('it', 'Italiano'),
+    ('es', 'Español'),
+    ('pt', 'Português'),
+    ('fr', 'Français'),
+    ('de', 'Deutsch'),
   ];
 
   @override
@@ -70,6 +74,7 @@ class _SttSettingsSheet extends StatelessWidget {
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
+                    runSpacing: 8,
                     children: [
                       for (final (code, label) in _languages)
                         ChoiceChip(
