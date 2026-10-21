@@ -10,6 +10,7 @@ import 'package:ndk/data_layer/repositories/verifiers/bip340_event_verifier.dart
 import 'package:ndk/domain_layer/entities/broadcast_state.dart';
 import 'package:ndk/domain_layer/entities/filter.dart';
 import 'package:ndk/domain_layer/entities/nip_01_event.dart';
+import 'package:ndk/domain_layer/entities/relay_request_outcome.dart';
 import 'package:ndk/domain_layer/repositories/event_signer.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -41,7 +42,8 @@ class NoteCache {
   // Fires true when an upload is refused by every configured Blossom server
   final promptFallbackBlossom = ValueNotifier<bool>(false);
 
-  static const _olderHistoryCompleteKey = 'older_history_complete';
+  static const _historyCompleteRelaysKey = 'history_complete_relays';
+  static const _legacyOlderHistoryKey = 'older_history_complete';
   static const _olderHistoryBatchSize = 250;
 
   AppDatabase? _db;
@@ -933,12 +935,41 @@ class NoteCache {
   // the high-water mark that no later since-query can see. Re-pages the full
   // author history once per session and feeds it through the dedupe path.
   Future<void> reconcile() async {
-    if (_reconciledThisSession) return;
+    if (_reconciledThisSession || _historyPassRunning) return;
     _reconciledThisSession = true;
 
+    final finished = await _pageHistory(_writeRelays);
+    // A relay that did not answer to the end gets another pass next session
+    if (finished.length < _writeRelays.length) _reconciledThisSession = false;
+  }
+
+  bool _historyPassRunning = false;
+
+  // Walks the given relays in parallel; returns those walked to the end
+  Future<Set<String>> _pageHistory(Iterable<String> relays) async {
+    _historyPassRunning = true;
+    final finished = <String>{};
+    try {
+      await Future.wait(relays.map((relay) async {
+        if (await _pageRelayHistory(relay)) finished.add(relay);
+      }));
+    } finally {
+      _historyPassRunning = false;
+    }
+    return finished;
+  }
+
+  // Pages one relay's author history from now down to its oldest event. Each
+  // relay keeps its own cursor: a shared one jumps to the oldest event any
+  // relay returned and skips what the denser relays still had to serve. The
+  // walk ends on an empty page, so a relay capping responses below the batch
+  // size is still read to the end. A timeout, CLOSED or dropped connection
+  // stops the walk and leaves the relay for a later pass.
+  Future<bool> _pageRelayHistory(String relay) async {
     int until = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 1;
-    while (_signer != null && _writeRelays.isNotEmpty) {
-      List<Nip01Event> events;
+    while (_signer != null && _writeRelays.contains(relay)) {
+      final List<Nip01Event> events;
+      final RelayRequestStatus? status;
       try {
         final response = NostrClient().ndk.requests.query(
               filter: Filter(
@@ -947,17 +978,16 @@ class NoteCache {
                 limit: _olderHistoryBatchSize,
                 until: until,
               ),
-              explicitRelays: _writeRelays,
+              explicitRelays: [relay],
               // Notes live in our own DB; the NDK cache rebuilds its state
               // for every event saved, which grows quadratically
               cacheRead: false,
               cacheWrite: false,
             );
         events = await response.future.timeout(const Duration(seconds: 20));
+        status = response.relayOutcomes.values.firstOrNull?.status;
       } catch (_) {
-        // Retry on a later sync; an aborted pass must not count as done
-        _reconciledThisSession = false;
-        return;
+        return false;
       }
 
       for (final event in events) {
@@ -968,9 +998,11 @@ class NoteCache {
         }
       }
 
-      if (events.length < _olderHistoryBatchSize) break;
+      if (status != RelayRequestStatus.eose) return false;
+      if (events.isEmpty) return true;
       until = events.map((e) => e.createdAt).reduce(min) - 1;
     }
+    return false;
   }
 
   void _clearSyncLoading() {
@@ -1467,57 +1499,22 @@ class NoteCache {
     } catch (_) {}
   }
 
+  // First full walk of every relay, shown with the loading indicator. A relay
+  // already walked to the end is skipped until clear() forgets it
   Future<void> syncOlderHistory() async {
     if (_writeRelays.isEmpty || _signer == null || _db == null) return;
 
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_olderHistoryCompleteKey) == true) return;
-
-    final oldestLocal = await _db!.getOldestCreatedAt();
-    final thirtyDaysAgo =
-        DateTime.now().subtract(const Duration(days: 30)).millisecondsSinceEpoch ~/
-            1000;
-    int until =
-        oldestLocal != null ? oldestLocal - 1 : thirtyDaysAgo - 1;
+    final done = prefs.getStringList(_historyCompleteRelaysKey) ?? const [];
+    final pending = _writeRelays.where((r) => !done.contains(r)).toList();
+    if (pending.isEmpty) return;
 
     loadingOlder.value = true;
     try {
-      while (_signer != null && _writeRelays.isNotEmpty) {
-        List<Nip01Event> events;
-        try {
-          final response = NostrClient().ndk.requests.query(
-                filter: Filter(
-                  kinds: [33301, 33302, 5],
-                  authors: [_signer!.getPublicKey()],
-                  limit: _olderHistoryBatchSize,
-                  until: until,
-                ),
-                explicitRelays: _writeRelays,
-                cacheRead: false,
-                cacheWrite: false,
-              );
-          events = await response.future.timeout(const Duration(seconds: 20));
-        } on TimeoutException {
-          break;
-        } catch (_) {
-          break;
-        }
-
-        for (final event in events) {
-          if (event.kind == 5) {
-            await _onDeletionEvent(event);
-          } else {
-            await _onRelayEvent(event);
-          }
-        }
-
-        if (events.length < _olderHistoryBatchSize) {
-          await prefs.setBool(_olderHistoryCompleteKey, true);
-          break;
-        }
-
-        final oldestTs = events.map((e) => e.createdAt).reduce(min);
-        until = oldestTs - 1;
+      final finished = await _pageHistory(pending);
+      if (finished.isNotEmpty) {
+        await prefs.setStringList(
+            _historyCompleteRelaysKey, {...done, ...finished}.toList());
       }
     } finally {
       loadingOlder.value = false;
@@ -1543,7 +1540,8 @@ class NoteCache {
     promptFallbackRelays.value = false;
     promptFallbackBlossom.value = false;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_olderHistoryCompleteKey);
+    await prefs.remove(_historyCompleteRelaysKey);
+    await prefs.remove(_legacyOlderHistoryKey);
   }
 
   Future<({String? text, String? error})> _decryptViaSigner(
