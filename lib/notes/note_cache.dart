@@ -919,7 +919,11 @@ class NoteCache {
 
     Future.delayed(const Duration(seconds: 10), _retryPendingDecryptions);
 
-    if (since != null) unawaited(reconcile());
+    // Full-history paging hashes every event on the UI isolate; give the
+    // first screen time to settle before it starts
+    if (since != null) {
+      Future.delayed(const Duration(seconds: 15), reconcile);
+    }
   }
 
   bool _reconciledThisSession = false;
