@@ -9,6 +9,9 @@ import 'package:native_toolchain_c/native_toolchain_c.dart';
 // lib/src/bindings.dart, so its @Native symbols resolve to it.
 void main(List<String> args) async {
   await build(args, (input, output) async {
+    // Web builds run the hook but request no code assets
+    if (!input.config.buildCodeAssets) return;
+
     final targetOS = input.config.code.targetOS;
     final root = input.packageRoot.resolve('src/opus/');
 
