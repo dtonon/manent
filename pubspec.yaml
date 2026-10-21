@@ -71,7 +71,7 @@ dependencies:
   whisper_ggml_plus:
     git:
       url: https://github.com/dtonon/whisper_ggml_plus.git
-      ref: 35358ebcc84bb6ee1286b3ccbff2101a83c73543
+      ref: 52f3dc5fe1b344597b3bcabf395742932ec0dd12
   # Vendored 1.3.3 with the web build hook guard; see CLAUDE.md
   audio_decode:
     path: packages/audio_decode

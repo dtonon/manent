@@ -1695,8 +1695,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "35358ebcc84bb6ee1286b3ccbff2101a83c73543"
-      resolved-ref: "35358ebcc84bb6ee1286b3ccbff2101a83c73543"
+      ref: "52f3dc5fe1b344597b3bcabf395742932ec0dd12"
+      resolved-ref: "52f3dc5fe1b344597b3bcabf395742932ec0dd12"
       url: "https://github.com/dtonon/whisper_ggml_plus.git"
     source: git
     version: "1.5.2"
