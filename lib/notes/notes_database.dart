@@ -10,6 +10,10 @@ class AppDatabase {
 
   Database? _db;
 
+  // Every relay event is looked up by nostr_id during sync
+  static const _nostrIdIndex =
+      'CREATE INDEX IF NOT EXISTS idx_notes_nostr_id ON notes(nostr_id)';
+
   Future<Database> _getDb() async {
     if (_db != null) return _db!;
 
@@ -25,7 +29,7 @@ class AppDatabase {
 
     _db = await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: (db, _) async {
         await db.execute('''
           CREATE TABLE notes (
@@ -40,6 +44,7 @@ class AppDatabase {
             sensitive INTEGER NOT NULL DEFAULT 0
           )
         ''');
+        await db.execute(_nostrIdIndex);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -74,6 +79,9 @@ class AppDatabase {
             await db.execute(
                 'ALTER TABLE notes ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0');
           }
+        }
+        if (oldVersion < 7) {
+          await db.execute(_nostrIdIndex);
         }
       },
     );
