@@ -69,11 +69,11 @@ void main(List<String> args) async {
         'USE_ALLOCA': null,
         'HAVE_LRINT': null,
         'HAVE_LRINTF': null,
-        'PACKAGE_VERSION': '"1.4"',
         if (targetOS == OS.windows) '_CRT_SECURE_NO_WARNINGS': null,
         // Keeps alloca and friends visible under a strict C standard on glibc
         if (targetOS != OS.windows) '_GNU_SOURCE': null,
       },
+      forcedIncludes: ['src/opus_config.h'],
       libraries: [if (targetOS == OS.android || targetOS == OS.linux) 'm'],
       language: Language.c,
     );
