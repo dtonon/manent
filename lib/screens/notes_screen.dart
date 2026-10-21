@@ -17,7 +17,8 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show SelectedContent;
+import 'package:flutter/rendering.dart'
+    show RenderAbstractViewport, SelectedContent;
 import 'package:flutter/services.dart';
 import 'package:thumbhash/thumbhash.dart' hide Image;
 import 'package:desktop_multi_window/desktop_multi_window.dart';
@@ -31,11 +32,13 @@ import '../utils/video_thumb.dart';
 
 import 'package:ndk/ndk.dart';
 
+import '../audio/audio_player_service.dart';
 import '../auth/auth_state.dart';
 import '../auth/relay_constants.dart';
 import '../blossom/blossom_constants.dart';
 import '../notes/network_self_test.dart';
 import '../notes/note.dart';
+import '../notes/mime_lookup.dart';
 import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
 import '../notes/sync_diagnostics.dart';
@@ -43,7 +46,11 @@ import '../search/note_filter.dart';
 import '../search/note_search.dart';
 import '../search/note_tags.dart';
 import '../search/search_ui.dart';
+import '../stt/stt.dart' as stt;
+import '../stt/stt_state.dart';
 import '../theme.dart';
+import '../widgets/audio_note_player.dart';
+import '../widgets/collapsible_body.dart';
 import '../widgets/gif_player.dart';
 import '../widgets/inline_web_video.dart';
 import '../widgets/manent_app_bar.dart';
@@ -84,10 +91,16 @@ class NotesScreen extends StatefulWidget {
   State<NotesScreen> createState() => _NotesScreenState();
 }
 
-class _NotesScreenState extends State<NotesScreen>
-    with WidgetsBindingObserver {
+class _NotesScreenState extends State<NotesScreen> with WidgetsBindingObserver {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  // Long notes the user opened with "Read more"; a note collapses again once
+  // it is more than a viewport height away from the visible area
+  final _expandedNoteIds = <String>{};
+  // Each expanded card's extent in scroll offsets (leading edge, far edge),
+  // kept so an unbuilt card can still be located
+  final _expandedRanges = <String, (double, double)>{};
+  final _cardKeys = <String, GlobalKey>{};
   final FocusNode _inputFocusNode = FocusNode();
   bool _sending = false;
   // The list is always reverse:true (newest at index 0 = visual bottom). This
@@ -102,6 +115,7 @@ class _NotesScreenState extends State<NotesScreen>
   static const _processTextChannel = MethodChannel('manent/process_text');
   String? _editingNoteId;
   DecryptedNote? _editingNote;
+  _EditTarget _editTarget = _EditTarget.text;
   // True while a file is being dragged over the window
   bool _dragging = false;
   // Pending file selected by user, cleared after send
@@ -299,7 +313,7 @@ class _NotesScreenState extends State<NotesScreen>
     final name = xfile.name.isNotEmpty
         ? xfile.name
         : 'dropped-${DateTime.now().millisecondsSinceEpoch}';
-    final mimeType = lookupMimeType(name) ?? 'application/octet-stream';
+    final mimeType = mimeTypeForFilename(name);
     if (rasterImageMimeTypes.contains(mimeType)) {
       await _handleImagePicked(bytes, name, mimeType);
     } else {
@@ -454,8 +468,7 @@ class _NotesScreenState extends State<NotesScreen>
   Set<String> get _inheritedTags {
     if (_editingNoteId != null) return const {};
     if (!NoteSearch.instance.open.value) return const {};
-    return NoteSearch.instance.inheritedTags
-        .difference(_droppedInheritedTags);
+    return NoteSearch.instance.inheritedTags.difference(_droppedInheritedTags);
   }
 
   // Appends the inherited tags the text doesn't already carry
@@ -511,6 +524,9 @@ class _NotesScreenState extends State<NotesScreen>
       );
       _trackIfFilteredOut(id);
       if (mounted) setState(() => _sending = false);
+      if (id != null && mounted) {
+        stt.autoTranscribeImport(context, id, file.mimeType, file.name);
+      }
       return;
     }
     final text = _withInheritedTags(_textController.text.trim());
@@ -537,8 +553,7 @@ class _NotesScreenState extends State<NotesScreen>
     if (shown || !mounted) return;
     await AuthService.setBlossomPromptShown();
     if (!mounted) return;
-    final suggested =
-        fallbackBlossomServers.map(_hostOf).join(' and ');
+    final suggested = fallbackBlossomServers.map(_hostOf).join(' and ');
     final accepted = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -564,7 +579,10 @@ class _NotesScreenState extends State<NotesScreen>
     );
     if (accepted != true) return;
     // Keep the existing servers: they may still hold previously uploaded blobs
-    final merged = <String>{...widget.blossomServers, ...fallbackBlossomServers};
+    final merged = <String>{
+      ...widget.blossomServers,
+      ...fallbackBlossomServers
+    };
     await widget.onBlossomServersChanged(merged.toList());
     NoteCache.instance.retryAllFailed();
   }
@@ -636,7 +654,7 @@ class _NotesScreenState extends State<NotesScreen>
       if (pf.path == null) return;
       bytes = await File(pf.path!).readAsBytes();
     }
-    final mimeType = lookupMimeType(pf.name) ?? 'application/octet-stream';
+    final mimeType = mimeTypeForFilename(pf.name);
     if (rasterImageMimeTypes.contains(mimeType)) {
       await _handleImagePicked(bytes, pf.name, mimeType);
     } else {
@@ -647,6 +665,29 @@ class _NotesScreenState extends State<NotesScreen>
       });
       _focusCaption();
     }
+  }
+
+  Future<void> _recordVoiceNote() async {
+    _inputFocusNode.unfocus();
+    final rec = await stt.recordVoiceNote(context);
+    if (rec == null || !mounted) return;
+    // Any recording longer than a second exceeds the inline threshold
+    if (rec.bytes.length >= 32 * 1024 &&
+        NoteCache.instance.blossomServers.isEmpty) {
+      final added = await _showFallbackBlossomDialog();
+      if (!added) return;
+    }
+    final caption = _withInheritedTags('');
+    setState(() => _sending = true);
+    final id = await NoteCache.instance.addFile(
+      rec.bytes,
+      rec.name,
+      caption: caption.isEmpty ? null : caption,
+    );
+    _trackIfFilteredOut(id);
+    if (mounted) setState(() => _sending = false);
+    // The audio note is already persisted; the transcript lands in its own field
+    if (id != null && mounted) stt.transcribeNote(context, id);
   }
 
   Future<void> _takePhoto() async {
@@ -1171,7 +1212,7 @@ class _NotesScreenState extends State<NotesScreen>
       final bytes = await File(item.path).readAsBytes();
       final name = item.path.split('/').last;
       final mimeType =
-          item.mimeType ?? lookupMimeType(name) ?? 'application/octet-stream';
+          item.mimeType ?? mimeTypeForFilename(name);
       if (mounted) {
         if (rasterImageMimeTypes.contains(mimeType)) {
           await _handleImagePicked(bytes, name, mimeType);
@@ -1195,14 +1236,84 @@ class _NotesScreenState extends State<NotesScreen>
     }
   }
 
-  void _startEdit(DecryptedNote note) {
+  // The list's children are rebuilt only with this screen, so every change
+  // to the set must also rebuild, or a card recreated later carries a stale
+  // flag and re-registers itself as expanded
+  void _expandNote(String id) {
+    if (_expandedNoteIds.add(id)) setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) {
+        _trackExpandedNotes(_scrollController.position);
+      }
+    });
+  }
+
+  // Called on every scroll. Cards still built refresh their range; cards the
+  // list dropped are collapsed once the offset is a viewport height past it,
+  // which is far enough that shrinking them cannot move anything on screen
+  void _trackExpandedNotes(ScrollMetrics metrics) {
+    if (_expandedNoteIds.isEmpty) return;
+    final gone = <String>[];
+    for (final id in _expandedNoteIds) {
+      final box = _cardKeys[id]?.currentContext?.findRenderObject();
+      if (box is RenderBox && box.attached && box.hasSize) {
+        final viewport = RenderAbstractViewport.maybeOf(box);
+        if (viewport == null) continue;
+        final leading = viewport.getOffsetToReveal(box, 0).offset;
+        final far = viewport.getOffsetToReveal(box, 1).offset +
+            metrics.viewportDimension;
+        _expandedRanges[id] = (leading, far);
+        continue;
+      }
+      final range = _expandedRanges[id];
+      if (range == null) {
+        gone.add(id);
+        continue;
+      }
+      // The card is on screen for offsets in [leading - H, far]; collapse
+      // once the offset is a further viewport height outside that band
+      final h = metrics.viewportDimension;
+      final (leading, far) = range;
+      if (metrics.pixels > far + h || metrics.pixels < leading - 2 * h) {
+        gone.add(id);
+      }
+    }
+    if (gone.isEmpty) return;
+    setState(() {
+      for (final id in gone) {
+        _collapseNote(id);
+      }
+    });
+  }
+
+  // The list is anchored at the bottom, so a growing card would slide its
+  // text upward. Scrolling by the same amount keeps the card's top in place
+  // and pushes the newer notes down instead.
+  void _holdReadingPosition(double grownBy) {
+    if (grownBy <= 0 || !_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    _scrollController.jumpTo(position.pixels + grownBy);
+  }
+
+  void _collapseNote(String id) {
+    _expandedNoteIds.remove(id);
+    _expandedRanges.remove(id);
+  }
+
+  void _startEdit(DecryptedNote note, {_EditTarget? target}) {
+    final effective = target ??
+        (note.kind == NoteKind.file ? _EditTarget.caption : _EditTarget.text);
+    _expandNote(note.id);
     setState(() {
       _editingNoteId = note.id;
       _editingNote = note;
+      _editTarget = effective;
     });
-    final initialText = note.kind == NoteKind.file
-        ? (note.attachment?.caption ?? '')
-        : note.text;
+    final initialText = switch (effective) {
+      _EditTarget.text => note.text,
+      _EditTarget.caption => note.attachment?.caption ?? '',
+      _EditTarget.transcript => note.attachment?.transcript ?? '',
+    };
     _textController.text = initialText;
     _textController.selection =
         TextSelection.collapsed(offset: initialText.length);
@@ -1214,6 +1325,7 @@ class _NotesScreenState extends State<NotesScreen>
 
   void _cancelEdit() {
     setState(() {
+      if (_editingNoteId != null) _collapseNote(_editingNoteId!);
       _editingNoteId = null;
       _editingNote = null;
     });
@@ -1224,16 +1336,22 @@ class _NotesScreenState extends State<NotesScreen>
   Future<void> _confirmEdit() async {
     final text = _textController.text.trim();
     final id = _editingNoteId;
+    final target = _editTarget;
     final isFileNote = _editingNote?.kind == NoteKind.file;
     if ((!isFileNote && text.isEmpty) || id == null || _sending) return;
     setState(() {
+      _collapseNote(id);
       _editingNoteId = null;
       _editingNote = null;
       _sending = true;
     });
     _textController.clear();
     _inputFocusNode.unfocus();
-    await NoteCache.instance.update(id, text);
+    if (target == _EditTarget.transcript) {
+      await NoteCache.instance.setTranscript(id, text);
+    } else {
+      await NoteCache.instance.update(id, text);
+    }
     if (mounted) {
       setState(() => _sending = false);
       // An edit can remove the very tag the filter matched on
@@ -1290,8 +1408,8 @@ class _NotesScreenState extends State<NotesScreen>
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogCtx, true),
-            style: TextButton.styleFrom(
-                foregroundColor: dialogCtx.mc.primaryText),
+            style:
+                TextButton.styleFrom(foregroundColor: dialogCtx.mc.primaryText),
             child: const Text('Log out'),
           ),
         ],
@@ -1605,8 +1723,7 @@ class _NotesScreenState extends State<NotesScreen>
             ),
             const SizedBox(height: 4),
             if (version.isNotEmpty)
-              Text('v.$version',
-                  style: TextStyle(color: ctx.mc.secondaryText)),
+              Text('v.$version', style: TextStyle(color: ctx.mc.secondaryText)),
             const SizedBox(height: 16),
             GestureDetector(
               onTap: () => launchUrl(
@@ -1678,21 +1795,20 @@ class _NotesScreenState extends State<NotesScreen>
         child: Padding(
           padding: const EdgeInsets.all(_barButtonHitPad),
           child: CircleAvatar(
-          radius: _barButtonSize / 2,
-          backgroundImage: widget.user.avatarUrl != null
-              ? NetworkImage(widget.user.avatarUrl!)
-              : null,
-          backgroundColor: accent,
-          child: widget.user.avatarUrl == null
-              ? Text(
-                  widget.user.name.isNotEmpty
-                      ? widget.user.name[0].toUpperCase()
-                      : '?',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: _useBottomBar ? 14 : 12),
-                )
-              : null,
+            radius: _barButtonSize / 2,
+            backgroundImage: widget.user.avatarUrl != null
+                ? NetworkImage(widget.user.avatarUrl!)
+                : null,
+            backgroundColor: accent,
+            child: widget.user.avatarUrl == null
+                ? Text(
+                    widget.user.name.isNotEmpty
+                        ? widget.user.name[0].toUpperCase()
+                        : '?',
+                    style: TextStyle(
+                        color: Colors.white, fontSize: _useBottomBar ? 14 : 12),
+                  )
+                : null,
           ),
         ),
       ),
@@ -2015,223 +2131,271 @@ class _NotesScreenState extends State<NotesScreen>
         return ValueListenableBuilder<bool>(
           valueListenable: NoteSearch.instance.open,
           builder: (context, searchOpen, _) {
-        final content = _wrapWithDropRegion(PopScope(
-          canPop: !inSelection && _editingNoteId == null && !searchOpen,
-          onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) {
-              if (_editingNoteId != null) {
-                _cancelEdit();
-              } else if (NoteSearch.instance.open.value) {
-                NoteSearch.instance.close();
-              } else {
-                _NoteCardState._selectionModeId.value = null;
-                _inputFocusNode.unfocus();
-              }
-            }
-          },
-          child: Scaffold(
-            backgroundColor: context.mc.surface,
-            appBar: _useBottomBar
-                ? null
-                : inSelection
-                    ? _buildSelectionAppBar()
-                    : manentAppBar(
-                        onTitleTap: _showAbout,
-                        // 12 + the button's own 4 hit pad puts the visible
-                        // circle on the 16px content line
-                        leadingWidth:
-                            12 + _barButtonSize + _barButtonHitPad * 2,
-                        leading: Padding(
-                          padding: const EdgeInsets.only(left: 12),
-                          child: Center(child: _buildAvatar()),
-                        ),
-                        actions: [
-                          Padding(
-                            padding: const EdgeInsets.only(right: 12),
-                            child: _buildSearchButton(),
-                          ),
-                        ],
-                      ),
-            bottomNavigationBar:
-                _useBottomBar ? _buildBottomBar(inSelection) : null,
-            body: SafeArea(
-              // With no top bar the list would otherwise run under the status bar
-              top: _useBottomBar,
-              bottom: false,
-              child: LayoutBuilder(builder: (context, constraints) {
-                // Desktop always gets the panel — the window width is the
-                // user's choice, so never swap the layout under them. On a very
-                // narrow window the panel gives way rather than eat the list.
-                final useSidePanel = !_useBottomBar;
-                final halfWidth = constraints.maxWidth / 2;
-                final panelWidth = halfWidth < searchPanelWidth
-                    ? halfWidth
-                    : searchPanelWidth;
-                return GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: inSelection ? _exitSelection : null,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                children: [
-                  Expanded(
-                    child: ValueListenableBuilder<bool>(
-                      valueListenable: NoteCache.instance.loading,
-                      builder: (context, isLoading, _) {
-                        if (isLoading) {
-                          return Center(
-                            child: Semantics(
-                              label: 'Loading notes',
-                              child: const CircularProgressIndicator(
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(accent),
-                              ),
+            final content = _wrapWithDropRegion(PopScope(
+              canPop: !inSelection && _editingNoteId == null && !searchOpen,
+              onPopInvokedWithResult: (didPop, _) {
+                if (!didPop) {
+                  if (_editingNoteId != null) {
+                    _cancelEdit();
+                  } else if (NoteSearch.instance.open.value) {
+                    NoteSearch.instance.close();
+                  } else {
+                    _NoteCardState._selectionModeId.value = null;
+                    _inputFocusNode.unfocus();
+                  }
+                }
+              },
+              child: Scaffold(
+                backgroundColor: context.mc.surface,
+                appBar: _useBottomBar
+                    ? null
+                    : inSelection
+                        ? _buildSelectionAppBar()
+                        : manentAppBar(
+                            onTitleTap: _showAbout,
+                            // 12 + the button's own 4 hit pad puts the visible
+                            // circle on the 16px content line
+                            leadingWidth:
+                                12 + _barButtonSize + _barButtonHitPad * 2,
+                            leading: Padding(
+                              padding: const EdgeInsets.only(left: 12),
+                              child: Center(child: _buildAvatar()),
                             ),
-                          );
-                        }
-                        return ValueListenableBuilder<bool>(
-                          valueListenable: NoteCache.instance.loadingOlder,
-                          builder: (context, isLoadingOlder, _) {
-                            return ValueListenableBuilder<List<DecryptedNote>>(
-                              valueListenable: NoteCache.instance.notifier,
-                              builder: (context, allNotes, _) {
-                                return ValueListenableBuilder<NoteFilter>(
-                                  valueListenable: NoteSearch.instance.filter,
-                                  builder: (context, activeFilter, _) {
-                                return ValueListenableBuilder<String?>(
-                                  valueListenable:
-                                      NoteSearch.instance.justAdded,
-                                  builder: (context, justAddedId, _) {
-                                final notes = _withJustAdded(
-                                    filterNotes(allNotes, activeFilter),
-                                    allNotes,
-                                    justAddedId);
-                                if (notes.isEmpty) {
-                                  return Center(
-                                    child: Text(
-                                      allNotes.isEmpty
-                                          ? 'No notes yet'
-                                          : 'No matching notes',
-                                      style: TextStyle(
-                                          color: context.mc.secondaryText,
-                                          fontSize: 14),
-                                    ),
-                                  );
-                                }
-                                return Stack(
-                                  children: [
-                                    NotificationListener<ScrollNotification>(
-                                      onNotification: (n) {
-                                        if (n is ScrollUpdateNotification) {
-                                          _lastInteractionTime = DateTime.now();
-                                          // reverse:true — pixels ≈ 0 is the
-                                          // bottom (newest). Toggle the
-                                          // scroll-to-bottom button as the user
-                                          // moves away from / back to it.
-                                          final atBottom = n.metrics.pixels <=
-                                              _bottomThreshold;
-                                          if (atBottom != _atBottom) {
-                                            setState(() {
-                                              _atBottom = atBottom;
-                                              _showScrollToBottom = !atBottom;
-                                            });
-                                          }
-                                        }
-                                        return false;
-                                      },
-                                      child: ListView(
-                                        controller: _scrollController,
-                                        reverse: true,
-                                        padding: const EdgeInsets.all(16),
-                                        children: _buildNoteItems(notes,
-                                            loadingOlder: isLoadingOlder),
-                                      ),
-                                    ),
-                                    if (_showScrollToBottom)
-                                      Positioned(
-                                        right: 16,
-                                        bottom: 16,
-                                        child: Semantics(
-                                          label: 'Scroll to latest note',
-                                          button: true,
-                                          child: GestureDetector(
-                                            onTap: _scrollToBottom,
-                                            child: Container(
-                                              width: 36,
-                                              height: 36,
-                                              decoration: const BoxDecoration(
-                                                color: accent,
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: const Icon(
-                                                Icons.keyboard_arrow_down,
-                                                color: Colors.white,
-                                                size: 24,
-                                              ),
+                            actions: [
+                              Padding(
+                                padding: const EdgeInsets.only(right: 12),
+                                child: _buildSearchButton(),
+                              ),
+                            ],
+                          ),
+                bottomNavigationBar:
+                    _useBottomBar ? _buildBottomBar(inSelection) : null,
+                body: SafeArea(
+                  // With no top bar the list would otherwise run under the status bar
+                  top: _useBottomBar,
+                  bottom: false,
+                  child: LayoutBuilder(builder: (context, constraints) {
+                    // Desktop always gets the panel — the window width is the
+                    // user's choice, so never swap the layout under them. On a very
+                    // narrow window the panel gives way rather than eat the list.
+                    final useSidePanel = !_useBottomBar;
+                    final halfWidth = constraints.maxWidth / 2;
+                    final panelWidth = halfWidth < searchPanelWidth
+                        ? halfWidth
+                        : searchPanelWidth;
+                    return GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onTap: inSelection ? _exitSelection : null,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              children: [
+                                Expanded(
+                                  child: ValueListenableBuilder<bool>(
+                                    valueListenable: NoteCache.instance.loading,
+                                    builder: (context, isLoading, _) {
+                                      if (isLoading) {
+                                        return Center(
+                                          child: Semantics(
+                                            label: 'Loading notes',
+                                            child:
+                                                const CircularProgressIndicator(
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                      accent),
                                             ),
                                           ),
-                                        ),
-                                      ),
-                                  ],
-                                );
-                                  },
-                                );
-                                  },
-                                );
-                              },
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                  // The search field takes the composer's slot rather than
-                  // stacking below it — only one text field is ever focusable.
-                  // Editing needs that slot back; the filter stays applied and
-                  // the search field returns when the edit ends.
-                  if (searchOpen && !useSidePanel && _editingNoteId == null)
-                    ValueListenableBuilder<List<DecryptedNote>>(
-                      valueListenable: NoteCache.instance.notifier,
-                      builder: (context, allNotes, _) =>
-                          InlineSearchBar(allNotes: allNotes),
-                    )
-                  else
-                    // Rebuilds on filter changes so the "will tag" strip
-                    // appears the moment a tag is selected
-                    ValueListenableBuilder<NoteFilter>(
-                      valueListenable: NoteSearch.instance.filter,
-                      builder: (context, _, __) => _buildInputBar(context),
-                    ),
-                ],
+                                        );
+                                      }
+                                      return ValueListenableBuilder<bool>(
+                                        valueListenable:
+                                            NoteCache.instance.loadingOlder,
+                                        builder: (context, isLoadingOlder, _) {
+                                          return ValueListenableBuilder<
+                                              List<DecryptedNote>>(
+                                            valueListenable:
+                                                NoteCache.instance.notifier,
+                                            builder: (context, allNotes, _) {
+                                              return ValueListenableBuilder<
+                                                  NoteFilter>(
+                                                valueListenable:
+                                                    NoteSearch.instance.filter,
+                                                builder:
+                                                    (context, activeFilter, _) {
+                                                  return ValueListenableBuilder<
+                                                      String?>(
+                                                    valueListenable: NoteSearch
+                                                        .instance.justAdded,
+                                                    builder: (context,
+                                                        justAddedId, _) {
+                                                      final notes =
+                                                          _withJustAdded(
+                                                              filterNotes(
+                                                                  allNotes,
+                                                                  activeFilter),
+                                                              allNotes,
+                                                              justAddedId);
+                                                      if (notes.isEmpty) {
+                                                        return Center(
+                                                          child: Text(
+                                                            allNotes.isEmpty
+                                                                ? 'No notes yet'
+                                                                : 'No matching notes',
+                                                            style: TextStyle(
+                                                                color: context
+                                                                    .mc
+                                                                    .secondaryText,
+                                                                fontSize: 14),
+                                                          ),
+                                                        );
+                                                      }
+                                                      return Stack(
+                                                        children: [
+                                                          NotificationListener<
+                                                              ScrollNotification>(
+                                                            onNotification:
+                                                                (n) {
+                                                              if (n
+                                                                  is ScrollUpdateNotification) {
+                                                                _lastInteractionTime =
+                                                                    DateTime
+                                                                        .now();
+                                                                _trackExpandedNotes(
+                                                                    n.metrics);
+                                                                // reverse:true — pixels ≈ 0 is the
+                                                                // bottom (newest). Toggle the
+                                                                // scroll-to-bottom button as the user
+                                                                // moves away from / back to it.
+                                                                final atBottom = n
+                                                                        .metrics
+                                                                        .pixels <=
+                                                                    _bottomThreshold;
+                                                                if (atBottom !=
+                                                                    _atBottom) {
+                                                                  setState(() {
+                                                                    _atBottom =
+                                                                        atBottom;
+                                                                    _showScrollToBottom =
+                                                                        !atBottom;
+                                                                  });
+                                                                }
+                                                              }
+                                                              return false;
+                                                            },
+                                                            child: ListView(
+                                                              controller:
+                                                                  _scrollController,
+                                                              reverse: true,
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .all(16),
+                                                              children: _buildNoteItems(
+                                                                  notes,
+                                                                  loadingOlder:
+                                                                      isLoadingOlder),
+                                                            ),
+                                                          ),
+                                                          if (_showScrollToBottom)
+                                                            Positioned(
+                                                              right: 16,
+                                                              bottom: 16,
+                                                              child: Semantics(
+                                                                label:
+                                                                    'Scroll to latest note',
+                                                                button: true,
+                                                                child:
+                                                                    GestureDetector(
+                                                                  onTap:
+                                                                      _scrollToBottom,
+                                                                  child:
+                                                                      Container(
+                                                                    width: 36,
+                                                                    height: 36,
+                                                                    decoration:
+                                                                        const BoxDecoration(
+                                                                      color:
+                                                                          accent,
+                                                                      shape: BoxShape
+                                                                          .circle,
+                                                                    ),
+                                                                    child:
+                                                                        const Icon(
+                                                                      Icons
+                                                                          .keyboard_arrow_down,
+                                                                      color: Colors
+                                                                          .white,
+                                                                      size: 24,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ),
+                                                        ],
+                                                      );
+                                                    },
+                                                  );
+                                                },
+                                              );
+                                            },
+                                          );
+                                        },
+                                      );
+                                    },
+                                  ),
+                                ),
+                                // The search field takes the composer's slot rather than
+                                // stacking below it — only one text field is ever focusable.
+                                // Editing needs that slot back; the filter stays applied and
+                                // the search field returns when the edit ends.
+                                if (searchOpen &&
+                                    !useSidePanel &&
+                                    _editingNoteId == null)
+                                  ValueListenableBuilder<List<DecryptedNote>>(
+                                    valueListenable:
+                                        NoteCache.instance.notifier,
+                                    builder: (context, allNotes, _) =>
+                                        InlineSearchBar(allNotes: allNotes),
+                                  )
+                                else
+                                  // Rebuilds on filter changes so the "will tag" strip
+                                  // appears the moment a tag is selected
+                                  ValueListenableBuilder<NoteFilter>(
+                                    valueListenable: NoteSearch.instance.filter,
+                                    builder: (context, _, __) =>
+                                        _buildInputBar(context),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (searchOpen && useSidePanel)
+                            ValueListenableBuilder<List<DecryptedNote>>(
+                              valueListenable: NoteCache.instance.notifier,
+                              builder: (context, allNotes, _) =>
+                                  SearchSidePanel(
+                                      allNotes: allNotes, width: panelWidth),
+                            ),
+                        ],
+                      ),
+                    );
+                  }),
+                ),
               ),
-                  ),
-                  if (searchOpen && useSidePanel)
-                    ValueListenableBuilder<List<DecryptedNote>>(
-                      valueListenable: NoteCache.instance.notifier,
-                      builder: (context, allNotes, _) =>
-                          SearchSidePanel(allNotes: allNotes, width: panelWidth),
-                    ),
-                ],
+            ));
+            if (!_useBottomBar) return content;
+            // No top bar means no appBarTheme.systemOverlayStyle — the status bar
+            // now sits over `surface`, so drive its icons off the theme brightness.
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            return AnnotatedRegion<SystemUiOverlayStyle>(
+              value: SystemUiOverlayStyle(
+                statusBarColor: Colors.transparent,
+                statusBarIconBrightness:
+                    isDark ? Brightness.light : Brightness.dark,
+                statusBarBrightness:
+                    isDark ? Brightness.dark : Brightness.light,
               ),
+              child: content,
             );
-              }),
-            ),
-          ),
-        ));
-        if (!_useBottomBar) return content;
-        // No top bar means no appBarTheme.systemOverlayStyle — the status bar
-        // now sits over `surface`, so drive its icons off the theme brightness.
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        return AnnotatedRegion<SystemUiOverlayStyle>(
-          value: SystemUiOverlayStyle(
-            statusBarColor: Colors.transparent,
-            statusBarIconBrightness:
-                isDark ? Brightness.light : Brightness.dark,
-            statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
-          ),
-          child: content,
-        );
           },
         );
       },
@@ -2296,7 +2460,14 @@ class _NotesScreenState extends State<NotesScreen>
         items.add(_buildOutsideFilterLabel());
       }
       items.add(_NoteCard(
-          key: ValueKey(note.id), note: note, onEdit: () => _startEdit(note)));
+          key: _cardKeys.putIfAbsent(note.id, GlobalKey.new),
+          note: note,
+          expanded: _expandedNoteIds.contains(note.id),
+          onExpand: (grownBy) {
+            _expandNote(note.id);
+            _holdReadingPosition(grownBy);
+          },
+          onEdit: (target) => _startEdit(note, target: target)));
       currentDate = noteDate;
     }
 
@@ -2451,11 +2622,10 @@ class _NotesScreenState extends State<NotesScreen>
                     label: 'Do not tag with $tag',
                     button: true,
                     child: GestureDetector(
-                      onTap: () => setState(
-                          () => _droppedInheritedTags = {
-                                ..._droppedInheritedTags,
-                                tag
-                              }),
+                      onTap: () => setState(() => _droppedInheritedTags = {
+                            ..._droppedInheritedTags,
+                            tag
+                          }),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 3),
@@ -2529,7 +2699,11 @@ class _NotesScreenState extends State<NotesScreen>
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            'Editing',
+                            switch (_editTarget) {
+                              _EditTarget.text => 'Editing',
+                              _EditTarget.caption => 'Editing caption',
+                              _EditTarget.transcript => 'Editing transcript',
+                            },
                             style: TextStyle(
                                 fontSize: 13, color: mc.secondaryText),
                           ),
@@ -2702,150 +2876,171 @@ class _NotesScreenState extends State<NotesScreen>
                     behavior: HitTestBehavior.opaque,
                     onTap: () => _inputFocusNode.requestFocus(),
                     child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 32, vertical: 18),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: CallbackShortcuts(
-                            bindings: <ShortcutActivator, VoidCallback>{
-                              const SingleActivator(LogicalKeyboardKey.enter,
-                                      control: true):
-                                  () => _editingNoteId != null
-                                      ? _confirmEdit()
-                                      : _sendNote(),
-                              const SingleActivator(LogicalKeyboardKey.enter,
-                                      meta: true):
-                                  () => _editingNoteId != null
-                                      ? _confirmEdit()
-                                      : _sendNote(),
-                            },
-                            child: MiddleClickPaste(
-                              controller: _textController,
-                              focusNode: _inputFocusNode,
-                              child: TextField(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 32, vertical: 18),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(
+                            child: CallbackShortcuts(
+                              bindings: <ShortcutActivator, VoidCallback>{
+                                const SingleActivator(LogicalKeyboardKey.enter,
+                                        control: true):
+                                    () => _editingNoteId != null
+                                        ? _confirmEdit()
+                                        : _sendNote(),
+                                const SingleActivator(LogicalKeyboardKey.enter,
+                                        meta: true):
+                                    () => _editingNoteId != null
+                                        ? _confirmEdit()
+                                        : _sendNote(),
+                              },
+                              child: MiddleClickPaste(
                                 controller: _textController,
                                 focusNode: _inputFocusNode,
-                                maxLines: null,
-                                keyboardType: TextInputType.multiline,
-                                textInputAction: TextInputAction.newline,
-                                onTap: () {
-                                  // Android creates word selections on single
-                                  // tap in a focused field; collapse to cursor
-                                  if (!_textController.selection.isCollapsed) {
-                                    _textController.selection =
-                                        TextSelection.collapsed(
-                                      offset: _textController
-                                          .selection.extentOffset,
-                                    );
-                                  }
-                                },
-                                decoration: InputDecoration(
-                                  hintText: hasPendingFile ||
-                                          editingFileAttachment != null
-                                      ? 'Add a caption...  |  Press # to tag'
-                                      : 'Memo...  |  Press # to tag',
-                                  border: InputBorder.none,
-                                  isDense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                  hintStyle: TextStyle(
-                                    color: mc.hintText,
-                                    fontSize: 14,
+                                child: TextField(
+                                  controller: _textController,
+                                  focusNode: _inputFocusNode,
+                                  maxLines: null,
+                                  keyboardType: TextInputType.multiline,
+                                  textInputAction: TextInputAction.newline,
+                                  onTap: () {
+                                    // Android creates word selections on single
+                                    // tap in a focused field; collapse to cursor
+                                    if (!_textController
+                                        .selection.isCollapsed) {
+                                      _textController.selection =
+                                          TextSelection.collapsed(
+                                        offset: _textController
+                                            .selection.extentOffset,
+                                      );
+                                    }
+                                  },
+                                  decoration: InputDecoration(
+                                    hintText: hasPendingFile ||
+                                            editingFileAttachment != null
+                                        ? 'Add a caption...  |  Press # to tag'
+                                        : 'Memo...  |  Press # to tag',
+                                    border: InputBorder.none,
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    hintStyle: TextStyle(
+                                      color: mc.hintText,
+                                      fontSize: 14,
+                                    ),
                                   ),
+                                  style: const TextStyle(
+                                      fontSize: 14, height: 1.3),
                                 ),
-                                style:
-                                    const TextStyle(fontSize: 14, height: 1.3),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        // Attach icon or send button — mutually exclusive
-                        ValueListenableBuilder<TextEditingValue>(
-                          valueListenable: _textController,
-                          builder: (context, value, _) {
-                            final hasText = value.text.trim().isNotEmpty;
-                            final canSend = hasPendingFile ||
-                                hasText ||
-                                editingFileAttachment != null;
-                            if (canSend) {
-                              return Semantics(
-                                label: isEditing ? 'Confirm edit' : 'Send',
-                                button: true,
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: isEditing ? _confirmEdit : _sendNote,
-                                  child: _sending
-                                      ? const SizedBox(
-                                          width: 24,
-                                          height: 24,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            valueColor:
-                                                AlwaysStoppedAnimation<Color>(
-                                                    accent),
+                          const SizedBox(width: 12),
+                          // Attach icon or send button — mutually exclusive
+                          ValueListenableBuilder<TextEditingValue>(
+                            valueListenable: _textController,
+                            builder: (context, value, _) {
+                              final hasText = value.text.trim().isNotEmpty;
+                              final canSend = hasPendingFile ||
+                                  hasText ||
+                                  editingFileAttachment != null;
+                              if (canSend) {
+                                return Semantics(
+                                  label: isEditing ? 'Confirm edit' : 'Send',
+                                  button: true,
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: isEditing ? _confirmEdit : _sendNote,
+                                    child: _sending
+                                        ? const SizedBox(
+                                            width: 24,
+                                            height: 24,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                      accent),
+                                            ),
+                                          )
+                                        : Icon(
+                                            isEditing
+                                                ? Icons.check_circle_outline
+                                                : Icons.send,
+                                            color: accent,
                                           ),
-                                        )
-                                      : Icon(
-                                          isEditing
-                                              ? Icons.check_circle_outline
-                                              : Icons.send,
-                                          color: accent,
+                                  ),
+                                );
+                              }
+                              if (!isEditing) {
+                                return Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (!_NoteCardState._isDesktopOrWeb) ...[
+                                      Semantics(
+                                        label:
+                                            'Take photo, long press to record video',
+                                        button: true,
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: _takePhoto,
+                                          onLongPress: _recordVideo,
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(
+                                                right: 20),
+                                            child: Icon(
+                                                Icons.camera_alt_outlined,
+                                                size: 24,
+                                                color: mc.iconMuted),
+                                          ),
                                         ),
-                                ),
-                              );
-                            }
-                            if (!isEditing) {
-                              return Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (!_NoteCardState._isDesktopOrWeb) ...[
+                                      ),
+                                    ],
+                                    if (stt.sttAvailable) ...[
+                                      Semantics(
+                                        label: 'Record voice note',
+                                        hint:
+                                            'Long press for transcription settings',
+                                        button: true,
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: _recordVoiceNote,
+                                          onLongPress: () =>
+                                              stt.openSttSettings(context),
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(
+                                                right: 20),
+                                            child: Icon(Icons.mic_none,
+                                                size: 24, color: mc.iconMuted),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                     Semantics(
-                                      label:
-                                          'Take photo, long press to record video',
+                                      label: 'Attach file',
                                       button: true,
                                       child: GestureDetector(
                                         behavior: HitTestBehavior.opaque,
-                                        onTap: _takePhoto,
-                                        onLongPress: _recordVideo,
+                                        onTap: _pickFile,
                                         child: Padding(
                                           padding:
-                                              const EdgeInsets.only(right: 20),
-                                          child: Icon(Icons.camera_alt_outlined,
-                                              size: 24,
-                                              color: mc.iconMuted),
+                                              const EdgeInsets.only(right: 0),
+                                          child: Transform.rotate(
+                                            angle: 0.55,
+                                            child: Icon(Icons.attach_file,
+                                                size: 24, color: mc.iconMuted),
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ],
-                                  Semantics(
-                                    label: 'Attach file',
-                                    button: true,
-                                    child: GestureDetector(
-                                      behavior: HitTestBehavior.opaque,
-                                      onTap: _pickFile,
-                                      child: Padding(
-                                        padding:
-                                            const EdgeInsets.only(right: 0),
-                                        child: Transform.rotate(
-                                          angle: 0.55,
-                                          child: Icon(Icons.attach_file,
-                                              size: 24,
-                                              color: mc.iconMuted),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-                            return const SizedBox.shrink();
-                          },
-                        ),
-                      ],
+                                );
+                              }
+                              return const SizedBox.shrink();
+                            },
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                   ),
                 ),
                 if (_tagSuggestions.isNotEmpty) _buildTagSuggestions(mc),
@@ -3369,8 +3564,7 @@ class _LinkedTextState extends State<LinkedText> {
 
   // Everything that isn't a URL gets a second pass for #tags. URLs are matched
   // first so a fragment like example.com/page#section stays one link.
-  void _addWithTags(
-      List<InlineSpan> spans, String text, TextStyle baseStyle) {
+  void _addWithTags(List<InlineSpan> spans, String text, TextStyle baseStyle) {
     int last = 0;
     for (final m in tagMatches(text)) {
       if (m.start > last) {
@@ -3452,11 +3646,23 @@ class _LinkedTextState extends State<LinkedText> {
   }
 }
 
+// Which field of a note the composer is editing
+enum _EditTarget { text, caption, transcript }
+
 class _NoteCard extends StatefulWidget {
   final DecryptedNote note;
-  final VoidCallback? onEdit;
+  final bool expanded;
+  // Carries the height the card is about to gain
+  final ValueChanged<double> onExpand;
+  final void Function(_EditTarget target)? onEdit;
 
-  const _NoteCard({super.key, required this.note, this.onEdit});
+  const _NoteCard({
+    super.key,
+    required this.note,
+    required this.expanded,
+    required this.onExpand,
+    this.onEdit,
+  });
 
   @override
   State<_NoteCard> createState() => _NoteCardState();
@@ -3478,9 +3684,11 @@ class _NoteCardState extends State<_NoteCard>
   // Captured in onSecondaryTapDown before SelectionArea word-selects on right-click
   String? _capturedSelectionOnRightClick;
   final _selectionAreaKey = GlobalKey<SelectionAreaState>();
+  final _collapsibleKey = GlobalKey();
 
   bool _retrying = false;
   bool _isRevealed = false;
+  bool _expanded = false;
   Offset _tapPosition = Offset.zero;
   Future<Uint8List?>? _imageBytesFuture;
 
@@ -3496,6 +3704,13 @@ class _NoteCardState extends State<_NoteCard>
   void initState() {
     super.initState();
     _initImageFuture();
+    _expanded = widget.expanded;
+  }
+
+  void _expand([double? grownBy]) {
+    grownBy ??= CollapsibleBody.hiddenHeight(_collapsibleKey);
+    if (!_expanded) setState(() => _expanded = true);
+    widget.onExpand(grownBy);
   }
 
   void _initImageFuture() {
@@ -3512,6 +3727,8 @@ class _NoteCardState extends State<_NoteCard>
     if (oldWidget.note.attachment?.sha256 != widget.note.attachment?.sha256) {
       _initImageFuture();
     }
+    // The owner only flips this while the card is on screen when an edit ends
+    if (oldWidget.expanded != widget.expanded) _expanded = widget.expanded;
   }
 
   static bool get _isDesktopOrWeb {
@@ -3543,8 +3760,7 @@ class _NoteCardState extends State<_NoteCard>
       case SyncStatus.pending:
         return Semantics(
           label: 'Sync pending',
-          child:
-              Icon(Icons.access_time, size: 14, color: context.mc.faintText),
+          child: Icon(Icons.access_time, size: 14, color: context.mc.faintText),
         );
     }
   }
@@ -3681,6 +3897,12 @@ class _NoteCardState extends State<_NoteCard>
     }
 
     final isFileNote = widget.note.kind == NoteKind.file;
+    final att = widget.note.attachment;
+    final transcribing = SttState.transcribing.value.contains(widget.note.id);
+    final canTranscribe = isFileNote &&
+        widget.note.error == null &&
+        att != null &&
+        stt.canTranscribe(att);
     entry = OverlayEntry(
       builder: (_) => ExcludeFocus(
         child: _NoteMenuOverlay(
@@ -3693,24 +3915,31 @@ class _NoteCardState extends State<_NoteCard>
                   widget.note.nostrId == null),
           showSelectText: !_isDesktopOrWeb && !isFileNote,
           showEdit: widget.note.error == null && !isFileNote,
-          showEditComment: isFileNote && widget.note.error == null,
           showSave: isFileNote,
-          showCopyImage: isFileNote && widget.note.attachment?.isImage == true,
+          showCopyImage: isFileNote && att?.isImage == true,
           showShare: isFileNote && !_isDesktopOrWeb,
-          showCopyCaption:
-              isFileNote && widget.note.attachment?.caption != null,
+          showCaption: isFileNote && widget.note.error == null,
+          hasCaption: isFileNote && att?.caption != null,
+          hasTranscript: isFileNote && att?.transcript != null && !transcribing,
+          showTranscribe:
+              canTranscribe && !transcribing && att.transcript == null,
+          canRetranscribe: canTranscribe,
+          showRemoveAudio: isFileNote &&
+              widget.note.error == null &&
+              att?.isAudio == true &&
+              !transcribing &&
+              (att!.transcript != null || att.caption != null),
           showSensitive: widget.note.error == null,
           isSensitive: widget.note.sensitive,
           // Kept in release for failed notes so they can report the sync log
           showDebugJson:
               kDebugMode || widget.note.syncStatus == SyncStatus.failed,
           editedAt: widget.note.editedAt,
+          filename: widget.note.attachment?.filename,
           fileSize: widget.note.attachment?.size,
           dim: widget.note.attachment?.dim,
           copyLabel: isFileNote
-              ? (widget.note.attachment?.isImage == true
-                  ? null
-                  : 'Copy filename')
+              ? null
               : (hasSelection ? 'Copy selected text' : 'Copy text'),
         ),
       ),
@@ -3732,59 +3961,120 @@ class _NoteCardState extends State<_NoteCard>
     } else if (result == 'share') {
       _shareFile();
     } else if (result == 'copy_caption') {
-      await Clipboard.setData(
-          ClipboardData(text: widget.note.attachment?.caption ?? ''));
-    } else if (result == 'edit' || result == 'edit_caption') {
-      widget.onEdit?.call();
+      await Clipboard.setData(ClipboardData(text: att?.caption ?? ''));
+    } else if (result == 'copy_transcript') {
+      await Clipboard.setData(ClipboardData(text: att?.transcript ?? ''));
+    } else if (result == 'transcribe') {
+      if (mounted) stt.transcribeNote(context, widget.note.id);
+    } else if (result == 'retranscribe') {
+      final ok = await _confirm(
+          'Replace transcript',
+          'Transcribe the audio again and replace the current transcript?',
+          'Replace');
+      if (ok && mounted) stt.transcribeNote(context, widget.note.id);
+    } else if (result == 'remove_caption') {
+      if (await _confirm(
+          'Remove caption', 'Remove the caption from this note?', 'Remove')) {
+        await NoteCache.instance.update(widget.note.id, '');
+      }
+    } else if (result == 'remove_transcript') {
+      final ok = await _confirm('Remove transcript',
+          'Remove the transcript from this note?', 'Remove');
+      if (ok) await NoteCache.instance.setTranscript(widget.note.id, null);
+    } else if (result == 'edit') {
+      widget.onEdit?.call(_EditTarget.text);
+    } else if (result == 'edit_caption') {
+      widget.onEdit?.call(_EditTarget.caption);
+    } else if (result == 'edit_transcript') {
+      widget.onEdit?.call(_EditTarget.transcript);
     } else if (result == 'retry_sync') {
       NoteCache.instance.retrySync(widget.note.id);
     } else if (result == 'copy') {
-      final textToCopy = widget.note.kind == NoteKind.file
-          ? (widget.note.attachment?.filename ?? '')
-          : (hasSelection ? selectedText : widget.note.text);
+      final textToCopy = hasSelection ? selectedText : widget.note.text;
       await Clipboard.setData(ClipboardData(text: textToCopy));
     } else if (result == 'select_text') {
+      _expand();
       _selectionModeId.value = widget.note.id;
     } else if (result == 'retry') {
       _retry();
-    } else if (result == 'delete') {
-      if (!mounted) return;
-      FocusManager.instance.primaryFocus?.unfocus();
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => CallbackShortcuts(
-          bindings: <ShortcutActivator, VoidCallback>{
-            const SingleActivator(LogicalKeyboardKey.enter, control: true):
-                () => Navigator.pop(ctx, true),
-            const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
-                Navigator.pop(ctx, true),
-          },
-          child: Focus(
-            autofocus: true,
-            child: AlertDialog(
-              title: const Text('Delete note'),
-              content:
-                  const Text('Are you sure you want to delete this message?'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Cancel'),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  style: TextButton.styleFrom(foregroundColor: accent),
-                  child: const Text('Delete'),
-                ),
-              ],
-            ),
-          ),
-        ),
+    } else if (result == 'remove_audio') {
+      final ok = await _confirm(
+        'Remove audio file',
+        'The transcript and caption are kept as a text note and the audio '
+            'file is deleted.',
+        'Remove',
       );
-      if (confirmed == true) {
+      if (ok) await _replaceAudioWithText();
+    } else if (result == 'delete') {
+      final ok = await _confirm('Delete note',
+          'Are you sure you want to delete this message?', 'Delete');
+      if (ok) {
+        final sha = widget.note.attachment?.sha256;
+        if (sha != null && AudioPlayerService.instance.activeSha.value == sha) {
+          await AudioPlayerService.instance.stop();
+        }
         await NoteCache.instance
             .delete(widget.note.id, nostrId: widget.note.nostrId);
       }
     }
+  }
+
+  // Turns an audio note into a text note made of its transcript and caption,
+  // then deletes the audio note. The text note is created first so nothing
+  // is lost if that step fails.
+  Future<void> _replaceAudioWithText() async {
+    final note = widget.note;
+    final att = note.attachment;
+    if (att == null) return;
+    final text = [att.transcript, att.caption]
+        .whereType<String>()
+        .map((t) => t.trim())
+        .where((t) => t.isNotEmpty)
+        .join('\n\n');
+    if (text.isEmpty) return;
+    final newId = await NoteCache.instance.add(text, createdAt: note.createdAt);
+    if (newId == null) return;
+    if (note.sensitive) await NoteCache.instance.setSensitive(newId, true);
+    if (AudioPlayerService.instance.activeSha.value == att.sha256) {
+      await AudioPlayerService.instance.stop();
+    }
+    await NoteCache.instance.delete(note.id, nostrId: note.nostrId);
+  }
+
+  // Destructive confirmation; Ctrl/Cmd+Enter confirms from the keyboard
+  Future<bool> _confirm(String title, String message, String action) async {
+    if (!mounted) return false;
+    FocusManager.instance.primaryFocus?.unfocus();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
+              Navigator.pop(ctx, true),
+          const SingleActivator(LogicalKeyboardKey.enter, meta: true): () =>
+              Navigator.pop(ctx, true),
+        },
+        child: Focus(
+          autofocus: true,
+          child: AlertDialog(
+            title: Text(title),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: TextButton.styleFrom(foregroundColor: accent),
+                child: Text(action),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return confirmed == true;
   }
 
   @override
@@ -3816,6 +4106,8 @@ class _NoteCardState extends State<_NoteCard>
         final isFileVideo =
             isFileNote && widget.note.attachment?.isVideo == true;
         final isFileGif = isFileNote && widget.note.attachment?.isGif == true;
+        final isFileAudio =
+            isFileNote && widget.note.attachment?.isAudio == true;
         // On web, GIFs/videos play inline in the card — the outer tap just
         // opens the context menu (the inline player handles its own controls).
         final isWebInlineMedia = kIsWeb && (isFileVideo || isFileGif);
@@ -3854,8 +4146,9 @@ class _NoteCardState extends State<_NoteCard>
             }
           }
           if (_isDesktopOrWeb) {
-            // File notes (non-image): left-click saves the file directly
-            final isFileNonImage = isFileNote && !isFileImage;
+            // File notes (non-image): left-click saves the file directly.
+            // Audio notes have their own inline controls.
+            final isFileNonImage = isFileNote && !isFileImage && !isFileAudio;
             onTap = isWebInlineMedia
                 ? _showContextMenu
                 : isFileVideo
@@ -3888,16 +4181,18 @@ class _NoteCardState extends State<_NoteCard>
           onSecondaryTapDown: onSecondaryTapDown,
           onLongPressStart: onLongPressStart,
           child: Container(
-            // Image/video notes use zero padding — the preview fills the card
-            padding: (isFileImage || isFileVideo)
+            // Image/video/audio notes use zero padding — the preview fills
+            // the card
+            padding: (isFileImage || isFileVideo || isFileAudio)
                 ? EdgeInsets.zero
                 : const EdgeInsets.fromLTRB(16, 16, 16, 8),
             decoration: BoxDecoration(
               color: color,
               borderRadius: BorderRadius.circular(8),
             ),
-            child:
-                _retrying ? _buildSpinner() : _buildContent(isActiveSelection),
+            child: _retrying
+                ? _buildSpinner()
+                : _buildContent(isActiveSelection, color),
           ),
         );
       },
@@ -4059,11 +4354,15 @@ class _NoteCardState extends State<_NoteCard>
     );
   }
 
-  Widget _buildContent([bool inSelectionMode = false]) {
+  Widget _buildContent(bool inSelectionMode, Color cardColor) {
     final mc = context.mc;
     if (widget.note.kind == NoteKind.file && widget.note.error == null) {
       return _FileNoteContent(
         note: widget.note,
+        cardColor: cardColor,
+        collapsibleKey: _collapsibleKey,
+        expanded: _expanded,
+        onExpand: _expand,
         imageBytesFuture: _imageBytesFuture,
         formatTime: _formatTime,
         buildSyncIcon: _buildSyncIcon,
@@ -4088,14 +4387,13 @@ class _NoteCardState extends State<_NoteCard>
           ),
           Text(
             widget.note.error!,
-            style: TextStyle(
-                fontSize: 14, height: 1.3, color: mc.primaryText),
+            style: TextStyle(fontSize: 14, height: 1.3, color: mc.primaryText),
           ),
           if (widget.note.nostrId != null)
             Text(
               'Event ID: ${widget.note.nostrId}',
-              style: TextStyle(
-                  fontSize: 14, height: 1.3, color: mc.primaryText),
+              style:
+                  TextStyle(fontSize: 14, height: 1.3, color: mc.primaryText),
             ),
           Align(
             alignment: Alignment.centerRight,
@@ -4191,15 +4489,22 @@ class _NoteCardState extends State<_NoteCard>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        LinkedText(
-          text: widget.note.text,
-          selectionMode: inSelectionMode,
-          selectionAreaKey: _selectionAreaKey,
-          onSelectionChanged: (content) {
-            final raw = content?.plainText.trim();
-            _desktopSelectedContent =
-                (raw != null && raw.isNotEmpty) ? raw : null;
-          },
+        CollapsibleBody(
+          key: _collapsibleKey,
+          maxHeight: _collapsedHeight(context),
+          expanded: _expanded,
+          fadeColor: cardColor,
+          onExpand: _expand,
+          child: LinkedText(
+            text: widget.note.text,
+            selectionMode: inSelectionMode,
+            selectionAreaKey: _selectionAreaKey,
+            onSelectionChanged: (content) {
+              final raw = content?.plainText.trim();
+              _desktopSelectedContent =
+                  (raw != null && raw.isNotEmpty) ? raw : null;
+            },
+          ),
         ),
         SizedBox(height: widget.note.sensitive && _isRevealed ? 12 : 6),
         Row(
@@ -4255,6 +4560,17 @@ class _NoteCardState extends State<_NoteCard>
   }
 }
 
+// Long note bodies are cropped to this height until "Read more" is tapped.
+// Measured on the list viewport, which is well short of the window once the
+// app bar, composer and keyboard are taken out
+double _collapsedHeight(BuildContext context) {
+  final position = Scrollable.maybeOf(context)?.position;
+  final viewport = position != null && position.hasViewportDimension
+      ? position.viewportDimension
+      : MediaQuery.sizeOf(context).height;
+  return viewport * 1 / 2;
+}
+
 // Formats file size for display
 String _formatFileSize(int bytes) {
   if (bytes < 1024) return '$bytes B';
@@ -4274,6 +4590,10 @@ Future<void> _openImageInDesktopViewer(Uint8List bytes, String filename) async {
 
 class _FileNoteContent extends StatelessWidget {
   final DecryptedNote note;
+  final Color cardColor;
+  final GlobalKey collapsibleKey;
+  final bool expanded;
+  final ValueChanged<double> onExpand;
   final Future<Uint8List?>? imageBytesFuture;
   final String Function(DateTime) formatTime;
   final Widget Function() buildSyncIcon;
@@ -4284,6 +4604,10 @@ class _FileNoteContent extends StatelessWidget {
 
   const _FileNoteContent({
     required this.note,
+    required this.cardColor,
+    required this.collapsibleKey,
+    required this.expanded,
+    required this.onExpand,
     required this.imageBytesFuture,
     required this.formatTime,
     required this.buildSyncIcon,
@@ -4300,16 +4624,53 @@ class _FileNoteContent extends StatelessWidget {
     if (attachment == null) return const SizedBox.shrink();
 
     if (note.sensitive && !isRevealed) {
-      return _buildSensitivePlaceholder(mc, attachment);
+      final placeholder = _buildSensitivePlaceholder(mc, attachment);
+      // Audio cards have no outer padding, so pad the file placeholder here
+      return attachment.isAudio
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: placeholder,
+            )
+          : placeholder;
     }
 
     if (attachment.isImage) {
-      return _buildImageContent(attachment);
+      return _buildImageContent(mc, attachment);
     }
     if (attachment.isVideo) {
       return _buildVideoContent(mc, attachment);
     }
+    if (attachment.isAudio) {
+      return _buildAudioContent(mc, attachment);
+    }
     return _buildFileContent(mc, attachment);
+  }
+
+  Widget _buildAudioContent(ManentColors mc, NoteAttachment attachment) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+          child: AudioNotePlayer(
+            key: ValueKey(attachment.sha256),
+            attachment: attachment,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _textBlock(mc, attachment),
+              _transcribingIndicator(mc),
+              SizedBox(height: note.sensitive ? 12 : 6),
+              _buildFileFooter(mc),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildVideoContent(ManentColors mc, NoteAttachment attachment) {
@@ -4413,24 +4774,11 @@ class _FileNoteContent extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         preview,
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${attachment.filename} - ${_formatFileSize(attachment.size)}',
-                style: TextStyle(
-                    fontSize: 14, height: 1.3, color: mc.secondaryText),
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (attachment.caption != null) ...[
-                const SizedBox(height: 6),
-                LinkedText(text: attachment.caption!),
-              ],
-            ],
+        if (attachment.caption != null || attachment.transcript != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: _textBlock(mc, attachment),
           ),
-        ),
       ],
     );
   }
@@ -4535,10 +4883,10 @@ class _FileNoteContent extends StatelessWidget {
                     imageFilter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                     child: Row(
                       children: [
-                        CircleAvatar(
+                        const CircleAvatar(
                           radius: 22,
-                          backgroundColor: const Color(0xFF333333),
-                          child: const Icon(Icons.insert_drive_file,
+                          backgroundColor: Color(0xFF333333),
+                          child: Icon(Icons.insert_drive_file,
                               color: Colors.white, size: 20),
                         ),
                         const SizedBox(width: 12),
@@ -4606,7 +4954,7 @@ class _FileNoteContent extends StatelessWidget {
     );
   }
 
-  Widget _buildImageContent(NoteAttachment attachment) {
+  Widget _buildImageContent(ManentColors mc, NoteAttachment attachment) {
     final image = ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: Stack(
@@ -4713,18 +5061,82 @@ class _FileNoteContent extends StatelessWidget {
       ),
     );
 
-    if (attachment.caption == null) return image;
+    if (attachment.caption == null && attachment.transcript == null) {
+      return image;
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         image,
         Padding(
           padding: const EdgeInsets.all(16),
-          child: LinkedText(text: attachment.caption!),
+          child: _textBlock(mc, attachment),
         ),
       ],
     );
   }
+
+  // Caption and transcript together, cropped like a long text note
+  Widget _textBlock(ManentColors mc, NoteAttachment attachment) {
+    if (attachment.caption == null && attachment.transcript == null) {
+      return const SizedBox.shrink();
+    }
+    return Builder(
+      builder: (context) => CollapsibleBody(
+        key: collapsibleKey,
+        maxHeight: _collapsedHeight(context),
+        expanded: expanded,
+        fadeColor: cardColor,
+        onExpand: onExpand,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (attachment.caption != null)
+              LinkedText(text: attachment.caption!),
+            _transcriptBlock(mc, attachment),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Speech-to-text shown apart from the caption under a labelled rule.
+  // [top] is the gap above it; by default it only applies after a caption.
+  Widget _transcriptBlock(ManentColors mc, NoteAttachment attachment,
+      {double? top}) {
+    final transcript = attachment.transcript;
+    if (transcript == null) return const SizedBox.shrink();
+    return Padding(
+      padding:
+          EdgeInsets.only(top: top ?? (attachment.caption != null ? 8 : 0)),
+      child: Semantics(
+        label: 'Transcript',
+        container: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Transcript',
+                  style: TextStyle(fontSize: 11, color: mc.secondaryText),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Divider(height: 1, thickness: 1, color: mc.border),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            LinkedText(text: transcript),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _transcribingIndicator(ManentColors mc) =>
+      _TranscribingBlock(noteId: note.id);
 
   Widget _buildFileContent(ManentColors mc, NoteAttachment attachment) {
     return Column(
@@ -4743,74 +5155,69 @@ class _FileNoteContent extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    attachment.filename,
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    _formatFileSize(attachment.size),
-                    style: TextStyle(fontSize: 12, color: mc.secondaryText),
-                  ),
-                ],
+              child: Text(
+                attachment.filename,
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
         ),
-        if (attachment.caption != null) ...[
-          const SizedBox(height: 8),
-          LinkedText(text: attachment.caption!),
-        ],
+        if (attachment.caption != null || attachment.transcript != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: _textBlock(mc, attachment),
+          ),
+        _transcribingIndicator(mc),
         SizedBox(height: note.sensitive ? 12 : 6),
+        _buildFileFooter(mc),
+      ],
+    );
+  }
+
+  Widget _buildFileFooter(ManentColors mc) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        if (note.sensitive)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onHide,
+            child: Semantics(
+              label: 'Hide sensitive content',
+              button: true,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: mc.cardDim,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.visibility_off_outlined,
+                        size: 12, color: mc.secondaryText),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Hide',
+                      style: TextStyle(fontSize: 11, color: mc.secondaryText),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          const SizedBox.shrink(),
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (note.sensitive)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onHide,
-                child: Semantics(
-                  label: 'Hide sensitive content',
-                  button: true,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: mc.cardDim,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.visibility_off_outlined,
-                            size: 12, color: mc.secondaryText),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Hide',
-                          style:
-                              TextStyle(fontSize: 11, color: mc.secondaryText),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              )
-            else
-              const SizedBox.shrink(),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                buildSyncIcon(),
-                const SizedBox(width: 4),
-                Text(
-                  formatTime(note.createdAt),
-                  style: TextStyle(fontSize: 12, color: mc.faintText),
-                ),
-              ],
+            buildSyncIcon(),
+            const SizedBox(width: 4),
+            Text(
+              formatTime(note.createdAt),
+              style: TextStyle(fontSize: 12, color: mc.faintText),
             ),
           ],
         ),
@@ -4886,6 +5293,125 @@ class _ThumbhashImageState extends State<_ThumbhashImage> {
 
 // Still first frame of a GIF with a centered play icon; the animation only
 // plays in the fullscreen viewer. Non-animated GIFs render without the icon.
+// Transcription feedback under the player: a sliding bar and the elapsed time
+// while whisper runs, a plain label while the note waits behind another one,
+// and a Cancel button in both cases
+class _TranscribingBlock extends StatefulWidget {
+  final String noteId;
+
+  const _TranscribingBlock({required this.noteId});
+
+  @override
+  State<_TranscribingBlock> createState() => _TranscribingBlockState();
+}
+
+class _TranscribingBlockState extends State<_TranscribingBlock> {
+  Timer? _ticker;
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  // The ticker only redraws the elapsed label, so it runs just while running
+  void _syncTicker(bool running) {
+    if (running && _ticker == null) {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    } else if (!running && _ticker != null) {
+      _ticker!.cancel();
+      _ticker = null;
+    }
+  }
+
+  String get _elapsed {
+    final since = SttState.runningSince;
+    final s = since == null ? 0 : DateTime.now().difference(since).inSeconds;
+    return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mc = context.mc;
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: SttState.transcribing,
+      builder: (context, ids, _) {
+        if (!ids.contains(widget.noteId)) {
+          _syncTicker(false);
+          return const SizedBox.shrink();
+        }
+        return ValueListenableBuilder<String?>(
+          valueListenable: SttState.running,
+          builder: (context, running, _) {
+            final isRunning = running == widget.noteId;
+            _syncTicker(isRunning);
+            final labelStyle =
+                TextStyle(fontSize: 12, color: mc.secondaryText);
+            return Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        isRunning ? 'Transcribing…' : 'Waiting to transcribe…',
+                        style: labelStyle,
+                      ),
+                      if (isRunning)
+                        Text(
+                          _elapsed,
+                          style: labelStyle.copyWith(
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (isRunning) ...[
+                    const SizedBox(height: 10),
+                    Semantics(
+                      label: 'Transcribing',
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          minHeight: 3,
+                          backgroundColor: mc.cardDim,
+                          color: accent,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Center(
+                    child: OutlinedButton(
+                      onPressed: () => stt.abortTranscription(widget.noteId),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: mc.secondaryText,
+                        side: BorderSide(color: mc.border),
+                        shape: const StadiumBorder(),
+                        padding: const EdgeInsets.symmetric(horizontal: 22),
+                        minimumSize: const Size(0, 36),
+                        textStyle: const TextStyle(fontSize: 13),
+                      ),
+                      child: const Text(
+                        'Cancel',
+                        semanticsLabel: 'Cancel transcription',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
 class _GifStillImage extends StatefulWidget {
   final Uint8List bytes;
   final String cacheKey; // sha256
@@ -4997,7 +5523,7 @@ class _GifStillImageState extends State<_GifStillImage> {
   }
 }
 
-class _NoteMenuOverlay extends StatelessWidget {
+class _NoteMenuOverlay extends StatefulWidget {
   final Offset tapPosition;
   final bool isDesktopOrWeb;
   final void Function([String?]) onSelect;
@@ -5005,18 +5531,25 @@ class _NoteMenuOverlay extends StatelessWidget {
   final bool showRetrySync;
   final bool showSelectText;
   final bool showEdit;
-  final bool showEditComment;
   final DateTime? editedAt;
-  // Null hides the copy action (e.g. image notes where filename copy is useless)
+  // Null hides the copy action (file notes copy details from the info block)
   final String? copyLabel;
 
   final bool showSave;
   final bool showCopyImage;
   final bool showShare;
-  final bool showCopyCaption;
+  // File notes: a caption row that opens a submenu once a caption exists, and
+  // a transcript row that does the same, or offers to transcribe
+  final bool showCaption;
+  final bool hasCaption;
+  final bool hasTranscript;
+  final bool showTranscribe;
+  final bool canRetranscribe;
+  final bool showRemoveAudio;
   final bool showSensitive;
   final bool isSensitive;
   final bool showDebugJson;
+  final String? filename;
   final int? fileSize;
   final String? dim;
 
@@ -5028,19 +5561,32 @@ class _NoteMenuOverlay extends StatelessWidget {
     this.showRetrySync = false,
     this.showSelectText = false,
     this.showEdit = false,
-    this.showEditComment = false,
     this.showSave = false,
     this.showCopyImage = false,
     this.showShare = false,
-    this.showCopyCaption = false,
+    this.showCaption = false,
+    this.hasCaption = false,
+    this.hasTranscript = false,
+    this.showTranscribe = false,
+    this.canRetranscribe = false,
+    this.showRemoveAudio = false,
     this.showSensitive = false,
     this.isSensitive = false,
     this.showDebugJson = false,
     this.editedAt,
     this.copyLabel = 'Copy text',
+    this.filename,
     this.fileSize,
     this.dim,
   });
+
+  @override
+  State<_NoteMenuOverlay> createState() => _NoteMenuOverlayState();
+}
+
+// Submenus expand in place: the list is swapped for a back row plus their items
+class _NoteMenuOverlayState extends State<_NoteMenuOverlay> {
+  String? _submenu;
 
   String _formatEditedAt(DateTime dt) {
     final months = [
@@ -5059,13 +5605,13 @@ class _NoteMenuOverlay extends StatelessWidget {
     ];
     final time =
         '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    return 'Edited ${dt.day} ${months[dt.month - 1]} $time';
+    return 'Edited: ${dt.day} ${months[dt.month - 1]} $time';
   }
 
   // color null inherits the menu's DefaultTextStyle (primaryText) so it adapts
   Widget _menuItem(String action, String label, {Color? color}) {
     return InkWell(
-      onTap: () => onSelect(action),
+      onTap: () => widget.onSelect(action),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Text(label, style: TextStyle(fontSize: 14, color: color)),
@@ -5073,55 +5619,165 @@ class _NoteMenuOverlay extends StatelessWidget {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final mc = context.mc;
-    // Menu actions in display order; dividers are interposed only between items
-    // so none ever touches the top or bottom edge of the menu.
-    final items = <Widget>[
-      if (showRetrySync) _menuItem('retry_sync', 'Retry sync'),
-      if (showSave) _menuItem('save', 'Save'),
-      if (showCopyImage) _menuItem('copy_image', 'Copy'),
-      if (showShare) _menuItem('share', 'Share'),
-      if (showCopyCaption) _menuItem('copy_caption', 'Copy caption'),
-      if (copyLabel != null) _menuItem('copy', copyLabel!),
-      if (showSelectText) _menuItem('select_text', 'Select text'),
-      if (showRetry) _menuItem('retry', 'Try to decrypt again'),
-      if (showEdit) _menuItem('edit', 'Edit'),
-      if (showEditComment) _menuItem('edit_caption', 'Edit caption'),
-      if (showSensitive)
-        _menuItem('set_sensitive',
-            isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
-      _menuItem('delete', 'Delete', color: accent),
-      if (showDebugJson)
-        _menuItem('show_json', 'Show raw data', color: mc.secondaryText),
-      if (fileSize != null || editedAt != null)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _submenuRow(ManentColors mc, String id, String label) {
+    return Semantics(
+      button: true,
+      hint: 'Opens submenu',
+      child: InkWell(
+        onTap: () => setState(() => _submenu = id),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+          child: Row(
             children: [
-              if (fileSize != null)
-                Text(
-                  'Size: ${_formatFileSize(fileSize!)}',
-                  style: TextStyle(fontSize: 12, color: mc.secondaryText),
-                ),
-              if (dim != null)
-                Text(
-                  'Dimensions: $dim',
-                  style: TextStyle(fontSize: 12, color: mc.secondaryText),
-                ),
-              if ((fileSize != null || dim != null) && editedAt != null)
-                const SizedBox(height: 6),
-              if (editedAt != null)
-                Text(
-                  _formatEditedAt(editedAt!),
-                  style: TextStyle(fontSize: 12, color: mc.secondaryText),
-                ),
+              Expanded(
+                child: Text(label, style: const TextStyle(fontSize: 14)),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: mc.secondaryText),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _backRow(ManentColors mc, String label) {
+    return Semantics(
+      button: true,
+      label: 'Back to note menu',
+      child: InkWell(
+        onTap: () => setState(() => _submenu = null),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 12, 16, 12),
+          child: Row(
+            children: [
+              Icon(Icons.chevron_left, size: 18, color: mc.secondaryText),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Read-only details with a button that copies them as text
+  Widget _infoBlock(ManentColors mc) {
+    final fileLines = [
+      if (widget.filename != null) 'Filename: ${widget.filename}',
+      if (widget.fileSize != null) 'Size: ${_formatFileSize(widget.fileSize!)}',
+      if (widget.dim != null) 'Dimensions: ${widget.dim}',
     ];
+    final editedLine =
+        widget.editedAt == null ? null : _formatEditedAt(widget.editedAt!);
+    final allLines = [...fileLines, if (editedLine != null) editedLine];
+    final style = TextStyle(fontSize: 12, color: mc.secondaryText);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final line in fileLines)
+                  Text(line,
+                      style: style,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                if (fileLines.isNotEmpty && editedLine != null)
+                  const SizedBox(height: 6),
+                if (editedLine != null) Text(editedLine, style: style),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: 'Copy details',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: allLines.join('\n')));
+                widget.onSelect(null);
+              },
+              child: Semantics(
+                label: 'Copy details',
+                button: true,
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(Icons.copy_outlined,
+                      size: 16, color: mc.secondaryText),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _mainItems(ManentColors mc) {
+    final w = widget;
+    return [
+      if (w.showRetrySync) _menuItem('retry_sync', 'Retry sync'),
+      if (w.showSave) _menuItem('save', 'Save'),
+      if (w.showCopyImage) _menuItem('copy_image', 'Copy'),
+      if (w.showShare) _menuItem('share', 'Share'),
+      if (w.copyLabel != null) _menuItem('copy', w.copyLabel!),
+      if (w.showSelectText) _menuItem('select_text', 'Select text'),
+      if (w.showRetry) _menuItem('retry', 'Try to decrypt again'),
+      if (w.showEdit) _menuItem('edit', 'Edit'),
+      if (w.showCaption)
+        w.hasCaption
+            ? _submenuRow(mc, 'caption', 'Caption')
+            : _menuItem('edit_caption', 'Add caption'),
+      if (w.hasTranscript)
+        _submenuRow(mc, 'transcript', 'Transcript')
+      else if (w.showTranscribe)
+        _menuItem('transcribe', 'Transcribe audio'),
+      if (w.showSensitive)
+        _menuItem('set_sensitive',
+            w.isSensitive ? 'Unset as sensitive' : 'Set as sensitive'),
+      if (w.showRemoveAudio)
+        _menuItem('remove_audio', 'Remove audio file', color: accent),
+      _menuItem('delete', 'Delete', color: accent),
+      if (w.showDebugJson)
+        _menuItem('show_json', 'Show raw data', color: mc.secondaryText),
+      if (w.filename != null || w.fileSize != null || w.editedAt != null)
+        _infoBlock(mc),
+    ];
+  }
+
+  List<Widget> _captionItems(ManentColors mc) => [
+        _backRow(mc, 'Caption'),
+        _menuItem('edit_caption', 'Edit'),
+        _menuItem('copy_caption', 'Copy'),
+        _menuItem('remove_caption', 'Remove', color: accent),
+      ];
+
+  List<Widget> _transcriptItems(ManentColors mc) => [
+        _backRow(mc, 'Transcript'),
+        _menuItem('edit_transcript', 'Edit'),
+        _menuItem('copy_transcript', 'Copy'),
+        if (widget.canRetranscribe) _menuItem('retranscribe', 'Re-transcribe'),
+        _menuItem('remove_transcript', 'Remove', color: accent),
+      ];
+
+  @override
+  Widget build(BuildContext context) {
+    final mc = context.mc;
+    // Menu rows in display order; dividers are interposed only between items
+    // so none ever touches the top or bottom edge of the menu.
+    final items = switch (_submenu) {
+      'caption' => _captionItems(mc),
+      'transcript' => _transcriptItems(mc),
+      _ => _mainItems(mc),
+    };
 
     final children = <Widget>[];
     for (final item in items) {
@@ -5136,13 +5792,13 @@ class _NoteMenuOverlay extends StatelessWidget {
         Positioned.fill(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => onSelect(null),
-            onSecondaryTap: () => onSelect(null),
+            onTap: () => widget.onSelect(null),
+            onSecondaryTap: () => widget.onSelect(null),
           ),
         ),
         CustomSingleChildLayout(
-          delegate: _MenuPositionDelegate(tapPosition,
-              isDesktopOrWeb: isDesktopOrWeb,
+          delegate: _MenuPositionDelegate(widget.tapPosition,
+              isDesktopOrWeb: widget.isDesktopOrWeb,
               keyboardHeight: MediaQuery.of(context).viewInsets.bottom),
           child: Container(
             decoration: BoxDecoration(

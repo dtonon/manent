@@ -4,11 +4,18 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 
 ## [Unreleased]
 
+- Add voice notes with on-device transcription
+- Show audio notes as an inline player with a real waveform, a draggable cursor and the duration
+- Normalize voice recordings to a standard level
+- Decode mp3, Ogg Vorbis and Ogg Opus for waveforms and transcription
+- Keep transcripts apart from captions, with their own edit, copy, re-transcribe and remove actions
+- Group file note menus into Caption and Transcript submenus and move the filename into the details block
 - Add a GitHub Linux release pipeline producing tar.gz, deb and rpm packages
 - Replace the Linux AppImage with a plain tar.gz bundle
 - Standardize the release pipeline (just release / publish / ship, with undo and changelog helpers)
 - Name all release artifacts manent-<version>-<platform>-<arch>
 - Attach the web bundle to releases
+- Sign macOS builds with a stable self-signed identity so privacy grants survive updates (one re-prompt on the first update)
 
 ## [2.0.1] - 2026-08-03
 

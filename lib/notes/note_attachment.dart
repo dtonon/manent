@@ -18,8 +18,11 @@ class NoteAttachment {
   final String key; // hex 32-byte AES key
   final String? thumbhash; // base64, images only
   final String? caption;
+  final String? transcript; // speech-to-text of audio, kept apart from caption
   final bool sensitive;
   final String? dim; // "<width>x<height>", images only
+  final double? duration; // seconds, audio only
+  final String? waveform; // base64, one 0-255 peak per bucket, audio only
 
   const NoteAttachment({
     this.url,
@@ -31,14 +34,21 @@ class NoteAttachment {
     required this.key,
     this.thumbhash,
     this.caption,
+    this.transcript,
     this.sensitive = false,
     this.dim,
+    this.duration,
+    this.waveform,
   });
 
   bool get isInline => data != null;
   bool get isImage => rasterImageMimeTypes.contains(mimeType);
   bool get isGif => mimeType == 'image/gif';
   bool get isVideo => mimeType.startsWith('video/');
+  bool get isAudio => mimeType.startsWith('audio/');
+
+  // Audio someone spoke in, by the only evidence that cannot lie: a transcript
+  bool get isVoiceNote => isAudio && transcript != null;
 
   // Short uppercase label for badges, e.g. MP4 / MOV — from the extension,
   // falling back to the mime subtype.
@@ -62,16 +72,21 @@ class NoteAttachment {
         'decryption-key': key,
         if (thumbhash != null) 'thumbhash': thumbhash,
         if (caption != null) 'caption': caption,
+        if (transcript != null) 'transcript': transcript,
         if (sensitive) 'sensitive': true,
         if (dim != null) 'dim': dim,
+        if (duration != null) 'duration': duration,
+        if (waveform != null) 'waveform': waveform,
       };
 
   factory NoteAttachment.fromJson(Map<String, dynamic> j) => NoteAttachment(
         url: j['url'] as String?,
         data: j['data'] as String?,
         filename: j['filename'] as String,
-        mimeType: (j['file-type'] ?? j['mime_type'])
-            as String, // TODO: 'mime_type' is deprecated, remove it after some time
+        mimeType: _normalizeMimeType(
+            (j['file-type'] ?? j['mime_type'])
+                as String, // TODO: 'mime_type' is deprecated, remove it after some time
+            j['filename'] as String),
         size: j['size'] as int,
         sha256: (j['x'] ?? j['sha256'])
             as String, // TODO: 'sha256' is deprecated, remove it after some time
@@ -80,13 +95,35 @@ class NoteAttachment {
         thumbhash: j['thumbhash'] as String?,
         caption: (j['caption'] ?? j['comment'])
             as String?, // TODO: 'comment' is deprecated, remove it after some time
+        transcript: j['transcript'] as String?,
         sensitive: j['sensitive'] == true,
         dim: j['dim'] as String?,
+        duration: (j['duration'] as num?)?.toDouble(),
+        waveform: j['waveform'] as String?,
       );
 
   String toJsonString() => jsonEncode(toJson());
 
-  NoteAttachment copyWith({String? url, String? data, bool? sensitive}) =>
+  // Opus notes saved before the extension was known carry a generic type
+  static String _normalizeMimeType(String mimeType, String filename) {
+    if (mimeType == 'application/octet-stream' &&
+        filename.toLowerCase().endsWith('.opus')) {
+      return 'audio/ogg';
+    }
+    return mimeType;
+  }
+
+  // Caption and transcript can be cleared by passing clearCaption /
+  // clearTranscript, since null means "keep"
+  NoteAttachment copyWith({
+    String? url,
+    String? data,
+    bool? sensitive,
+    String? caption,
+    bool clearCaption = false,
+    String? transcript,
+    bool clearTranscript = false,
+  }) =>
       NoteAttachment(
         url: url ?? this.url,
         data: data ?? this.data,
@@ -96,8 +133,11 @@ class NoteAttachment {
         sha256: sha256,
         key: key,
         thumbhash: thumbhash,
-        caption: caption,
+        caption: clearCaption ? null : (caption ?? this.caption),
+        transcript: clearTranscript ? null : (transcript ?? this.transcript),
         sensitive: sensitive ?? this.sensitive,
         dim: dim,
+        duration: duration,
+        waveform: waveform,
       );
 }

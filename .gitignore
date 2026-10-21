@@ -49,3 +49,6 @@ app.*.map.json
 /dist
 .env
 zapstore.yaml
+
+# Local macOS signing identity
+macos/Runner/Configs/Signing.local.xcconfig

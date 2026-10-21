@@ -44,7 +44,8 @@ build target=host:
     set -euo pipefail
     case "{{target}}" in
         macos)
-            flutter build macos --release ;;
+            flutter build macos --release
+            ./scripts/macos_verify_signature.sh build/macos/Build/Products/Release/Manent.app ;;
         android)
             flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols/android ;;
         android-bundle)

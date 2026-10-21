@@ -2,7 +2,7 @@ import '../notes/note.dart';
 import 'note_tags.dart';
 
 // Facets derived from data we already store — no write-path changes needed.
-enum NoteKindFilter { all, text, images, videos, files, sensitive }
+enum NoteKindFilter { all, text, images, videos, voice, audio, files, sensitive }
 
 extension NoteKindFilterExt on NoteKindFilter {
   String get label => switch (this) {
@@ -10,6 +10,8 @@ extension NoteKindFilterExt on NoteKindFilter {
         NoteKindFilter.text => 'Text',
         NoteKindFilter.images => 'Images',
         NoteKindFilter.videos => 'Videos',
+        NoteKindFilter.voice => 'Voice notes',
+        NoteKindFilter.audio => 'Audio',
         NoteKindFilter.files => 'Files',
         NoteKindFilter.sensitive => 'Sensitive',
       };
@@ -25,7 +27,9 @@ extension NoteKindFilterExt on NoteKindFilter {
     return switch (this) {
       NoteKindFilter.images => a.isImage,
       NoteKindFilter.videos => a.isVideo,
-      NoteKindFilter.files => !a.isImage && !a.isVideo,
+      NoteKindFilter.voice => a.isVoiceNote,
+      NoteKindFilter.audio => a.isAudio && !a.isVoiceNote,
+      NoteKindFilter.files => !a.isImage && !a.isVideo && !a.isAudio,
       _ => false,
     };
   }
@@ -76,13 +80,14 @@ class NoteFilter {
 }
 
 // Text notes match on their body; file notes carry their text in the
-// attachment caption, plus the filename is worth matching too.
+// attachment caption and transcript, plus the filename is worth matching too.
 bool noteMatchesQuery(DecryptedNote note, String needle) {
   if (needle.isEmpty) return true;
   if (note.text.toLowerCase().contains(needle)) return true;
   final a = note.attachment;
   if (a == null) return false;
   return (a.caption?.toLowerCase().contains(needle) ?? false) ||
+      (a.transcript?.toLowerCase().contains(needle) ?? false) ||
       a.filename.toLowerCase().contains(needle);
 }
 

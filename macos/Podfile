@@ -40,6 +40,25 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
 
+    # whisper_ggml_plus vendors ggml with only the arch/arm sources, so the
+    # x86_64 slice of a universal build both misses the x86 repack kernels and
+    # picks up conflicting non-NEON fallbacks from the arm files. For x86_64
+    # only: drop the arm sources and let GGML_CPU_GENERIC (honored solely by
+    # arch-fallback.h) route every kernel to the generic C implementations.
+    # arm64 keeps the optimized NEON path. Also silence the vendored C++'s
+    # warning flood.
+    if target.name == 'whisper_ggml_plus'
+      target.build_configurations.each do |config|
+        config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+        config.build_settings['EXCLUDED_SOURCE_FILE_NAMES[arch=x86_64]'] =
+          '*/arch/arm/*'
+        config.build_settings['OTHER_CFLAGS[arch=x86_64]'] =
+          '$(inherited) -DGGML_CPU_GENERIC'
+        config.build_settings['OTHER_CPLUSPLUSFLAGS[arch=x86_64]'] =
+          '$(inherited) -DGGML_CPU_GENERIC'
+      end
+    end
+
     # Xcode 26 exports a deployment-target env var for every platform (IPHONEOS,
     # TVOS, WATCHOS, XROS, DRIVERKIT, ANDROID) into each pod build phase. Cargokit
     # (super_native_extensions) inherits them when compiling its Rust host

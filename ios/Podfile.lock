@@ -74,6 +74,8 @@ PODS:
     - Flutter
   - receive_sharing_intent (1.8.1):
     - Flutter
+  - record_ios (1.2.1):
+    - Flutter
   - SDWebImage (5.21.7):
     - SDWebImage/Core (= 5.21.7)
   - SDWebImage/Core (5.21.7)
@@ -98,6 +100,8 @@ PODS:
     - FlutterMacOS
   - wakelock_plus (0.0.1):
     - Flutter
+  - whisper_ggml_plus (1.3.1):
+    - Flutter
 
 DEPENDENCIES:
   - device_info_plus (from `.symlinks/plugins/device_info_plus/ios`)
@@ -112,6 +116,7 @@ DEPENDENCIES:
   - media_kit_video (from `.symlinks/plugins/media_kit_video/ios`)
   - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
   - receive_sharing_intent (from `.symlinks/plugins/receive_sharing_intent/ios`)
+  - record_ios (from `.symlinks/plugins/record_ios/ios`)
   - share_plus (from `.symlinks/plugins/share_plus/ios`)
   - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
   - sqflite_darwin (from `.symlinks/plugins/sqflite_darwin/darwin`)
@@ -119,6 +124,7 @@ DEPENDENCIES:
   - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
   - video_player_avfoundation (from `.symlinks/plugins/video_player_avfoundation/darwin`)
   - wakelock_plus (from `.symlinks/plugins/wakelock_plus/ios`)
+  - whisper_ggml_plus (from `.symlinks/plugins/whisper_ggml_plus/ios`)
 
 SPEC REPOS:
   trunk:
@@ -155,6 +161,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/package_info_plus/ios"
   receive_sharing_intent:
     :path: ".symlinks/plugins/receive_sharing_intent/ios"
+  record_ios:
+    :path: ".symlinks/plugins/record_ios/ios"
   share_plus:
     :path: ".symlinks/plugins/share_plus/ios"
   shared_preferences_foundation:
@@ -169,6 +177,8 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/video_player_avfoundation/darwin"
   wakelock_plus:
     :path: ".symlinks/plugins/wakelock_plus/ios"
+  whisper_ggml_plus:
+    :path: ".symlinks/plugins/whisper_ggml_plus/ios"
 
 SPEC CHECKSUMS:
   device_info_plus: 21fcca2080fbcd348be798aa36c3e5ed849eefbe
@@ -187,6 +197,7 @@ SPEC CHECKSUMS:
   media_kit_video: f3b0d035d89def15cfbbcf7dc2ae278f201e2f83
   package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
   receive_sharing_intent: 222384f00ffe7e952bbfabaa9e3967cb87e5fe00
+  record_ios: 980fd386a97a35987d0fce3dfda4b26a38c90f4c
   SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
   SDWebImageWebPCoder: 0e06e365080397465cc73a7a9b472d8a3bd0f377
   share_plus: 50da8cb520a8f0f65671c6c6a99b3617ed10a58a
@@ -197,6 +208,7 @@ SPEC CHECKSUMS:
   url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
   video_player_avfoundation: 3453f792138786248960ca029747fcd9f318ef52
   wakelock_plus: e29112ab3ef0b318e58cfa5c32326458be66b556
+  whisper_ggml_plus: 3c1196cee818eae5482d3068eee9274922373d79
 
 PODFILE CHECKSUM: fd4447d0b62fdb54ff34a444f11ecff99bbeb64b
 

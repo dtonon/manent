@@ -10,6 +10,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_secure_storage_windows
   irondash_engine_context
   media_kit_video
+  record_windows
   screen_retriever_windows
   share_plus
   super_native_extensions
@@ -18,6 +19,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
+  whisper_ggml_plus
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

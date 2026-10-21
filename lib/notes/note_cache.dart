@@ -5,7 +5,6 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:mime/mime.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ndk/data_layer/repositories/verifiers/bip340_event_verifier.dart';
 import 'package:ndk/domain_layer/entities/broadcast_state.dart';
@@ -16,11 +15,14 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:thumbhash/thumbhash.dart';
 
+import '../audio/audio_analysis.dart';
+import '../audio/waveform.dart';
 import '../auth/nostr_client.dart';
 import '../blossom/blossom_client.dart';
 import '../blossom/file_crypto.dart';
 import 'local_crypto.dart';
 import 'local_key_store.dart';
+import 'mime_lookup.dart';
 import 'note.dart';
 import 'note_attachment.dart';
 import 'notes_database.dart';
@@ -201,12 +203,13 @@ class NoteCache {
   }
 
   // Returns the local id of the new note so callers can track it
-  Future<String?> add(String text) async {
+  // [createdAt] lets a note take another note's place in the timeline
+  Future<String?> add(String text, {DateTime? createdAt}) async {
     if (_localKey == null) return null;
 
     final localContent = await LocalCrypto.encrypt(_localKey!, text);
     final id = _generateId();
-    final now = DateTime.now();
+    final now = createdAt ?? DateTime.now();
 
     if (_db != null) {
       await _db!.insert(
@@ -233,7 +236,7 @@ class NoteCache {
     if (_localKey == null) return null;
 
     filename = p.basename(filename);
-    final mimeType = lookupMimeType(filename) ?? 'application/octet-stream';
+    final mimeType = mimeTypeForFilename(filename);
     final key = FileCrypto.generateKey();
     final encryptedBytes = await FileCrypto.encrypt(key, bytes);
     final sha256 = await FileCrypto.sha256Hex(encryptedBytes);
@@ -246,6 +249,17 @@ class NoteCache {
       final info = await _computeImageInfo(bytes);
       thumbhash = info.thumbhash;
       dim = info.dim;
+    }
+
+    // Duration and peak waveform for audio, when decodable here
+    double? duration;
+    String? waveform;
+    if (mimeType.startsWith('audio/')) {
+      final info = await analyzeAudio(bytes, mimeType);
+      if (info != null) {
+        duration = info.duration;
+        waveform = encodeWaveform(info.peaks);
+      }
     }
 
     final isInline = encryptedBytes.length < 32 * 1024;
@@ -262,6 +276,8 @@ class NoteCache {
         thumbhash: thumbhash,
         caption: caption,
         dim: dim,
+        duration: duration,
+        waveform: waveform,
       );
     } else {
       // Save encrypted file to disk cache for later display
@@ -279,6 +295,8 @@ class NoteCache {
         thumbhash: thumbhash,
         caption: caption,
         dim: dim,
+        duration: duration,
+        waveform: waveform,
       );
     }
 
@@ -456,7 +474,10 @@ class NoteCache {
     _mirrorToOtherServers(localId, url, attachment.sha256, encryptedBytes,
         skip: {uploadedTo!, ...failedHere});
 
-    final updated = attachment.copyWith(url: url);
+    // The caption may have been edited (or transcribed) while the upload ran,
+    // so merge the URL into the freshest attachment we have
+    final current = _map[localId]?.attachment ?? attachment;
+    final updated = current.copyWith(url: url);
 
     // Update local_content with the URL
     if (_localKey != null && _db != null) {
@@ -596,7 +617,41 @@ class NoteCache {
     }
   }
 
+  DecryptedNote? byId(String id) => _map[id];
+
+  // Replaces a file note's transcript; null or blank removes it
+  Future<void> setTranscript(String id, String? text) async {
+    final existing = _map[id];
+    final att = existing?.attachment;
+    if (existing == null || att == null) return;
+    final value = text?.trim();
+    await _persistEdit(
+      id,
+      attachment: value == null || value.isEmpty
+          ? att.copyWith(clearTranscript: true)
+          : att.copyWith(transcript: value),
+    );
+  }
+
+  // Edits a text note's body, or a file note's caption (empty clears it)
   Future<void> update(String id, String newText) async {
+    final existing = _map[id];
+    final att = existing?.attachment;
+    if (existing?.kind == NoteKind.file && att != null) {
+      await _persistEdit(
+        id,
+        attachment: newText.isEmpty
+            ? att.copyWith(clearCaption: true)
+            : att.copyWith(caption: newText),
+      );
+      return;
+    }
+    await _persistEdit(id, newText: newText);
+  }
+
+  // Stores an edited body or attachment, bumps edited_at and republishes
+  Future<void> _persistEdit(String id,
+      {String newText = '', NoteAttachment? attachment}) async {
     if (_localKey == null) return;
     final existing = _map[id];
     if (existing == null || existing.error != null) return;
@@ -604,27 +659,10 @@ class NoteCache {
     final editedAt = DateTime.now();
     final editedAtSeconds = editedAt.millisecondsSinceEpoch ~/ 1000;
 
-    NoteAttachment? updatedAttachment;
-    String localContent;
-
-    if (existing.kind == NoteKind.file && existing.attachment != null) {
-      final att = existing.attachment!;
-      updatedAttachment = NoteAttachment(
-        url: att.url,
-        data: att.data,
-        filename: att.filename,
-        mimeType: att.mimeType,
-        size: att.size,
-        sha256: att.sha256,
-        key: att.key,
-        thumbhash: att.thumbhash,
-        caption: newText.isEmpty ? null : newText,
-      );
-      localContent = await LocalCrypto.encrypt(
-          _localKey!, updatedAttachment.toJsonString());
-    } else {
-      localContent = await LocalCrypto.encrypt(_localKey!, newText);
-    }
+    final localContent = await LocalCrypto.encrypt(
+      _localKey!,
+      attachment != null ? attachment.toJsonString() : newText,
+    );
 
     if (_db != null) {
       await _db!.updateForEdit(
@@ -642,13 +680,13 @@ class NoteCache {
       editedAt: editedAt,
       syncStatus: SyncStatus.pending,
       kind: existing.kind,
-      attachment: updatedAttachment ?? existing.attachment,
+      attachment: attachment ?? existing.attachment,
       sensitive: existing.sensitive,
     );
     _emit();
 
-    if (existing.kind == NoteKind.file) {
-      _publishFileEvent(id, updatedAttachment!, editedAtSeconds);
+    if (attachment != null) {
+      _publishFileEvent(id, attachment, editedAtSeconds);
     } else {
       _publishToRelays(id, newText, editedAtSeconds,
           sensitive: existing.sensitive);
