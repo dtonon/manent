@@ -25,8 +25,7 @@ jobs:
 
       - run: flutter pub get
 
-      # Verbose so build hook errors reach the log; MSBuild swallows them otherwise
-      - run: flutter build windows --release -v
+      - run: flutter build windows --release
 
       - name: Package
         shell: bash
