@@ -17,12 +17,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Linux build dependencies
+        timeout-minutes: 10
         run: |
+          # The Azure apt mirror stalls apt for the whole job when unhealthy
+          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          echo 'Acquire::Retries "3"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' \
+            | sudo tee /etc/apt/apt.conf.d/99-ci >/dev/null
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libstdc++-12-dev \
             libsecret-1-dev libjsoncpp-dev \
-            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
             libmpv-dev libepoxy-dev \
             rpm
           sudo gem install fpm

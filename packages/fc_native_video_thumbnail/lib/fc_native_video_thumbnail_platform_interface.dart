@@ -1,0 +1,89 @@
+import 'dart:typed_data';
+
+import 'package:plugin_platform_interface/plugin_platform_interface.dart';
+
+import 'fc_native_video_thumbnail_method_channel.dart';
+
+enum FcVideoThumbnailTimeUnit {
+  seconds,
+  milliseconds,
+  microseconds,
+}
+
+class FcVideoThumbnailTime {
+  final int value;
+  final FcVideoThumbnailTimeUnit unit;
+
+  FcVideoThumbnailTime(this.value, this.unit);
+
+  Map<String, dynamic> toMap() {
+    var us = -1;
+    switch (unit) {
+      case FcVideoThumbnailTimeUnit.seconds:
+        us = (value * 1e6).toInt();
+        break;
+      case FcVideoThumbnailTimeUnit.milliseconds:
+        us = value * 1000;
+        break;
+      case FcVideoThumbnailTimeUnit.microseconds:
+        us = value;
+        break;
+      default:
+        us = -1;
+        break;
+    }
+    if (us < 0) {
+      return {};
+    }
+    return {
+      'atUs': us,
+    };
+  }
+}
+
+abstract class FcNativeVideoThumbnailPlatform extends PlatformInterface {
+  /// Constructs a FcNativeVideoThumbnailPlatform.
+  FcNativeVideoThumbnailPlatform() : super(token: _token);
+
+  static final Object _token = Object();
+
+  static FcNativeVideoThumbnailPlatform _instance =
+      MethodChannelFcNativeVideoThumbnail();
+
+  /// The default instance of [FcNativeVideoThumbnailPlatform] to use.
+  ///
+  /// Defaults to [MethodChannelFcNativeVideoThumbnail].
+  static FcNativeVideoThumbnailPlatform get instance => _instance;
+
+  /// Platform-specific implementations should set this with their own
+  /// platform-specific class that extends [FcNativeVideoThumbnailPlatform] when
+  /// they register themselves.
+  static set instance(FcNativeVideoThumbnailPlatform instance) {
+    PlatformInterface.verifyToken(instance, _token);
+    _instance = instance;
+  }
+
+  Future<bool> saveThumbnailToFile(
+      {required String srcFile,
+      required String destFile,
+      required int width,
+      required int height,
+      String? format,
+      bool? srcFileUri,
+      FcVideoThumbnailTime? at,
+      int? quality}) {
+    throw UnimplementedError('saveThumbnailToFile() has not been implemented.');
+  }
+
+  Future<Uint8List?> saveThumbnailToBytes(
+      {required String srcFile,
+      required int width,
+      required int height,
+      String? format,
+      bool? srcFileUri,
+      FcVideoThumbnailTime? at,
+      int? quality}) {
+    throw UnimplementedError(
+        'saveThumbnailToBytes() has not been implemented.');
+  }
+}

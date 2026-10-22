@@ -307,10 +307,9 @@ packages:
   fc_native_video_thumbnail:
     dependency: "direct main"
     description:
-      name: fc_native_video_thumbnail
-      sha256: "01dcca96173d2dda14f5cccbb06ec42563999337b7eb442ce2debe4917ca26b4"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/fc_native_video_thumbnail"
+      relative: true
+    source: path
     version: "2.2.0"
   ffi:
     dependency: transitive
