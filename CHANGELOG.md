@@ -4,6 +4,8 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-22
+
 Manent learns to listen. Record voice notes, have them transcribed on your device, and play them back from an inline player, all stored and synced with the same encryption as everything else.
 
 - Record voice notes in a full-screen recorder with a live level meter, pause and resume, a confirmation before discarding, and the screen kept awake while recording
