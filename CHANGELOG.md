@@ -4,14 +4,11 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 
 ## [Unreleased]
 
-- Fix the web build, which failed in the audio decoder build hooks
-- Let the GitHub release workflows attach their Linux and Windows artifacts
-- Ship libmpv with the Windows build so video and audio notes play there
-
 Manent learns to listen. Record voice notes, have them transcribed on your device, and play them back from an inline player, all stored and synced with the same encryption as everything else.
 
 - Record voice notes in a full-screen recorder with a live level meter, pause and resume, a confirmation before discarding, and the screen kept awake while recording
 - Transcribe on the device with whisper: downloadable models, language choice, a prompt built from your own tags so hashtags come out spelled right, and transcription of imported audio as soon as a model is present
+- Run transcription on any x86-64 Linux or Windows machine: the engine ships one build per CPU generation and picks the best one at launch, so a 2011 laptop and a recent desktop both run at their best
 - Show elapsed time, a progress bar and a Cancel button while a note is transcribing, and a Waiting state for notes queued behind it
 - Keep transcripts apart from captions, each with its own edit, copy, re-transcribe and remove actions, and count tags found in transcripts as note tags
 - Play audio notes inline with a real waveform, a draggable cursor, the duration, and a per-note playback speed on voice notes
@@ -25,7 +22,8 @@ Manent learns to listen. Record voice notes, have them transcribed on your devic
 General improvements:
 
 - Crop long notes to two thirds of the viewport with a Read more button
-- Add a GitHub Linux release pipeline producing tar.gz, deb and rpm packages
+- Play video and audio notes on Windows, which now ships its own media library
+- Add a GitHub Linux release pipeline producing tar.gz, deb and rpm packages that run on any current distro, Fedora 41 included
 - Replace the Linux AppImage with a plain tar.gz bundle
 - Standardize the release pipeline (just release / publish / ship, with undo and changelog helpers)
 - Name all release artifacts manent-<version>-<platform>-<arch>
