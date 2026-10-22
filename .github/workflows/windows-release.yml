@@ -27,6 +27,15 @@ jobs:
 
       - run: flutter build windows --release
 
+      # Runtime CPU dispatch needs the ggml core DLLs and the CPU variants next
+      # to the whisper plugin
+      - name: Check whisper plugin bundle
+        shell: bash
+        run: |
+          RELEASE_DIR=$(ls -d build/windows/*/runner/Release)
+          ls "$RELEASE_DIR"/ggml.dll "$RELEASE_DIR"/ggml-base.dll "$RELEASE_DIR"/whisper_ggml_plus.dll
+          ls "$RELEASE_DIR"/ggml-cpu-*.dll
+
       - name: Package
         shell: bash
         run: |

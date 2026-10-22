@@ -41,15 +41,18 @@ jobs:
 
       - run: flutter build linux --release
 
-      # The whisper plugin must stay at the x86-64 baseline; only the ggml CPU
-      # variants next to it may carry AVX code (picked at runtime)
+      # The whisper plugin and the ggml core libraries must stay at the x86-64
+      # baseline; only the ggml CPU variants next to them may carry AVX code
+      # (picked at runtime). Any VEX/EVEX vector instruction is a leak.
       - name: Check whisper plugin CPU baseline
         run: |
           BUNDLE_DIR=$(ls -d build/linux/*/release/bundle)
           ls "$BUNDLE_DIR"/lib/libggml-cpu-*.so
-          if objdump -d "$BUNDLE_DIR/lib/libwhisper_ggml_plus.so" | grep -qE 'vfmadd|ymm'; then
-            echo "libwhisper_ggml_plus.so contains AVX code"; exit 1
-          fi
+          for lib in libwhisper_ggml_plus.so libggml.so libggml-base.so; do
+            if objdump -d "$BUNDLE_DIR/lib/$lib" | grep -qE '\bv[a-z0-9]+\s+.*%[xyz]mm|vzeroupper'; then
+              echo "$lib contains AVX code"; exit 1
+            fi
+          done
 
       - name: Package
         run: |

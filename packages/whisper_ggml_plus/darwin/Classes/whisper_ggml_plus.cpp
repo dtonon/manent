@@ -30,13 +30,8 @@
 #include <android/log.h>
 #endif
 
-#ifdef WHISPER_GGML_PLUS_CPU_DISPATCH
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
+#if defined(WHISPER_GGML_PLUS_CPU_DISPATCH) && !defined(_WIN32)
 #include <dlfcn.h>
-#endif
 #endif
 
 #include "json/json.hpp"
@@ -134,27 +129,12 @@ static std::string default_vad_model_path() {
 }
 
 #ifdef WHISPER_GGML_PLUS_CPU_DISPATCH
-// Directory holding this library: ggml's CPU variants are bundled next to it
+// Directory holding this library: ggml's CPU variants are bundled next to it.
+// On Windows every DLL sits beside the executable, which ggml searches by
+// itself, so only Linux needs the explicit directory.
 static std::string plugin_directory() {
 #ifdef _WIN32
-    HMODULE module = nullptr;
-    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                            reinterpret_cast<LPCWSTR>(&request), &module)) {
-        return std::string();
-    }
-    wchar_t buffer[MAX_PATH];
-    const DWORD length = GetModuleFileNameW(module, buffer, MAX_PATH);
-    if (length == 0 || length >= MAX_PATH) {
-        return std::string();
-    }
-    std::wstring path(buffer, length);
-    const size_t slash = path.find_last_of(L"\\/");
-    if (slash == std::wstring::npos) {
-        return std::string();
-    }
-    path.resize(slash);
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-    return converter.to_bytes(path);
+    return std::string();
 #else
     Dl_info info;
     if (dladdr(reinterpret_cast<void *>(&request), &info) == 0 || info.dli_fname == nullptr) {
@@ -168,15 +148,21 @@ static std::string plugin_directory() {
 #endif
 
 // With dynamic backends nothing is registered until loaded: pick the best CPU
-// variant for this machine once, before any whisper call
-static void load_backends_once() {
+// variant for this machine once, before any whisper call. Returns an error
+// message when no CPU backend could be loaded.
+static std::string load_backends_once() {
 #ifdef WHISPER_GGML_PLUS_CPU_DISPATCH
     static std::once_flag once;
+    static std::string searched;
     std::call_once(once, [] {
-        const std::string dir = plugin_directory();
-        ggml_backend_load_all_from_path(dir.empty() ? nullptr : dir.c_str());
+        searched = plugin_directory();
+        ggml_backend_load_all_from_path(searched.empty() ? nullptr : searched.c_str());
     });
+    if (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU) == nullptr) {
+        return "no ggml CPU backend found in " + (searched.empty() ? std::string("the executable directory") : searched);
+    }
 #endif
+    return std::string();
 }
 
 static std::string cpu_backend_description() {
@@ -227,8 +213,17 @@ static char * json_to_char(const json & json_data) {
 static json transcribe(const json & json_body) {
     std::lock_guard<std::mutex> lock(g_mutex);
 
-    load_backends_once();
     g_should_abort.store(false);
+
+    json json_result;
+    json_result["@type"] = "transcribe";
+
+    const std::string backend_error = load_backends_once();
+    if (!backend_error.empty()) {
+        json_result["@type"] = "error";
+        json_result["message"] = backend_error;
+        return json_result;
+    }
 
     whisper_params params;
     params.n_threads = json_body["threads"];
@@ -247,9 +242,6 @@ static json transcribe(const json & json_body) {
     if (json_body.contains("prompt") && json_body["prompt"].is_string()) {
         params.prompt = json_body["prompt"].get<std::string>();
     }
-
-    json json_result;
-    json_result["@type"] = "transcribe";
 
     if (g_ctx == nullptr || g_model_path != params.model) {
         dispose_context_locked();
@@ -434,7 +426,10 @@ FUNCTION_ATTRIBUTE char *request(char *body) {
             return json_to_char(transcribe(json_body));
         }
         if (json_body["@type"] == "getVersion") {
-            load_backends_once();
+            const std::string backend_error = load_backends_once();
+            if (!backend_error.empty()) {
+                return json_to_char({{"@type", "error"}, {"message", backend_error}});
+            }
             return json_to_char({{"@type", "version"},
                                  {"message", "lib v1.8.3-accel (cpu: " + cpu_backend_description() + ")"}});
         }

@@ -64,10 +64,13 @@ endif()
 # script cannot expand, so the install step fails. EXCLUDE_FROM_ALL keeps their
 # install scripts out of the parent's; the targets still build as dependencies
 # of the plugin, which is bundled through the Flutter bundled-libraries list.
+# ggml only ever appends to this cached list; reset it so a reconfigure in the
+# same build dir cannot reference variants from a previous run
+unset(GGML_AVAILABLE_BACKENDS CACHE)
 add_subdirectory("${GGML_ROOT_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/ggml" EXCLUDE_FROM_ALL)
 
 if(WHISPER_CPU_DISPATCH)
-  # whisper itself stays inside the plugin library
+  # Whisper itself stays inside the plugin library
   set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 endif()
 
