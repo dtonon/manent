@@ -25,7 +25,7 @@ class SttService {
       ? 4
       : max(2, min(6, Platform.numberOfProcessors - 2));
 
-  // The arm64 build targets armv8.2+dotprod (see android/whisper_arch.cmake);
+  // The arm64 build targets armv8.2+dotprod (see the whisper_ggml_plus Android CMake);
   // older CPUs would hit illegal instructions mid-inference, so refuse early
   static bool? _cpuSupported;
   static bool get _androidCpuOk {

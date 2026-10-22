@@ -1701,11 +1701,9 @@ packages:
   whisper_ggml_plus:
     dependency: "direct main"
     description:
-      path: "."
-      ref: "52f3dc5fe1b344597b3bcabf395742932ec0dd12"
-      resolved-ref: "52f3dc5fe1b344597b3bcabf395742932ec0dd12"
-      url: "https://github.com/dtonon/whisper_ggml_plus.git"
-    source: git
+      path: "packages/whisper_ggml_plus"
+      relative: true
+    source: path
     version: "1.5.2"
   win32:
     dependency: transitive
