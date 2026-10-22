@@ -28,9 +28,16 @@ wrapper that every platform compiles.
   under `darwin/Resources`; rebuild them with `darwin/scripts` after touching
   `ggml-metal`.
 - `cmake/whisper_plugin.cmake` — shared CMake logic for Android, Linux and
-  Windows: static ggml + whisper linked into one `whisper_ggml_plus` shared
-  library. Desktop x86-64 targets AVX2 + FMA + F16C; Android arm64 targets
-  armv8.2-a + dotprod + fp16 (checked at runtime by the app).
+  Windows, producing one `whisper_ggml_plus` shared library with whisper
+  inside. On desktop x86-64 (`WHISPER_CPU_DISPATCH`) ggml is built as shared
+  libraries with one CPU backend per instruction-set level (`ggml-cpu-x64`,
+  `-sse42`, `-sandybridge`, `-haswell`, `-skylakex`, ...), all bundled next to
+  the plugin, and the wrapper loads the best one for the running CPU before
+  the first whisper call. A single static baseline either crashed older CPUs
+  with SIGILL or left newer ones slow. The plugin library itself must stay at
+  the x86-64 baseline; the Linux CI checks it for AVX code. Android keeps a
+  static single-variant build targeting armv8.2-a + dotprod + fp16 (checked
+  at runtime by the app).
 - `assets/models/ggml-silero-v6.2.0.bin` — Silero VAD model, extracted by the
   Dart side on non-Apple platforms.
 

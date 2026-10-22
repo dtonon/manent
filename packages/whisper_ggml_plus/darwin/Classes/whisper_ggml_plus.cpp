@@ -4,6 +4,7 @@
 #include "whisper_ggml_plus.h"
 
 #include "whisper/include/whisper.h"
+#include "whisper/ggml/include/ggml-backend.h"
 
 #define DR_WAV_IMPLEMENTATION
 #include "whisper/examples/dr_wav.h"
@@ -27,6 +28,15 @@
 
 #ifdef __ANDROID__
 #include <android/log.h>
+#endif
+
+#ifdef WHISPER_GGML_PLUS_CPU_DISPATCH
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 #endif
 
 #include "json/json.hpp"
@@ -123,6 +133,57 @@ static std::string default_vad_model_path() {
 #endif
 }
 
+#ifdef WHISPER_GGML_PLUS_CPU_DISPATCH
+// Directory holding this library: ggml's CPU variants are bundled next to it
+static std::string plugin_directory() {
+#ifdef _WIN32
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(&request), &module)) {
+        return std::string();
+    }
+    wchar_t buffer[MAX_PATH];
+    const DWORD length = GetModuleFileNameW(module, buffer, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return std::string();
+    }
+    std::wstring path(buffer, length);
+    const size_t slash = path.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) {
+        return std::string();
+    }
+    path.resize(slash);
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+    return converter.to_bytes(path);
+#else
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void *>(&request), &info) == 0 || info.dli_fname == nullptr) {
+        return std::string();
+    }
+    std::string path(info.dli_fname);
+    const size_t slash = path.find_last_of('/');
+    return slash == std::string::npos ? std::string() : path.substr(0, slash);
+#endif
+}
+#endif
+
+// With dynamic backends nothing is registered until loaded: pick the best CPU
+// variant for this machine once, before any whisper call
+static void load_backends_once() {
+#ifdef WHISPER_GGML_PLUS_CPU_DISPATCH
+    static std::once_flag once;
+    std::call_once(once, [] {
+        const std::string dir = plugin_directory();
+        ggml_backend_load_all_from_path(dir.empty() ? nullptr : dir.c_str());
+    });
+#endif
+}
+
+static std::string cpu_backend_description() {
+    ggml_backend_dev_t cpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    return cpu == nullptr ? std::string("none") : std::string(ggml_backend_dev_description(cpu));
+}
+
 static struct whisper_context * g_ctx = nullptr;
 static std::string g_model_path = "";
 static std::mutex g_mutex;
@@ -166,6 +227,7 @@ static char * json_to_char(const json & json_data) {
 static json transcribe(const json & json_body) {
     std::lock_guard<std::mutex> lock(g_mutex);
 
+    load_backends_once();
     g_should_abort.store(false);
 
     whisper_params params;
@@ -372,7 +434,9 @@ FUNCTION_ATTRIBUTE char *request(char *body) {
             return json_to_char(transcribe(json_body));
         }
         if (json_body["@type"] == "getVersion") {
-            return json_to_char({{"@type", "version"}, {"message", "lib v1.8.3-accel"}});
+            load_backends_once();
+            return json_to_char({{"@type", "version"},
+                                 {"message", "lib v1.8.3-accel (cpu: " + cpu_backend_description() + ")"}});
         }
         return json_to_char({{"@type", "error"}, {"message", "method not found"}});
     } catch (const std::exception & e) {

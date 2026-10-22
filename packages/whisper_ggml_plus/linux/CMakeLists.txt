@@ -7,7 +7,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../cmake/whisper_plugin.cmake")
 
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(whisper_ggml_plus_bundled_libraries
-    $<TARGET_FILE:${PROJECT_NAME}>
+    ${WHISPER_PLUGIN_BUNDLED_LIBRARIES}
     PARENT_SCOPE
   )
 endif()

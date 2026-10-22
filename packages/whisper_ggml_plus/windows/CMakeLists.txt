@@ -11,7 +11,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(whisper_ggml_plus_bundled_libraries
-    $<TARGET_FILE:${PROJECT_NAME}>
+    ${WHISPER_PLUGIN_BUNDLED_LIBRARIES}
     PARENT_SCOPE
   )
 endif()

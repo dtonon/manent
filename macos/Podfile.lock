@@ -45,10 +45,8 @@ PODS:
     - FlutterMacOS
   - wakelock_plus (0.0.1):
     - FlutterMacOS
-  - whisper_ggml_plus (1.3.1):
-    - FlutterMacOS
-    - whisper_ggml_plus/no-arc (= 1.3.1)
-  - whisper_ggml_plus/no-arc (1.3.1):
+  - whisper_ggml_plus (1.5.2):
+    - Flutter
     - FlutterMacOS
   - window_manager (0.5.0):
     - FlutterMacOS
@@ -75,7 +73,7 @@ DEPENDENCIES:
   - url_launcher_macos (from `Flutter/ephemeral/.symlinks/plugins/url_launcher_macos/macos`)
   - video_player_avfoundation (from `Flutter/ephemeral/.symlinks/plugins/video_player_avfoundation/darwin`)
   - wakelock_plus (from `Flutter/ephemeral/.symlinks/plugins/wakelock_plus/macos`)
-  - whisper_ggml_plus (from `Flutter/ephemeral/.symlinks/plugins/whisper_ggml_plus/macos`)
+  - whisper_ggml_plus (from `Flutter/ephemeral/.symlinks/plugins/whisper_ggml_plus/darwin`)
   - window_manager (from `Flutter/ephemeral/.symlinks/plugins/window_manager/macos`)
 
 EXTERNAL SOURCES:
@@ -122,7 +120,7 @@ EXTERNAL SOURCES:
   wakelock_plus:
     :path: Flutter/ephemeral/.symlinks/plugins/wakelock_plus/macos
   whisper_ggml_plus:
-    :path: Flutter/ephemeral/.symlinks/plugins/whisper_ggml_plus/macos
+    :path: Flutter/ephemeral/.symlinks/plugins/whisper_ggml_plus/darwin
   window_manager:
     :path: Flutter/ephemeral/.symlinks/plugins/window_manager/macos
 
@@ -148,7 +146,7 @@ SPEC CHECKSUMS:
   url_launcher_macos: f87a979182d112f911de6820aefddaf56ee9fbfd
   video_player_avfoundation: 3453f792138786248960ca029747fcd9f318ef52
   wakelock_plus: 917609be14d812ddd9e9528876538b2263aaa03b
-  whisper_ggml_plus: 679c4d6243cd309dacdbb7ab4901466d3a49f51c
+  whisper_ggml_plus: 7e6e810f17c5d4057fb158129e7c72748110894b
   window_manager: b729e31d38fb04905235df9ea896128991cad99e
 
 PODFILE CHECKSUM: e6392709f968a73a57066627effc45d088843780
