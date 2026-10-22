@@ -20,10 +20,11 @@ class SttService {
   String? _current;
 
   // On big.LITTLE phones extra threads land on the slow little cores and
-  // drag the fast ones down; 4 covers the big/mid clusters
+  // drag the fast ones down; 4 covers the big/mid clusters. Desktop uses the
+  // logical cores so hyperthreads hide memory and conversion latency
   static int get _threads => Platform.isAndroid || Platform.isIOS
       ? 4
-      : max(2, min(6, Platform.numberOfProcessors - 2));
+      : max(2, min(6, Platform.numberOfProcessors));
 
   // The arm64 build targets armv8.2+dotprod (see the whisper_ggml_plus Android CMake);
   // older CPUs would hit illegal instructions mid-inference, so refuse early

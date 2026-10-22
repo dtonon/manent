@@ -247,12 +247,15 @@ static json transcribe(const json & json_body) {
         dispose_context_locked();
 
         whisper_context_params cparams = whisper_context_default_params();
-#ifdef __ANDROID__
-        cparams.use_gpu = false;
-        cparams.flash_attn = false;
-#else
+        // Flash attention pays off on the Metal GPU path; on CPU-only builds
+        // its block-wise kernel does far more fp16 conversions, which are
+        // software routines on CPUs without F16C
+#ifdef GGML_USE_METAL
         cparams.use_gpu = true;
         cparams.flash_attn = true;
+#else
+        cparams.use_gpu = false;
+        cparams.flash_attn = false;
 #endif
 
         g_ctx = whisper_init_from_file_with_params(params.model.c_str(), cparams);
