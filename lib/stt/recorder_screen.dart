@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -40,6 +41,9 @@ class _RecorderScreenState extends State<_RecorderScreen>
   final _recorder = AudioRecorder();
   Timer? _ticker;
   StreamSubscription<Amplitude>? _ampSub;
+  StreamSubscription<Uint8List>? _pcmSub;
+  BytesBuilder? _pcm;
+  Completer<void>? _pcmDone;
   String? _path;
   String? _error;
   bool _recording = false;
@@ -114,8 +118,10 @@ class _RecorderScreenState extends State<_RecorderScreen>
       }
     } catch (e) {
       final hint = !kIsWeb && Platform.isLinux
-          ? ' On Linux, recording requires parecord (pulseaudio-utils) '
-              'and ffmpeg.'
+          ? '\nOn Linux, recording needs the PulseAudio tools: '
+              'sudo dnf install pulseaudio-utils (Fedora), '
+              'sudo apt install pulseaudio-utils (Debian/Ubuntu), '
+              'sudo pacman -S libpulse (Arch).'
           : '';
       if (mounted) {
         setState(() => _error = 'Could not start recording: $e$hint');
@@ -161,15 +167,37 @@ class _RecorderScreenState extends State<_RecorderScreen>
   static bool _androidProbed = false;
   static int? _androidBlockSize;
 
+  static const _sampleRate = 16000;
+
   Future<void> _startRecorder(String path) async {
     // 16 kHz mono WAV is what whisper.cpp expects; no transcoding needed
     RecordConfig config([int? blockSize]) => RecordConfig(
           encoder: AudioEncoder.wav,
-          sampleRate: 16000,
+          sampleRate: _sampleRate,
           numChannels: 1,
           streamBufferSize: blockSize,
         );
 
+    // The Linux backend spawns ffmpeg just to write the WAV header, so take
+    // the raw PCM stream instead and write the header in Dart at stop
+    if (!kIsWeb && Platform.isLinux) {
+      final stream = await _recorder.startStream(const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: _sampleRate,
+        numChannels: 1,
+      ));
+      final pcm = BytesBuilder(copy: false);
+      final done = Completer<void>();
+      _pcm = pcm;
+      _pcmDone = done;
+      _pcmSub = stream.listen(
+        pcm.add,
+        onDone: done.complete,
+        onError: (_) => done.complete(),
+        cancelOnError: true,
+      );
+      return;
+    }
     if (kIsWeb || !Platform.isAndroid) {
       await _recorder.start(config(), path: path);
       return;
@@ -215,16 +243,10 @@ class _RecorderScreenState extends State<_RecorderScreen>
     try {
       // A stopped parecord ignores the kill until it is continued
       if (_paused) await _recorder.resume();
-      final path = await _recorder.stop();
-      if (path == null) throw Exception('no file produced');
-      final file = File(path);
+      final wav = await _finishRecording();
       // Drop the dead air at both ends, then bring the quiet mic input up to
       // a normal level
-      final bytes =
-          normalizeWavInPlace(trimWavSilence(await file.readAsBytes()));
-      try {
-        await file.delete();
-      } catch (_) {}
+      final bytes = normalizeWavInPlace(trimWavSilence(wav));
       if (!mounted) return;
       final now = DateTime.now();
       String two(int v) => v.toString().padLeft(2, '0');
@@ -242,6 +264,33 @@ class _RecorderScreenState extends State<_RecorderScreen>
         });
       }
     }
+  }
+
+  Future<Uint8List> _finishRecording() async {
+    final path = await _recorder.stop();
+    final pcm = _pcm;
+    if (pcm != null) {
+      // The stream closes once parecord has exited; do not wait on it forever
+      await _pcmDone?.future
+          .timeout(const Duration(seconds: 2), onTimeout: () {});
+      await _releasePcmStream();
+      return encodeWavPcm16(pcm.takeBytes(),
+          sampleRate: _sampleRate, channels: 1);
+    }
+    if (path == null) throw Exception('no file produced');
+    final file = File(path);
+    final bytes = await file.readAsBytes();
+    try {
+      await file.delete();
+    } catch (_) {}
+    return bytes;
+  }
+
+  Future<void> _releasePcmStream() async {
+    await _pcmSub?.cancel();
+    _pcmSub = null;
+    _pcm = null;
+    _pcmDone = null;
   }
 
   // The recording keeps running underneath, so Keep loses nothing
@@ -290,6 +339,7 @@ class _RecorderScreenState extends State<_RecorderScreen>
     try {
       await _recorder.stop();
     } catch (_) {}
+    await _releasePcmStream();
     if (_path != null) {
       try {
         await File(_path!).delete();
@@ -303,6 +353,7 @@ class _RecorderScreenState extends State<_RecorderScreen>
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _ampSub?.cancel();
+    _pcmSub?.cancel();
     _releaseWakelock();
     _recorder.dispose();
     super.dispose();
