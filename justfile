@@ -95,12 +95,32 @@ gh_build target:
     gh workflow run {{target}}-release.yml --ref master
     @echo -e "\nFollow the build with: gh run watch"
 
-# Fetch the latest successful github build into dist/: linux | windows
-gh_fetch target:
-    @[[ "{{target}}" == "linux" || "{{target}}" == "windows" ]] || { echo "unknown target: {{target}} (linux | windows)"; exit 1; }
-    rm -rf dist/manent-{{target}}-*
-    gh run download $(gh run list --workflow={{target}}-release.yml --status success -L1 --json databaseId -q '.[0].databaseId') -p 'manent-{{target}}-*' -D dist/
-    @echo -e "\nArtifacts saved in dist/manent-{{target}}-*/"
+# Fetch a github build into dist/ as manent-<version>-<target>-x64.*: linux | windows (default: latest successful run)
+gh_fetch target run_id="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{target}}" == "linux" || "{{target}}" == "windows" ]] || { echo "unknown target: {{target}} (linux | windows)"; exit 1; }
+    id="{{run_id}}"
+    [[ -n "$id" ]] || id=$(gh run list --workflow={{target}}-release.yml --status success -L1 --json databaseId -q '.[0].databaseId')
+    [[ -n "$id" ]] || { echo "no successful {{target}} run found"; exit 1; }
+    tmp=$(mktemp -d)
+    gh run download "$id" -n manent-{{target}}-x64 -D "$tmp"
+    rm -f dist/manent-{{version}}-{{target}}-x64.*
+    mv "$tmp"/manent-{{version}}-{{target}}-x64.* dist/
+    rm -rf "$tmp"
+    ls -1 dist/manent-{{version}}-{{target}}-x64.*
+
+# Wait for the github build triggered by the current tag and fetch it into dist/: linux | windows
+gh_wait target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{target}}" == "linux" || "{{target}}" == "windows" ]] || { echo "unknown target: {{target}} (linux | windows)"; exit 1; }
+    tag="v{{version}}"
+    id=$(gh run list --workflow={{target}}-release.yml --event push --branch "$tag" -L1 --json databaseId -q '.[0].databaseId')
+    [[ -n "$id" ]] || { echo "no {{target}} run for $tag, dispatch one with: just gh_build {{target}}"; exit 1; }
+    echo "Waiting for the {{target}} build of $tag (run $id)..."
+    gh run watch "$id" --exit-status > /dev/null || { echo "{{target}} build failed: $(gh run view "$id" --json url -q .url)"; exit 1; }
+    just gh_fetch {{target}} "$id"
 
 # Second isolated instance (own bundle id → own data dir/prefs), handy for sync tests
 test_instance_macos:
@@ -111,7 +131,7 @@ test_instance_macos:
     codesign --force --deep --sign - dist/Manent-Test.app
     open dist/Manent-Test.app
 
-# Build the local release artifacts as dist/manent-<version>-* (linux/windows come from CI on tag push)
+# Build the local release artifacts as dist/manent-<version>-* (linux/windows come from CI, see gh_wait)
 dist: (build "macos") (build "android") (build "web")
     #!/usr/bin/env bash
     set -euo pipefail
@@ -158,7 +178,7 @@ release VERSION:
     git tag -a "v$v" -m "v$v"
     echo "Released v$v, push with: git push --follow-tags"
 
-# Create the GitHub release for the current version with the local artifacts attached; `just publish draft` for a draft
+# Create the GitHub release for the current version with all the artifacts attached; `just publish draft` for a draft
 publish MODE="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -168,7 +188,9 @@ publish MODE="":
     [[ -n "$(git ls-remote --tags origin "$tag")" ]] || { echo "tag $tag not on origin, run: git push --follow-tags"; exit 1; }
     notes="$(awk -v h="## [$v]" 'index($0,h)==1{f=1;next} /^## \[/{f=0} f' CHANGELOG.md)"
     just dist
-    # The tag-triggered workflows may have created the release already to attach linux/windows artifacts
+    just gh_wait linux
+    just gh_wait windows
+    ls -1 dist/manent-"$v"-*
     if gh release view "$tag" > /dev/null 2>&1; then
         gh release edit "$tag" --title "$tag" --notes "$notes"
         gh release upload "$tag" dist/manent-"$v"-* --clobber
@@ -178,12 +200,22 @@ publish MODE="":
         gh release create "$tag" dist/manent-"$v"-* --title "$tag" --notes "$notes" $draft
     fi
 
-# Release, push and publish in one go; `just ship X.Y.Z draft` for a draft release
-ship VERSION MODE="":
+# Release, push, publish and deploy the web app in one go: `just ship X.Y.Z [draft] [host]`
+ship VERSION MODE="" HOST="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mode="{{MODE}}"; host="{{HOST}}"
+    [[ "$mode" == "draft" || -z "$mode" ]] || { host="$mode"; mode=""; }
     just release {{VERSION}}
     git push --follow-tags
-    just publish {{MODE}}
-    @echo -e "\nRemember to deploy the web app: just deploy web <host>"
+    just publish "$mode"
+    if [[ -n "$host" ]]; then
+        echo -e "\nDeploying the web app to $host..."
+        rsync -av --delete --progress build/web/ "$host":~/manent/
+        just purge-web-cache
+    else
+        echo -e "\nRemember to deploy the web app: just deploy web <host>"
+    fi
 
 # Undo the last release: `just undo release` (local only) | `just undo ship` (also deletes the github release and remote tag)
 undo action:
