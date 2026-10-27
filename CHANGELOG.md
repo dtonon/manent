@@ -4,6 +4,12 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 
 ## [Unreleased]
 
+A Linux-only maintenance release; nothing changes on the other platforms.
+
+- Record voice notes without ffmpeg: the recording is captured as raw audio and the WAV file is written by the app itself
+- Declare the PulseAudio tools (pulseaudio-utils) as a dependency of the deb and rpm packages, so a fresh install can record right away
+- Point to the right package to install when the recorder cannot find the PulseAudio tools
+
 ## [3.0.0] - 2026-10-22
 
 Manent learns to listen. Record voice notes, have them transcribed on your device, and play them back from an inline player, all stored and synced with the same encryption as everything else.
