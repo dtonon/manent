@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 // Minimal RIFF/WAVE reader: integer PCM (8/16/24/32-bit) and 32-bit float,
 // any channel count. Samples are read lazily from the data chunk.
+// encodeWavPcm16 at the bottom is the matching writer for 16-bit PCM.
 class WavPcm {
   final int sampleRate;
   final int channels;
@@ -279,4 +280,36 @@ Uint8List trimWavSilence(
   ob.setUint32(4, out.length - 8, Endian.little);
   ob.setUint32(start - 4, dataLen, Endian.little);
   return out;
+}
+
+// Wraps raw little-endian 16-bit PCM in a 44-byte WAV header. A trailing
+// partial frame (a capture cut mid-sample) is dropped.
+Uint8List encodeWavPcm16(Uint8List pcm,
+    {required int sampleRate, required int channels}) {
+  const bits = 16;
+  final blockAlign = channels * bits ~/ 8;
+  final dataLen = pcm.length - pcm.length % blockAlign;
+  final out = ByteData(44 + dataLen);
+  void tag(int offset, String s) {
+    for (var i = 0; i < 4; i++) {
+      out.setUint8(offset + i, s.codeUnitAt(i));
+    }
+  }
+
+  tag(0, 'RIFF');
+  out.setUint32(4, 36 + dataLen, Endian.little);
+  tag(8, 'WAVE');
+  tag(12, 'fmt ');
+  out.setUint32(16, 16, Endian.little);
+  out.setUint16(20, 1, Endian.little);
+  out.setUint16(22, channels, Endian.little);
+  out.setUint32(24, sampleRate, Endian.little);
+  out.setUint32(28, sampleRate * blockAlign, Endian.little);
+  out.setUint16(32, blockAlign, Endian.little);
+  out.setUint16(34, bits, Endian.little);
+  tag(36, 'data');
+  out.setUint32(40, dataLen, Endian.little);
+  final bytes = out.buffer.asUint8List();
+  bytes.setRange(44, 44 + dataLen, pcm);
+  return bytes;
 }

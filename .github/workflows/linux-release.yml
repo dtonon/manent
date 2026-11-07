@@ -71,12 +71,12 @@ jobs:
           fpm -s dir -t deb -n manent -v "$VERSION" -a native \
             --description "Sync encrypted notes and files between devices via Nostr" \
             --url "https://github.com/dtonon/manent" \
-            --depends libmpv2 --depends libsecret-1-0 \
+            --depends libmpv2 --depends libsecret-1-0 --depends pulseaudio-utils \
             -p "manent-$VERSION-linux-x64.deb" -C pkg usr
           fpm -s dir -t rpm -n manent -v "$VERSION" -a native \
             --description "Sync encrypted notes and files between devices via Nostr" \
             --url "https://github.com/dtonon/manent" \
-            --depends mpv-libs --depends libsecret \
+            --depends mpv-libs --depends libsecret --depends pulseaudio-utils \
             -p "manent-$VERSION-linux-x64.rpm" -C pkg usr
 
       - uses: actions/upload-artifact@v4

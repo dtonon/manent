@@ -80,12 +80,12 @@ package target=host: (build target)
     fpm -f -s dir -t deb -n manent -v "{{version}}" -a native \
       --description "Sync encrypted notes and files between devices via Nostr" \
       --url "https://github.com/dtonon/manent" \
-      --depends libmpv2 --depends libsecret-1-0 \
+      --depends libmpv2 --depends libsecret-1-0 --depends pulseaudio-utils \
       -p dist/manent-{{version}}-linux-x64.deb -C "$PKG" usr
     fpm -f -s dir -t rpm -n manent -v "{{version}}" -a native \
       --description "Sync encrypted notes and files between devices via Nostr" \
       --url "https://github.com/dtonon/manent" \
-      --depends mpv-libs --depends libsecret \
+      --depends mpv-libs --depends libsecret --depends pulseaudio-utils \
       -p dist/manent-{{version}}-linux-x64.rpm -C "$PKG" usr
     echo -e "\nArtifacts saved in dist/manent-{{version}}-linux-x64.{deb,rpm}"
 

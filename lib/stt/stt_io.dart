@@ -9,6 +9,8 @@ import 'stt_model_manager.dart';
 import 'stt_service.dart';
 import 'stt_settings_sheet.dart';
 
+export 'linux_parecord.dart' show addParecordToPath;
+
 const sttAvailable = true;
 
 // WAV, mp3 and Ogg Vorbis: anything toSpeechWav can turn into 16 kHz mono

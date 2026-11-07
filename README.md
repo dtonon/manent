@@ -56,13 +56,13 @@ This patch is overwritten by `flutter upgrade` and must be reapplied until Flutt
 
 ### Linux build
 
-`just build_linux` produces a plain tar.gz of the Flutter release bundle, the same output as the GitHub pipeline (`just gh_build_linux`). Beyond the standard Flutter toolchain it needs the dev headers for libmpv and libepoxy (`media_kit_video`) and FFmpeg (`fc_native_video_thumbnail`):
+`just build_linux` produces a plain tar.gz of the Flutter release bundle, the same output as the GitHub pipeline (`just gh_build_linux`). Beyond the standard Flutter toolchain it needs the dev headers for libmpv and libepoxy (`media_kit_video`):
 
-- **Fedora:** `sudo dnf install mpv-devel libepoxy-devel ffmpeg-free-devel`
-- **Debian/Ubuntu:** `sudo apt install libmpv-dev libepoxy-dev libavformat-dev libavcodec-dev libavutil-dev libswscale-dev`
+- **Fedora:** `sudo dnf install mpv-devel libepoxy-devel`
+- **Debian/Ubuntu:** `sudo apt install libmpv-dev libepoxy-dev`
 
 The full list, including the generic Flutter desktop dependencies, is in `.github/workflows/linux-release.yml`.
 
 `just package_linux` additionally wraps the bundle into `.deb` and `.rpm` packages, same as the GitHub pipeline; it needs [fpm](https://fpm.readthedocs.io) (`gem install fpm`; building the `.deb` on Fedora also needs `dnf install dpkg`).
 
-**Runtime dependency:** the app links the system libmpv and FFmpeg libraries, so the target machine needs `mpv-libs` (Fedora) or `libmpv2` (Debian/Ubuntu), which pulls in the FFmpeg libraries with it.
+**Runtime dependencies:** the app links the system libmpv, so the target machine needs `mpv-libs` (Fedora) or `libmpv2` (Debian/Ubuntu); video thumbnails also go through it. Voice recording spawns `parecord` and `pactl`, so it needs `pulseaudio-utils` (Fedora, Debian/Ubuntu) or `libpulse` (Arch), which work with PipeWire as well.
