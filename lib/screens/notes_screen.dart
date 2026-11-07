@@ -41,6 +41,7 @@ import '../notes/note.dart';
 import '../notes/mime_lookup.dart';
 import '../notes/note_attachment.dart';
 import '../notes/note_cache.dart';
+import '../notes/quote_segments.dart';
 import '../notes/sync_diagnostics.dart';
 import '../search/note_filter.dart';
 import '../search/note_search.dart';
@@ -3517,8 +3518,9 @@ class _LinkedTextState extends State<LinkedText> {
     caseSensitive: false,
   );
 
-  late TextSpan _textSpan;
+  late List<({bool quote, TextSpan span})> _segments;
   final List<TapGestureRecognizer> _recognizers = [];
+  final _selectionDelegate = _LineJoinSelectionDelegate();
 
   static bool get _isDesktopOrWeb {
     if (kIsWeb) {
@@ -3546,8 +3548,16 @@ class _LinkedTextState extends State<LinkedText> {
   }
 
   void _rebuild() {
-    _textSpan = TextSpan(children: _buildSpans(widget.text, widget.style));
+    _segments = [
+      for (final s in splitQuoteSegments(widget.text))
+        (
+          quote: s.quote,
+          span: TextSpan(children: _buildSpans(s.text, widget.style)),
+        ),
+    ];
   }
+
+  bool get _hasQuote => _segments.any((s) => s.quote);
 
   void _disposeRecognizers() {
     for (final r in _recognizers) {
@@ -3559,6 +3569,7 @@ class _LinkedTextState extends State<LinkedText> {
   @override
   void dispose() {
     _disposeRecognizers();
+    _selectionDelegate.dispose();
     super.dispose();
   }
 
@@ -3622,9 +3633,36 @@ class _LinkedTextState extends State<LinkedText> {
     return spans;
   }
 
+  // One Text.rich per segment; quote segments get a left accent border
+  Widget _body(BuildContext context, {required bool selectable}) {
+    if (!_hasQuote) return Text.rich(_segments.single.span);
+    final mc = context.mc;
+    final column = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final s in _segments)
+          if (s.quote)
+            Container(
+              padding: const EdgeInsets.only(left: 10),
+              decoration: const BoxDecoration(
+                border: Border(left: BorderSide(color: accent, width: 3)),
+              ),
+              child: DefaultTextStyle.merge(
+                style: TextStyle(color: mc.secondaryText),
+                child: Text.rich(s.span),
+              ),
+            )
+          else
+            Text.rich(s.span),
+      ],
+    );
+    return selectable
+        ? SelectionContainer(delegate: _selectionDelegate, child: column)
+        : column;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final span = _textSpan;
     if (_isDesktopOrWeb) {
       return DefaultSelectionStyle(
         selectionColor: textSelectionColor,
@@ -3632,17 +3670,33 @@ class _LinkedTextState extends State<LinkedText> {
           key: widget.selectionAreaKey,
           onSelectionChanged: widget.onSelectionChanged,
           contextMenuBuilder: (_, __) => const SizedBox.shrink(),
-          child: Text.rich(span),
+          child: _body(context, selectable: true),
         ),
       );
     }
     if (widget.selectionMode) {
       return DefaultSelectionStyle(
         selectionColor: textSelectionColor,
-        child: SelectableText.rich(span),
+        // SelectableText holds a single span, so quoted notes need SelectionArea
+        child: _hasQuote
+            ? SelectionArea(child: _body(context, selectable: true))
+            : SelectableText.rich(_segments.single.span),
       );
     }
-    return Text.rich(span);
+    return _body(context, selectable: false);
+  }
+}
+
+// Selections spanning several Text widgets are joined with no separator;
+// restore the line break between segments
+class _LineJoinSelectionDelegate extends StaticSelectionContainerDelegate {
+  @override
+  SelectedContent? getSelectedContent() {
+    final parts = [
+      for (final s in selectables)
+        if (s.getSelectedContent() case final SelectedContent c) c.plainText,
+    ];
+    return parts.isEmpty ? null : SelectedContent(plainText: parts.join('\n'));
   }
 }
 
