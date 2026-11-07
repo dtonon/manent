@@ -14,6 +14,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../audio/wav_decoder.dart';
 import '../theme.dart';
+import 'linux_parecord.dart';
 
 typedef Recording = ({Uint8List bytes, String name});
 
@@ -78,8 +79,22 @@ class _RecorderScreenState extends State<_RecorderScreen>
     if (_recording && !_paused) _stop();
   }
 
+  static const _linuxInstallHint =
+      '\nOn Linux, recording needs the PulseAudio tools: '
+      'sudo dnf install pulseaudio-utils (Fedora), '
+      'sudo apt install pulseaudio-utils (Debian/Ubuntu), '
+      'sudo pacman -S libpulse (Arch).';
+
   Future<void> _start() async {
     try {
+      if (!kIsWeb && Platform.isLinux && !parecordInstalled()) {
+        if (mounted) {
+          setState(() =>
+              _error = 'Could not start recording: parecord is not installed.'
+                  '$_linuxInstallHint');
+        }
+        return;
+      }
       if (!await _recorder.hasPermission()) {
         if (mounted) {
           setState(() => _error = 'Microphone permission denied.');
@@ -117,12 +132,7 @@ class _RecorderScreenState extends State<_RecorderScreen>
         _stop();
       }
     } catch (e) {
-      final hint = !kIsWeb && Platform.isLinux
-          ? '\nOn Linux, recording needs the PulseAudio tools: '
-              'sudo dnf install pulseaudio-utils (Fedora), '
-              'sudo apt install pulseaudio-utils (Debian/Ubuntu), '
-              'sudo pacman -S libpulse (Arch).'
-          : '';
+      final hint = !kIsWeb && Platform.isLinux ? _linuxInstallHint : '';
       if (mounted) {
         setState(() => _error = 'Could not start recording: $e$hint');
       }

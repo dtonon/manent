@@ -27,12 +27,14 @@ import 'screens/login_screen.dart';
 import 'screens/notes_screen.dart';
 import 'search/note_search.dart';
 import 'search/search_ui.dart';
+import 'stt/stt.dart' show addParecordToPath;
 import 'theme.dart';
 import 'widgets/gif_player.dart';
 import 'widgets/media_kit_video_screen.dart';
 import 'widgets/video_player_screen.dart';
 
 void main(List<String> args) async {
+  addParecordToPath();
   WidgetsFlutterBinding.ensureInitialized();
   await _installBundledRoots();
   // media_kit plays video and audio on Linux and Windows; other platforms use

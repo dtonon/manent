@@ -5,6 +5,8 @@ import '../notes/note_attachment.dart';
 
 const sttAvailable = false;
 
+void addParecordToPath() {}
+
 bool canTranscribe(NoteAttachment attachment) => false;
 
 Future<({Uint8List bytes, String name})?> recordVoiceNote(
