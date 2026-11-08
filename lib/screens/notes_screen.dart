@@ -3369,10 +3369,11 @@ class _VideoThumbnail extends StatefulWidget {
 }
 
 class _VideoThumbnailState extends State<_VideoThumbnail> {
-  // sha256 -> thumbnail bytes (null = generated but none available)
-  static final Map<String, Uint8List?> _cache = {};
+  // sha256 -> thumbnail bytes and aspect ratio (bytes null = none available)
+  static final Map<String, ({Uint8List? bytes, double ratio})> _cache = {};
 
   Uint8List? _thumb;
+  double _ratio = 16 / 9;
 
   @override
   void initState() {
@@ -3382,28 +3383,52 @@ class _VideoThumbnailState extends State<_VideoThumbnail> {
 
   Future<void> _load() async {
     final key = widget.attachment.sha256;
-    if (_cache.containsKey(key)) {
-      _thumb = _cache[key];
+    final cached = _cache[key];
+    if (cached != null) {
+      _thumb = cached.bytes;
+      _ratio = cached.ratio;
       return;
     }
     final bytes = await NoteCache.instance.getFileBytes(widget.attachment);
     if (bytes == null) return;
     final thumb =
         await generateVideoThumbnail(bytes, widget.attachment.filename);
-    _cache[key] = thumb;
+    final ratio = thumb == null ? 16 / 9 : await _imageRatio(thumb);
+    _cache[key] = (bytes: thumb, ratio: ratio);
     if (!mounted) return;
-    setState(() => _thumb = thumb);
+    setState(() {
+      _thumb = thumb;
+      _ratio = ratio;
+    });
+  }
+
+  // Reads only the image header, no full decode
+  static Future<double> _imageRatio(Uint8List bytes) async {
+    try {
+      final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+      final descriptor = await ui.ImageDescriptor.encoded(buffer);
+      final ratio = descriptor.width / descriptor.height;
+      descriptor.dispose();
+      buffer.dispose();
+      return ratio.isFinite && ratio > 0 ? ratio : 16 / 9;
+    } catch (_) {
+      return 16 / 9;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final thumb = _thumb;
     if (thumb != null) {
-      return Image.memory(
-        thumb,
-        fit: BoxFit.fitWidth,
-        width: double.infinity,
-        semanticLabel: widget.attachment.filename,
+      // No stored dim for videos: the box gets its size once generated
+      return _CappedMedia(
+        aspectRatio: _ratio,
+        backdrop: _MediaBackdrop.bytes(thumb),
+        child: Image.memory(
+          thumb,
+          fit: BoxFit.contain,
+          semanticLabel: widget.attachment.filename,
+        ),
       );
     }
     return const AspectRatio(
@@ -4424,6 +4449,7 @@ class _NoteCardState extends State<_NoteCard>
         isRevealed: _isRevealed,
         onReveal: () => setState(() => _isRevealed = true),
         onHide: () => setState(() => _isRevealed = false),
+        onOpenImage: () => _openImageViewer(context),
       );
     }
 
@@ -4655,6 +4681,7 @@ class _FileNoteContent extends StatelessWidget {
   final bool isRevealed;
   final VoidCallback onReveal;
   final VoidCallback onHide;
+  final VoidCallback onOpenImage;
 
   const _FileNoteContent({
     required this.note,
@@ -4669,6 +4696,7 @@ class _FileNoteContent extends StatelessWidget {
     required this.isRevealed,
     required this.onReveal,
     required this.onHide,
+    required this.onOpenImage,
   });
 
   @override
@@ -4861,6 +4889,7 @@ class _FileNoteContent extends StatelessWidget {
       bg = _ThumbhashImage(
         thumbhash: attachment.thumbhash!,
         filename: attachment.filename,
+        aspectRatio: attachment.aspectRatio,
       );
     } else {
       bg = AspectRatio(
@@ -5009,52 +5038,80 @@ class _FileNoteContent extends StatelessWidget {
   }
 
   Widget _buildImageContent(ManentColors mc, NoteAttachment attachment) {
+    final ratio = attachment.aspectRatio;
+    final preview = FutureBuilder<Uint8List?>(
+      future: imageBytesFuture,
+      builder: (ctx, snap) {
+        if (snap.hasData && snap.data != null) {
+          // GIFs: on web play inline in the card (still → play → controls);
+          // elsewhere show a still + play icon that opens the viewer.
+          if (attachment.isGif) {
+            if (kIsWeb) {
+              return GifPlayer(
+                bytes: snap.data!,
+                semanticLabel: attachment.filename,
+                inline: true,
+              );
+            }
+            return _GifStillImage(
+              bytes: snap.data!,
+              cacheKey: attachment.sha256,
+              filename: attachment.filename,
+              aspectRatio: ratio,
+            );
+          }
+          if (ratio == null) {
+            // Old notes without dim or thumbhash: natural size, no cap
+            return Image.memory(
+              snap.data!,
+              fit: BoxFit.fitWidth,
+              width: double.infinity,
+              semanticLabel: attachment.filename,
+            );
+          }
+          return _CappedMedia(
+            aspectRatio: ratio,
+            backdrop: _MediaBackdrop.bytes(snap.data!),
+            child: Image.memory(
+              snap.data!,
+              fit: BoxFit.contain,
+              semanticLabel: attachment.filename,
+            ),
+          );
+        }
+        // Thumbhash placeholder while loading
+        if (attachment.thumbhash != null) {
+          return _ThumbhashImage(
+            thumbhash: attachment.thumbhash!,
+            filename: attachment.filename,
+            aspectRatio: ratio,
+          );
+        }
+        return _CappedMedia(
+          aspectRatio: ratio ?? 16 / 9,
+          child: const Center(
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      },
+    );
+    // Web GIFs play inline with their own controls
+    final isInlineGif = kIsWeb && attachment.isGif;
     final image = ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: Stack(
         children: [
-          FutureBuilder<Uint8List?>(
-            future: imageBytesFuture,
-            builder: (ctx, snap) {
-              if (snap.hasData && snap.data != null) {
-                // GIFs: on web play inline in the card (still → play → controls);
-                // elsewhere show a still + play icon that opens the viewer.
-                if (attachment.isGif) {
-                  if (kIsWeb) {
-                    return GifPlayer(
-                      bytes: snap.data!,
-                      semanticLabel: attachment.filename,
-                      inline: true,
-                    );
-                  }
-                  return _GifStillImage(
-                    bytes: snap.data!,
-                    cacheKey: attachment.sha256,
-                    filename: attachment.filename,
-                  );
-                }
-                return Image.memory(
-                  snap.data!,
-                  fit: BoxFit.fitWidth,
-                  width: double.infinity,
-                  semanticLabel: attachment.filename,
-                );
-              }
-              // Thumbhash placeholder while loading
-              if (attachment.thumbhash != null) {
-                return _ThumbhashImage(
-                  thumbhash: attachment.thumbhash!,
-                  filename: attachment.filename,
-                );
-              }
-              return const AspectRatio(
-                aspectRatio: 16 / 9,
-                child: Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              );
-            },
-          ),
+          if (isInlineGif)
+            preview
+          else
+            MergeSemantics(
+              child: Semantics(
+                button: true,
+                label: 'Open image',
+                onTap: onOpenImage,
+                child: preview,
+              ),
+            ),
           Positioned(
             bottom: 16,
             right: 16,
@@ -5280,11 +5337,111 @@ class _FileNoteContent extends StatelessWidget {
   }
 }
 
+// Tall media in the list is capped to this fraction of the screen height and
+// shown whole, with a blurred copy filling the side strips
+const _maxMediaHeightFraction = 0.6;
+
+// Full-width box for list media, height reserved from the aspect ratio before
+// loading. The child must fill the box (BoxFit.contain); the backdrop only
+// shows when the cap leaves side strips, so transparent images keep the card
+// colour behind them.
+class _CappedMedia extends StatelessWidget {
+  final double aspectRatio;
+  final Widget child;
+  final Widget? backdrop;
+
+  const _CappedMedia({
+    required this.aspectRatio,
+    required this.child,
+    this.backdrop,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final maxHeight =
+        MediaQuery.sizeOf(context).height * _maxMediaHeightFraction;
+    return LayoutBuilder(builder: (context, constraints) {
+      final width = constraints.maxWidth;
+      final natural = width / aspectRatio;
+      final capped = natural > maxHeight;
+      final box = SizedBox(
+        width: width,
+        height: capped ? maxHeight : natural,
+        child: child,
+      );
+      if (!capped || backdrop == null) return box;
+      return Stack(
+        children: [Positioned.fill(child: backdrop!), box],
+      );
+    });
+  }
+}
+
+Future<ui.Image?> _decodeThumbhash(String thumbhash) async {
+  try {
+    final result = thumbHashToRGBA(base64Decode(thumbhash));
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      Uint8List.fromList(result.rgba),
+      result.width,
+      result.height,
+      ui.PixelFormat.rgba8888,
+      completer.complete,
+    );
+    return await completer.future;
+  } catch (_) {
+    return null;
+  }
+}
+
+// The media itself, blurred and stretched over the side strips of a capped box
+class _MediaBackdrop extends StatelessWidget {
+  final Widget child;
+
+  const _MediaBackdrop({required this.child});
+
+  // Tiny decode of encoded bytes: cheap, and already soft once stretched
+  _MediaBackdrop.bytes(Uint8List bytes)
+      : child = Image(
+          image: ResizeImage(MemoryImage(bytes), width: 32),
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+          gaplessPlayback: true,
+        );
+
+  @override
+  Widget build(BuildContext context) {
+    // Washed out towards the theme so the main picture stands out
+    final veil = Theme.of(context).brightness == Brightness.dark
+        ? Colors.black.withValues(alpha: 0.4)
+        : Colors.white.withValues(alpha: 0.4);
+    return ExcludeSemantics(
+      child: ClipRect(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: child,
+            ),
+            ColoredBox(color: veil),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ThumbhashImage extends StatefulWidget {
   final String thumbhash;
   final String filename;
+  final double? aspectRatio;
 
-  const _ThumbhashImage({required this.thumbhash, required this.filename});
+  const _ThumbhashImage({
+    required this.thumbhash,
+    required this.filename,
+    this.aspectRatio,
+  });
 
   @override
   State<_ThumbhashImage> createState() => _ThumbhashImageState();
@@ -5296,24 +5453,13 @@ class _ThumbhashImageState extends State<_ThumbhashImage> {
   @override
   void initState() {
     super.initState();
-    _decode();
-  }
-
-  Future<void> _decode() async {
-    try {
-      final hashBytes = base64Decode(widget.thumbhash);
-      final result = thumbHashToRGBA(hashBytes);
-      final completer = Completer<ui.Image>();
-      ui.decodeImageFromPixels(
-        Uint8List.fromList(result.rgba),
-        result.width,
-        result.height,
-        ui.PixelFormat.rgba8888,
-        completer.complete,
-      );
-      final img = await completer.future;
-      if (mounted) setState(() => _image = img);
-    } catch (_) {}
+    _decodeThumbhash(widget.thumbhash).then((img) {
+      if (mounted) {
+        setState(() => _image = img);
+      } else {
+        img?.dispose();
+      }
+    });
   }
 
   @override
@@ -5324,22 +5470,24 @@ class _ThumbhashImageState extends State<_ThumbhashImage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_image == null) {
-      return const AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+    final image = _image;
+    final ratio = widget.aspectRatio ??
+        (image != null ? image.width / image.height : 16 / 9);
+    if (image == null) {
+      return _CappedMedia(
+        aspectRatio: ratio,
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
     return Semantics(
       label: widget.filename,
       image: true,
-      child: AspectRatio(
-        aspectRatio: _image!.width / _image!.height,
-        child: RawImage(
-          image: _image,
-          fit: BoxFit.fitWidth,
-          width: double.infinity,
+      child: _CappedMedia(
+        aspectRatio: ratio,
+        backdrop: _MediaBackdrop(
+          child: RawImage(image: image, fit: BoxFit.cover),
         ),
+        child: RawImage(image: image, fit: BoxFit.contain),
       ),
     );
   }
@@ -5470,11 +5618,13 @@ class _GifStillImage extends StatefulWidget {
   final Uint8List bytes;
   final String cacheKey; // sha256
   final String filename;
+  final double? aspectRatio;
 
   const _GifStillImage({
     required this.bytes,
     required this.cacheKey,
     required this.filename,
+    this.aspectRatio,
   });
 
   @override
@@ -5521,10 +5671,12 @@ class _GifStillImageState extends State<_GifStillImage> {
   @override
   Widget build(BuildContext context) {
     final frame = _frame;
+    final ratio = widget.aspectRatio ??
+        (frame != null ? frame.width / frame.height : 16 / 9);
     if (frame == null) {
-      return const AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      return _CappedMedia(
+        aspectRatio: ratio,
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
     return Stack(
@@ -5533,13 +5685,12 @@ class _GifStillImageState extends State<_GifStillImage> {
         Semantics(
           label: widget.filename,
           image: true,
-          child: AspectRatio(
-            aspectRatio: frame.width / frame.height,
-            child: RawImage(
-              image: frame,
-              fit: BoxFit.fitWidth,
-              width: double.infinity,
+          child: _CappedMedia(
+            aspectRatio: ratio,
+            backdrop: _MediaBackdrop(
+              child: RawImage(image: frame, fit: BoxFit.cover),
             ),
+            child: RawImage(image: frame, fit: BoxFit.contain),
           ),
         ),
         if (_animated) ...[

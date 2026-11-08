@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:thumbhash/thumbhash.dart' show thumbHashToApproximateAspectRatio;
+
 const rasterImageMimeTypes = {
   'image/jpeg',
   'image/png',
@@ -46,6 +48,23 @@ class NoteAttachment {
   bool get isGif => mimeType == 'image/gif';
   bool get isVideo => mimeType.startsWith('video/');
   bool get isAudio => mimeType.startsWith('audio/');
+
+  // Width / height from dim, else approximated from the thumbhash
+  double? get aspectRatio {
+    final parts = dim?.split('x');
+    if (parts != null && parts.length == 2) {
+      final w = int.tryParse(parts[0]);
+      final h = int.tryParse(parts[1]);
+      if (w != null && h != null && w > 0 && h > 0) return w / h;
+    }
+    if (thumbhash == null) return null;
+    try {
+      final r = thumbHashToApproximateAspectRatio(base64Decode(thumbhash!));
+      return r.isFinite && r > 0 ? r : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   // Audio someone spoke in, by the only evidence that cannot lie: a transcript
   bool get isVoiceNote => isAudio && transcript != null;

@@ -4,8 +4,9 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 
 ## [Unreleased]
 
-A Linux-only maintenance release; nothing changes on the other platforms.
+Tall images stop taking over the note list, and voice recording on Linux needs fewer system packages.
 
+- Cap tall images and videos in the note list at 60% of the screen height, showing them whole with a soft blurred copy filling the sides; the space is reserved before the image loads, so the list no longer jumps
 - Record voice notes without ffmpeg: the recording is captured as raw audio and the WAV file is written by the app itself
 - Declare the PulseAudio tools (pulseaudio-utils) as a dependency of the deb and rpm packages, so a fresh install can record right away
 - Point to the right package to install when the recorder cannot find the PulseAudio tools
