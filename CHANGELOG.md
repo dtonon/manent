@@ -4,6 +4,8 @@ Notable changes to Manent. The format follows [Keep a Changelog](https://keepach
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-11-09
+
 Tall images stop taking over the note list, and voice recording on Linux needs fewer system packages.
 
 - Cap tall images and videos in the note list at 60% of the screen height, showing them whole with a soft blurred copy filling the sides; the space is reserved before the image loads, so the list no longer jumps
